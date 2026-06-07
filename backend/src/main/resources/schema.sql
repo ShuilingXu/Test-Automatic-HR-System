@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS hr_employee (
     bank_name VARCHAR(128) NOT NULL,
     hire_date DATE NOT NULL,
     employment_status INTEGER NOT NULL DEFAULT 0,
+    source_candidate_id INTEGER,
+    interview_stage_status VARCHAR(64),
     source_channel VARCHAR(64),
     notes VARCHAR(1000),
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -87,6 +89,8 @@ CREATE TABLE IF NOT EXISTS recruitment_candidate (
     expected_salary VARCHAR(128),
     self_introduction VARCHAR(2000),
     application_status VARCHAR(32) NOT NULL DEFAULT 'SUBMITTED',
+    interview_stage_status VARCHAR(64) NOT NULL DEFAULT '简历待查',
+    interview_process_id INTEGER,
     resume_file_id INTEGER,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -186,3 +190,103 @@ CREATE TABLE IF NOT EXISTS sys_user (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sys_user_username ON sys_user(username);
+
+CREATE TABLE IF NOT EXISTS interview_knowledge_base (
+    id INTEGER PRIMARY KEY,
+    knowledge_base_name VARCHAR(128) NOT NULL,
+    tech_category VARCHAR(128),
+    job_category VARCHAR(128),
+    status INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_knowledge_item (
+    id INTEGER PRIMARY KEY,
+    knowledge_base_id INTEGER NOT NULL,
+    knowledge_point VARCHAR(255) NOT NULL,
+    knowledge_content VARCHAR(5000) NOT NULL,
+    status INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (knowledge_base_id) REFERENCES interview_knowledge_base(id)
+);
+
+CREATE TABLE IF NOT EXISTS interview_job_knowledge_weight (
+    id INTEGER PRIMARY KEY,
+    job_id INTEGER NOT NULL,
+    knowledge_base_id INTEGER NOT NULL,
+    knowledge_point VARCHAR(255) NOT NULL,
+    weight INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_llm_config (
+    id INTEGER PRIMARY KEY,
+    config_name VARCHAR(128) NOT NULL,
+    model_role VARCHAR(32) NOT NULL,
+    base_url VARCHAR(255) NOT NULL,
+    api_key_masked VARCHAR(255),
+    model_name VARCHAR(128) NOT NULL,
+    prompt_template VARCHAR(5000),
+    status INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_process (
+    id INTEGER PRIMARY KEY,
+    recruitment_candidate_id INTEGER NOT NULL,
+    interviewee_user_id INTEGER,
+    job_id INTEGER NOT NULL,
+    current_stage VARCHAR(32) NOT NULL,
+    stage_status VARCHAR(32) NOT NULL,
+    overall_status VARCHAR(32) NOT NULL,
+    ai_threshold_score INTEGER NOT NULL DEFAULT 7,
+    ai_average_score INTEGER,
+    video_approved INTEGER NOT NULL DEFAULT 0,
+    onsite_approved INTEGER NOT NULL DEFAULT 0,
+    approved_hr_user_id INTEGER,
+    approved_hr_name VARCHAR(64),
+    process_status_view VARCHAR(64) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_ai_record (
+    id INTEGER PRIMARY KEY,
+    process_id INTEGER NOT NULL,
+    knowledge_base_id INTEGER,
+    knowledge_point VARCHAR(255),
+    question_content VARCHAR(5000) NOT NULL,
+    answer_content VARCHAR(5000),
+    interviewer_score INTEGER,
+    scorer_score INTEGER,
+    average_score INTEGER,
+    sequence_no INTEGER NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_video_session (
+    id INTEGER PRIMARY KEY,
+    process_id INTEGER NOT NULL,
+    video_serial_no VARCHAR(128) NOT NULL,
+    video_join_link VARCHAR(500) NOT NULL,
+    approver_user_id INTEGER,
+    approver_name VARCHAR(64),
+    interviewee_join_time DATETIME,
+    hr_join_time DATETIME,
+    start_time DATETIME,
+    end_time DATETIME,
+    recording_path VARCHAR(500),
+    session_status VARCHAR(32) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_interview_process_candidate_id ON interview_process(recruitment_candidate_id);
+CREATE INDEX IF NOT EXISTS idx_interview_process_stage ON interview_process(current_stage);
+CREATE INDEX IF NOT EXISTS idx_interview_ai_record_process_id ON interview_ai_record(process_id);
+CREATE INDEX IF NOT EXISTS idx_interview_video_session_process_id ON interview_video_session(process_id);

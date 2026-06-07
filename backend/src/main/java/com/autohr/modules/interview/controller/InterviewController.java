@@ -1,12 +1,14 @@
 package com.autohr.modules.interview.controller;
 
 import com.autohr.common.api.ApiResponse;
-import com.autohr.modules.interview.dto.AssignCandidateRequest;
-import com.autohr.modules.interview.dto.BatchSaveRequest;
+import com.autohr.modules.interview.dto.AiAnswerRequest;
+import com.autohr.modules.interview.dto.InterviewDecisionRequest;
 import com.autohr.modules.interview.dto.InterviewVO;
-import com.autohr.modules.interview.dto.QuestionSaveRequest;
-import com.autohr.modules.interview.dto.SubmissionSaveRequest;
-import com.autohr.modules.interview.dto.SubmissionScoreRequest;
+import com.autohr.modules.interview.dto.JobKnowledgeWeightSaveRequest;
+import com.autohr.modules.interview.dto.KnowledgeBaseSaveRequest;
+import com.autohr.modules.interview.dto.KnowledgeItemSaveRequest;
+import com.autohr.modules.interview.dto.LlmConfigSaveRequest;
+import com.autohr.modules.interview.dto.StartInterviewProcessRequest;
 import com.autohr.modules.interview.service.InterviewService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -27,58 +29,111 @@ public class InterviewController {
 
     private final InterviewService interviewService;
 
-    @PostMapping("/admin/batches")
-    public ApiResponse<InterviewVO> saveBatch(@Valid @RequestBody BatchSaveRequest request) {
-        return ApiResponse.success(interviewService.saveBatch(request));
+    @PostMapping("/hr/knowledge-bases")
+    public ApiResponse<InterviewVO> saveKnowledgeBase(@Valid @RequestBody KnowledgeBaseSaveRequest request) {
+        return ApiResponse.success(interviewService.saveKnowledgeBase(request));
     }
 
-    @GetMapping("/admin/batches")
-    public ApiResponse<List<InterviewVO>> listBatches(@RequestParam(required = false) Integer status,
-                                                      @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(interviewService.listBatches(status, keyword));
+    @GetMapping("/hr/knowledge-bases")
+    public ApiResponse<List<InterviewVO>> listKnowledgeBases(@RequestParam(required = false) Integer status,
+                                                             @RequestParam(required = false) String keyword) {
+        return ApiResponse.success(interviewService.listKnowledgeBases(status, keyword));
     }
 
-    @PostMapping("/admin/questions")
-    public ApiResponse<InterviewVO> saveQuestion(@Valid @RequestBody QuestionSaveRequest request) {
-        return ApiResponse.success(interviewService.saveQuestion(request));
+    @PostMapping("/hr/knowledge-items")
+    public ApiResponse<InterviewVO> saveKnowledgeItem(@Valid @RequestBody KnowledgeItemSaveRequest request) {
+        return ApiResponse.success(interviewService.saveKnowledgeItem(request));
     }
 
-    @GetMapping("/admin/questions")
-    public ApiResponse<List<InterviewVO>> listQuestions(@RequestParam(required = false) Integer status,
+    @GetMapping("/hr/knowledge-items")
+    public ApiResponse<List<InterviewVO>> listKnowledgeItems(@RequestParam(required = false) Long knowledgeBaseId,
+                                                             @RequestParam(required = false) String keyword) {
+        return ApiResponse.success(interviewService.listKnowledgeItems(knowledgeBaseId, keyword));
+    }
+
+    @PostMapping("/hr/job-knowledge-weights")
+    public ApiResponse<InterviewVO> saveJobKnowledgeWeight(@Valid @RequestBody JobKnowledgeWeightSaveRequest request) {
+        return ApiResponse.success(interviewService.saveJobKnowledgeWeight(request));
+    }
+
+    @GetMapping("/hr/job-knowledge-weights")
+    public ApiResponse<List<InterviewVO>> listJobKnowledgeWeights(@RequestParam(required = false) Long jobId) {
+        return ApiResponse.success(interviewService.listJobKnowledgeWeights(jobId));
+    }
+
+    @PostMapping("/it/llm-configs")
+    public ApiResponse<InterviewVO> saveLlmConfig(@Valid @RequestBody LlmConfigSaveRequest request) {
+        return ApiResponse.success(interviewService.saveLlmConfig(request));
+    }
+
+    @GetMapping("/it/llm-configs")
+    public ApiResponse<List<InterviewVO>> listLlmConfigs(@RequestParam(required = false) String modelRole,
+                                                         @RequestParam(required = false) Integer status) {
+        return ApiResponse.success(interviewService.listLlmConfigs(modelRole, status));
+    }
+
+    @PostMapping("/hr/processes")
+    public ApiResponse<InterviewVO> startProcess(@Valid @RequestBody StartInterviewProcessRequest request) {
+        return ApiResponse.success(interviewService.startInterviewProcess(request));
+    }
+
+    @GetMapping("/hr/processes")
+    public ApiResponse<List<InterviewVO>> listProcesses(@RequestParam(required = false) String overallStatus,
+                                                        @RequestParam(required = false) String stageStatus,
                                                         @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(interviewService.listQuestions(status, keyword));
+        return ApiResponse.success(interviewService.listProcesses(overallStatus, stageStatus, keyword));
     }
 
-    @PostMapping("/admin/candidates")
-    public ApiResponse<InterviewVO> assignCandidate(@Valid @RequestBody AssignCandidateRequest request) {
-        return ApiResponse.success(interviewService.assignCandidate(request));
+    @PostMapping("/interviewee/ai-answer")
+    public ApiResponse<InterviewVO> submitAiAnswer(@Valid @RequestBody AiAnswerRequest request) {
+        return ApiResponse.success(interviewService.submitAiAnswer(request));
     }
 
-    @GetMapping("/admin/candidates")
-    public ApiResponse<List<InterviewVO>> listCandidates(@RequestParam(required = false) Long batchId,
-                                                         @RequestParam(required = false) String status,
-                                                         @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(interviewService.listCandidates(batchId, status, keyword));
+    @GetMapping("/hr/ai-records")
+    public ApiResponse<List<InterviewVO>> listAiRecords(@RequestParam Long processId) {
+        return ApiResponse.success(interviewService.listAiRecords(processId));
     }
 
-    @GetMapping("/admin/submissions")
-    public ApiResponse<List<InterviewVO>> listSubmissions(@RequestParam(required = false) Long interviewCandidateId) {
-        return ApiResponse.success(interviewService.listSubmissions(interviewCandidateId));
+    @PostMapping("/hr/video-session/{processId}")
+    public ApiResponse<InterviewVO> createVideoSession(@PathVariable Long processId,
+                                                       @RequestParam(required = false) Long approverUserId,
+                                                       @RequestParam(required = false) String approverName) {
+        return ApiResponse.success(interviewService.createVideoSession(processId, approverUserId, approverName));
     }
 
-    @PostMapping("/admin/submissions/{submissionId}/score")
-    public ApiResponse<InterviewVO> scoreSubmission(@PathVariable Long submissionId,
-                                                    @Valid @RequestBody SubmissionScoreRequest request) {
-        return ApiResponse.success(interviewService.scoreSubmission(submissionId, request));
+    @PostMapping("/interviewee/video-join/{processId}")
+    public ApiResponse<InterviewVO> intervieweeJoin(@PathVariable Long processId) {
+        return ApiResponse.success(interviewService.intervieweeJoinVideo(processId));
     }
 
-    @GetMapping("/candidates/{interviewCandidateId}/questions")
-    public ApiResponse<List<InterviewVO>> listCandidateQuestions(@PathVariable Long interviewCandidateId) {
-        return ApiResponse.success(interviewService.listCandidateQuestions(interviewCandidateId));
+    @PostMapping("/hr/video-join/{processId}")
+    public ApiResponse<InterviewVO> hrJoin(@PathVariable Long processId,
+                                           @RequestParam(required = false) Long approverUserId,
+                                           @RequestParam(required = false) String approverName) {
+        return ApiResponse.success(interviewService.hrJoinVideo(processId, approverUserId, approverName));
     }
 
-    @PostMapping("/submissions")
-    public ApiResponse<InterviewVO> submitAnswer(@Valid @RequestBody SubmissionSaveRequest request) {
-        return ApiResponse.success(interviewService.submitAnswer(request));
+    @PostMapping("/hr/video-complete/{processId}")
+    public ApiResponse<InterviewVO> completeVideo(@PathVariable Long processId,
+                                                  @RequestParam(required = false) String recordingPath) {
+        return ApiResponse.success(interviewService.completeVideoSession(processId, recordingPath));
+    }
+
+    @PostMapping("/hr/approve-ai/{processId}")
+    public ApiResponse<InterviewVO> approveAi(@PathVariable Long processId,
+                                              @Valid @RequestBody InterviewDecisionRequest request) {
+        return ApiResponse.success(interviewService.approveAiToVideo(processId, request));
+    }
+
+    @PostMapping("/hr/approve-video/{processId}")
+    public ApiResponse<InterviewVO> approveVideo(@PathVariable Long processId,
+                                                 @Valid @RequestBody InterviewDecisionRequest request) {
+        return ApiResponse.success(interviewService.approveVideoToOnsite(processId, request));
+    }
+
+    @PostMapping("/hr/approve-onsite/{processId}")
+    public ApiResponse<InterviewVO> approveOnsite(@PathVariable Long processId,
+                                                  @Valid @RequestBody InterviewDecisionRequest request) {
+        return ApiResponse.success(interviewService.decideOnsite(processId, request));
     }
 }

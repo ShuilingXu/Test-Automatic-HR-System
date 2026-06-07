@@ -30,6 +30,8 @@ public class Employee {
     private String bankName;
     private LocalDate hireDate;
     private Integer employmentStatus;
+    private Long sourceCandidateId;
+    private String interviewStageStatus;
     private String sourceChannel;
     private String notes;
 

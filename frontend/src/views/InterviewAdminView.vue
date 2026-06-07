@@ -3,86 +3,117 @@
     <section class="page-card">
       <div class="topline">
         <div>
-          <p class="page-eyebrow">Interview Admin</p>
-          <h1 class="page-title">面试系统管理</h1>
-          <p class="page-subtitle">维护面试批次、题库、候选人分配和评分结果。</p>
+          <p class="page-eyebrow">Interview HR</p>
+          <h1 class="page-title">面试系统 HR 入口</h1>
+          <p class="page-subtitle">维护 AI 知识库、岗位知识权重、LLM 配置，并推进 AI 面、视频面、线下面流程。</p>
         </div>
-        <RouterLink class="link-chip" to="/">返回 HR 管理台</RouterLink>
+        <RouterLink class="link-chip" to="/admin">返回管理后台</RouterLink>
       </div>
 
       <div class="sub-tabs">
-        <button :class="{ active: activeTab === 'batches' }" @click="activeTab = 'batches'">面试批次</button>
-        <button :class="{ active: activeTab === 'questions' }" @click="activeTab = 'questions'">题库管理</button>
-        <button :class="{ active: activeTab === 'candidates' }" @click="activeTab = 'candidates'">候选人进度</button>
-        <button :class="{ active: activeTab === 'scores' }" @click="activeTab = 'scores'">评分管理</button>
+        <button :class="{ active: activeTab === 'kb' }" @click="activeTab = 'kb'">知识库</button>
+        <button :class="{ active: activeTab === 'weights' }" @click="activeTab = 'weights'">岗位权重</button>
+        <button :class="{ active: activeTab === 'llm' }" @click="activeTab = 'llm'">LLM配置</button>
+        <button :class="{ active: activeTab === 'process' }" @click="activeTab = 'process'">面试流程</button>
       </div>
 
-      <section v-if="activeTab === 'batches'" class="surface">
-        <h3>面试批次</h3>
-        <el-form :model="batchForm" label-position="top" class="form-grid">
-          <el-form-item label="批次名称"><el-input v-model="batchForm.batchName" /></el-form-item>
-          <el-form-item label="批次编码"><el-input v-model="batchForm.batchCode" /></el-form-item>
-          <el-form-item label="关联岗位"><el-select v-model="batchForm.jobId" clearable><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
-          <el-form-item label="状态"><el-select v-model="batchForm.status"><el-option label="启用" :value="1" /><el-option label="停用" :value="0" /></el-select></el-form-item>
-          <el-form-item label="说明" class="wide"><el-input v-model="batchForm.description" type="textarea" :rows="3" /></el-form-item>
-        </el-form>
-        <div class="link-row"><el-button type="primary" @click="saveBatch">保存批次</el-button><el-button @click="resetBatch">清空</el-button></div>
-        <el-table :data="batches" stripe class="data-table" @row-click="editBatch">
-          <el-table-column prop="batchName" label="批次" />
-          <el-table-column prop="batchCode" label="编码" />
-          <el-table-column prop="status" label="状态"><template #default="scope">{{ scope.row.status === 1 ? '启用' : '停用' }}</template></el-table-column>
+      <section v-if="activeTab === 'kb'" class="surface">
+        <h3>知识库与知识点</h3>
+        <div class="page-grid">
+          <el-form :model="kbForm" label-position="top" class="surface inner-surface">
+            <el-form-item label="知识库名称"><el-input v-model="kbForm.knowledgeBaseName" /></el-form-item>
+            <el-form-item label="技术方向"><el-input v-model="kbForm.techCategory" /></el-form-item>
+            <el-form-item label="岗位方向"><el-input v-model="kbForm.jobCategory" /></el-form-item>
+            <el-button type="primary" @click="saveKnowledgeBase">保存知识库</el-button>
+          </el-form>
+          <el-form :model="itemForm" label-position="top" class="surface inner-surface">
+            <el-form-item label="所属知识库"><el-select v-model="itemForm.knowledgeBaseId"><el-option v-for="item in knowledgeBases" :key="item.id" :label="item.knowledgeBaseName" :value="item.id" /></el-select></el-form-item>
+            <el-form-item label="知识点"><el-input v-model="itemForm.knowledgePoint" /></el-form-item>
+            <el-form-item label="知识内容"><el-input v-model="itemForm.knowledgeContent" type="textarea" :rows="4" /></el-form-item>
+            <el-button type="primary" @click="saveKnowledgeItem">保存知识点</el-button>
+          </el-form>
+        </div>
+        <el-table :data="knowledgeBases" stripe class="data-table" @row-click="selectKnowledgeBase">
+          <el-table-column prop="knowledgeBaseName" label="知识库" />
+          <el-table-column prop="techCategory" label="技术方向" />
+          <el-table-column prop="jobCategory" label="岗位方向" />
+        </el-table>
+        <el-table :data="knowledgeItems" stripe class="data-table">
+          <el-table-column prop="knowledgePoint" label="知识点" />
+          <el-table-column prop="knowledgeContent" label="知识内容" min-width="280" />
         </el-table>
       </section>
 
-      <section v-if="activeTab === 'questions'" class="surface">
-        <h3>题库管理</h3>
-        <el-form :model="questionForm" label-position="top" class="form-grid">
-          <el-form-item label="题目标题"><el-input v-model="questionForm.questionTitle" /></el-form-item>
-          <el-form-item label="题型"><el-input v-model="questionForm.questionType" /></el-form-item>
-          <el-form-item label="难度"><el-input v-model="questionForm.difficulty" /></el-form-item>
-          <el-form-item label="分值"><el-input-number v-model="questionForm.score" :min="1" /></el-form-item>
-          <el-form-item label="标签" class="wide"><el-input v-model="questionForm.tags" /></el-form-item>
-          <el-form-item label="题目内容" class="wide"><el-input v-model="questionForm.content" type="textarea" :rows="4" /></el-form-item>
-          <el-form-item label="参考答案" class="wide"><el-input v-model="questionForm.referenceAnswer" type="textarea" :rows="3" /></el-form-item>
+      <section v-if="activeTab === 'weights'" class="surface">
+        <h3>岗位知识权重</h3>
+        <el-form :model="weightForm" label-position="top" class="form-grid">
+          <el-form-item label="招聘岗位"><el-select v-model="weightForm.jobId"><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
+          <el-form-item label="知识库"><el-select v-model="weightForm.knowledgeBaseId"><el-option v-for="item in knowledgeBases" :key="item.id" :label="item.knowledgeBaseName" :value="item.id" /></el-select></el-form-item>
+          <el-form-item label="知识点"><el-input v-model="weightForm.knowledgePoint" /></el-form-item>
+          <el-form-item label="权重"><el-input-number v-model="weightForm.weight" :min="1" /></el-form-item>
         </el-form>
-        <div class="link-row"><el-button type="primary" @click="saveQuestion">保存题目</el-button><el-button @click="resetQuestion">清空</el-button></div>
-        <el-table :data="questions" stripe class="data-table" @row-click="editQuestion">
-          <el-table-column prop="questionTitle" label="标题" />
-          <el-table-column prop="difficulty" label="难度" />
-          <el-table-column prop="score" label="分值" />
-          <el-table-column prop="tags" label="标签" />
+        <el-button type="primary" @click="saveWeight">保存权重</el-button>
+        <el-table :data="weights" stripe class="data-table">
+          <el-table-column prop="jobId" label="岗位ID" />
+          <el-table-column prop="knowledgePoint" label="知识点" />
+          <el-table-column prop="weight" label="权重" />
         </el-table>
       </section>
 
-      <section v-if="activeTab === 'candidates'" class="surface">
-        <h3>候选人分配</h3>
-        <el-form :model="assignForm" label-position="top" class="form-grid">
-          <el-form-item label="面试批次"><el-select v-model="assignForm.batchId"><el-option v-for="batch in batches" :key="batch.id" :label="batch.batchName" :value="batch.id" /></el-select></el-form-item>
-          <el-form-item label="招聘候选人"><el-select v-model="assignForm.recruitmentCandidateId"><el-option v-for="item in recruitmentCandidates" :key="item.id" :label="`${item.fullName} / ${item.mobilePhone}`" :value="item.id" /></el-select></el-form-item>
+      <section v-if="activeTab === 'llm'" class="surface">
+        <h3>LLM 模型连接配置</h3>
+        <el-form :model="llmForm" label-position="top" class="form-grid">
+          <el-form-item label="配置名称"><el-input v-model="llmForm.configName" /></el-form-item>
+          <el-form-item label="模型角色"><el-select v-model="llmForm.modelRole"><el-option label="面试官LLM A" value="INTERVIEWER" /><el-option label="评分LLM B" value="SCORER" /></el-select></el-form-item>
+          <el-form-item label="OpenAI接口地址"><el-input v-model="llmForm.baseUrl" /></el-form-item>
+          <el-form-item label="API Key掩码"><el-input v-model="llmForm.apiKeyMasked" /></el-form-item>
+          <el-form-item label="模型名称"><el-input v-model="llmForm.modelName" /></el-form-item>
+          <el-form-item label="提示词模板" class="wide"><el-input v-model="llmForm.promptTemplate" type="textarea" :rows="4" /></el-form-item>
         </el-form>
-        <div class="link-row"><el-button type="primary" @click="assignCandidate">分配候选人</el-button></div>
-        <el-table :data="interviewCandidates" stripe class="data-table" @row-click="selectInterviewCandidate">
-          <el-table-column prop="candidateName" label="候选人" />
-          <el-table-column prop="mobilePhone" label="电话" />
-          <el-table-column prop="interviewStatus" label="状态" />
-          <el-table-column prop="totalScore" label="总分" />
+        <el-button type="primary" @click="saveLlmConfig">保存配置</el-button>
+        <el-table :data="llmConfigs" stripe class="data-table">
+          <el-table-column prop="configName" label="配置名称" />
+          <el-table-column prop="modelRole" label="角色" />
+          <el-table-column prop="baseUrl" label="接口地址" min-width="220" />
+          <el-table-column prop="modelName" label="模型" />
         </el-table>
       </section>
 
-      <section v-if="activeTab === 'scores'" class="surface">
-        <h3>评分管理</h3>
-        <el-table :data="submissions" stripe class="data-table" @row-click="editSubmissionScore">
-          <el-table-column prop="interviewCandidateId" label="候选人编号" />
-          <el-table-column prop="questionId" label="题目编号" />
-          <el-table-column prop="answerContent" label="答题内容" min-width="220" />
-          <el-table-column prop="score" label="得分" />
-        </el-table>
-        <el-form :model="scoreForm" label-position="top" class="form-grid score-form">
-          <el-form-item label="答题记录 ID"><el-input v-model="scoreForm.submissionId" disabled /></el-form-item>
-          <el-form-item label="得分"><el-input-number v-model="scoreForm.score" :min="0" /></el-form-item>
-          <el-form-item label="评语" class="wide"><el-input v-model="scoreForm.reviewerComment" type="textarea" :rows="3" /></el-form-item>
+      <section v-if="activeTab === 'process'" class="surface">
+        <h3>候选人面试流程</h3>
+        <el-form :model="processForm" label-position="top" class="form-grid">
+          <el-form-item label="招聘候选人"><el-select v-model="processForm.recruitmentCandidateId"><el-option v-for="item in recruitmentCandidates" :key="item.id" :label="`${item.fullName} / ${item.mobilePhone}`" :value="item.id" /></el-select></el-form-item>
+          <el-form-item label="面试者用户ID"><el-input-number v-model="processForm.intervieweeUserId" :min="1" /></el-form-item>
+          <el-form-item label="岗位"><el-select v-model="processForm.jobId"><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
+          <el-form-item label="AI通过阈值"><el-input-number v-model="processForm.aiThresholdScore" :min="1" :max="10" /></el-form-item>
         </el-form>
-        <el-button type="primary" @click="scoreSubmission">保存评分</el-button>
+        <div class="link-row"><el-button type="primary" @click="startProcess">发起面试流程</el-button></div>
+        <el-table :data="processes" stripe class="data-table" @row-click="selectProcess">
+          <el-table-column prop="recruitmentCandidateId" label="候选人ID" />
+          <el-table-column prop="currentStage" label="当前轮次" />
+          <el-table-column prop="processStatusView" label="状态展示" />
+          <el-table-column prop="aiAverageScore" label="AI均分" />
+          <el-table-column prop="overallStatus" label="总状态" />
+        </el-table>
+        <div v-if="selectedProcess" class="surface inner-surface detail-surface">
+          <h3>流程审批</h3>
+          <div class="link-row">
+            <el-button @click="approveAi(1)">AI通过进视频面</el-button>
+            <el-button @click="approveAi(0)">AI拒绝</el-button>
+            <el-button @click="createVideo">生成视频面链接</el-button>
+            <el-button @click="approveVideo(1)">视频面通过进线下面</el-button>
+            <el-button @click="approveVideo(0)">视频面拒绝</el-button>
+            <el-button @click="approveOnsite(1)">线下面通过</el-button>
+            <el-button @click="approveOnsite(0)">线下面拒绝</el-button>
+          </div>
+          <el-table :data="aiRecords" stripe class="data-table">
+            <el-table-column prop="sequenceNo" label="题号" width="70" />
+            <el-table-column prop="knowledgePoint" label="知识点" />
+            <el-table-column prop="questionContent" label="提问" min-width="220" />
+            <el-table-column prop="answerContent" label="回答" min-width="220" />
+            <el-table-column prop="averageScore" label="均分" width="80" />
+          </el-table>
+        </div>
       </section>
     </section>
   </div>
@@ -94,40 +125,47 @@ import { RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { interviewApi, recruitmentApi } from '../services/api'
 
-const activeTab = ref('batches')
-const batches = ref([])
-const questions = ref([])
+const activeTab = ref('kb')
+const knowledgeBases = ref([])
+const knowledgeItems = ref([])
+const weights = ref([])
+const llmConfigs = ref([])
 const jobs = ref([])
 const recruitmentCandidates = ref([])
-const interviewCandidates = ref([])
-const submissions = ref([])
+const processes = ref([])
+const aiRecords = ref([])
+const selectedProcess = ref(null)
 
-const batchForm = reactive({ id: null, batchName: '', batchCode: '', jobId: null, description: '', status: 1 })
-const questionForm = reactive({ id: null, questionTitle: '', questionType: 'TEXT', difficulty: '中等', tags: '', content: '', referenceAnswer: '', score: 10, status: 1 })
-const assignForm = reactive({ batchId: null, recruitmentCandidateId: null })
-const scoreForm = reactive({ submissionId: null, score: 0, reviewerComment: '' })
+const kbForm = reactive({ id: null, knowledgeBaseName: '', techCategory: '', jobCategory: '', status: 1 })
+const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '', knowledgeContent: '', status: 1 })
+const weightForm = reactive({ id: null, jobId: null, knowledgeBaseId: null, knowledgePoint: '', weight: 1 })
+const llmForm = reactive({ id: null, configName: '', modelRole: 'INTERVIEWER', baseUrl: '', apiKeyMasked: '', modelName: '', promptTemplate: '', status: 1 })
+const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: null, jobId: null, aiThresholdScore: 7 })
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
 async function loadAll() {
   try {
-    batches.value = (await interviewApi.listBatches()).data
-    questions.value = (await interviewApi.listQuestions()).data
+    knowledgeBases.value = (await interviewApi.listKnowledgeBases()).data
+    llmConfigs.value = (await interviewApi.listLlmConfigs()).data
     jobs.value = (await recruitmentApi.listAdminJobs()).data
     recruitmentCandidates.value = (await recruitmentApi.listCandidates()).data
-    interviewCandidates.value = (await interviewApi.listInterviewCandidates()).data
-    submissions.value = (await interviewApi.listSubmissions()).data
+    processes.value = (await interviewApi.listProcesses()).data
   } catch (error) { fail(error) }
 }
-function resetBatch() { Object.assign(batchForm, { id: null, batchName: '', batchCode: '', jobId: null, description: '', status: 1 }) }
-function editBatch(row) { Object.assign(batchForm, row) }
-async function saveBatch() { try { await interviewApi.saveBatch({ ...batchForm }); ElMessage.success('批次已保存'); resetBatch(); await loadAll() } catch (error) { fail(error) } }
-function resetQuestion() { Object.assign(questionForm, { id: null, questionTitle: '', questionType: 'TEXT', difficulty: '中等', tags: '', content: '', referenceAnswer: '', score: 10, status: 1 }) }
-function editQuestion(row) { Object.assign(questionForm, row) }
-async function saveQuestion() { try { await interviewApi.saveQuestion({ ...questionForm }); ElMessage.success('题目已保存'); resetQuestion(); await loadAll() } catch (error) { fail(error) } }
-async function assignCandidate() { try { await interviewApi.assignCandidate({ ...assignForm }); ElMessage.success('候选人已分配'); await loadAll() } catch (error) { fail(error) } }
-async function selectInterviewCandidate(row) { assignForm.batchId = row.batchId; submissions.value = (await interviewApi.listSubmissions({ interviewCandidateId: row.id })).data }
-function editSubmissionScore(row) { Object.assign(scoreForm, { submissionId: row.id, score: row.score || 0, reviewerComment: row.reviewerComment || '' }) }
-async function scoreSubmission() { try { await interviewApi.scoreSubmission(scoreForm.submissionId, { score: scoreForm.score, reviewerComment: scoreForm.reviewerComment }); ElMessage.success('评分已保存'); await loadAll() } catch (error) { fail(error) } }
+async function selectKnowledgeBase(row) {
+  itemForm.knowledgeBaseId = row.id
+  knowledgeItems.value = (await interviewApi.listKnowledgeItems({ knowledgeBaseId: row.id })).data
+}
+async function saveKnowledgeBase() { try { await interviewApi.saveKnowledgeBase({ ...kbForm }); ElMessage.success('知识库已保存'); await loadAll() } catch (error) { fail(error) } }
+async function saveKnowledgeItem() { try { await interviewApi.saveKnowledgeItem({ ...itemForm }); ElMessage.success('知识点已保存'); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
+async function saveWeight() { try { await interviewApi.saveJobKnowledgeWeight({ ...weightForm }); ElMessage.success('权重已保存'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
+async function saveLlmConfig() { try { await interviewApi.saveLlmConfig({ ...llmForm }); ElMessage.success('LLM配置已保存'); await loadAll() } catch (error) { fail(error) } }
+async function startProcess() { try { await interviewApi.startProcess({ ...processForm }); ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
+async function selectProcess(row) { selectedProcess.value = row; aiRecords.value = (await interviewApi.listAiRecords({ processId: row.id })).data }
+async function approveAi(approved) { try { await interviewApi.approveAi(selectedProcess.value.id, { approved, approverName: 'HR审批人' }); ElMessage.success('AI审批完成'); await loadAll() } catch (error) { fail(error) } }
+async function createVideo() { try { await interviewApi.createVideoSession(selectedProcess.value.id, { approverName: 'HR审批人' }); ElMessage.success('视频面试链接已生成'); await loadAll() } catch (error) { fail(error) } }
+async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved, approverName: 'HR审批人' }); ElMessage.success('视频面审批完成'); await loadAll() } catch (error) { fail(error) } }
+async function approveOnsite(approved) { try { await interviewApi.approveOnsite(selectedProcess.value.id, { approved, approverName: 'HR审批人' }); ElMessage.success('线下面审批完成'); await loadAll() } catch (error) { fail(error) } }
 
 onMounted(loadAll)
 </script>
@@ -139,6 +177,8 @@ onMounted(loadAll)
 .sub-tabs button.active { background: #102532; color: #f4efe7; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
 .wide { grid-column: 1 / -1; }
-.data-table, .score-form { margin-top: 18px; }
+.inner-surface { background: rgba(255,255,255,0.82); }
+.detail-surface { margin-top: 18px; }
+.data-table { margin-top: 18px; }
 @media (max-width: 900px) { .form-grid { grid-template-columns: 1fr; } }
 </style>

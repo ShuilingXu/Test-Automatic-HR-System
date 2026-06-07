@@ -28,6 +28,8 @@ public class RecruitmentCandidate {
     private String expectedSalary;
     private String selfIntroduction;
     private String applicationStatus;
+    private String interviewStageStatus;
+    private Long interviewProcessId;
     private Long resumeFileId;
 
     @TableField(fill = FieldFill.INSERT)

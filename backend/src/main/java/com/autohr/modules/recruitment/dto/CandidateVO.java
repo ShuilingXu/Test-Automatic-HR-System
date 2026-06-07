@@ -21,6 +21,8 @@ public class CandidateVO {
     private String expectedSalary;
     private String selfIntroduction;
     private String applicationStatus;
+    private String interviewStageStatus;
+    private Long interviewProcessId;
     private Long resumeFileId;
     private String resumeFileName;
     private LocalDateTime createdAt;

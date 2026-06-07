@@ -71,16 +71,25 @@ export const authApi = {
 }
 
 export const interviewApi = {
-  saveBatch(payload) { return request.post('/interview/admin/batches', payload) },
-  listBatches(params) { return request.get('/interview/admin/batches', { params }) },
-  saveQuestion(payload) { return request.post('/interview/admin/questions', payload) },
-  listQuestions(params) { return request.get('/interview/admin/questions', { params }) },
-  assignCandidate(payload) { return request.post('/interview/admin/candidates', payload) },
-  listInterviewCandidates(params) { return request.get('/interview/admin/candidates', { params }) },
-  listSubmissions(params) { return request.get('/interview/admin/submissions', { params }) },
-  scoreSubmission(submissionId, payload) { return request.post(`/interview/admin/submissions/${submissionId}/score`, payload) },
-  listCandidateQuestions(interviewCandidateId) { return request.get(`/interview/candidates/${interviewCandidateId}/questions`) },
-  submitAnswer(payload) { return request.post('/interview/submissions', payload) },
+  saveKnowledgeBase(payload) { return request.post('/interview/hr/knowledge-bases', payload) },
+  listKnowledgeBases(params) { return request.get('/interview/hr/knowledge-bases', { params }) },
+  saveKnowledgeItem(payload) { return request.post('/interview/hr/knowledge-items', payload) },
+  listKnowledgeItems(params) { return request.get('/interview/hr/knowledge-items', { params }) },
+  saveJobKnowledgeWeight(payload) { return request.post('/interview/hr/job-knowledge-weights', payload) },
+  listJobKnowledgeWeights(params) { return request.get('/interview/hr/job-knowledge-weights', { params }) },
+  saveLlmConfig(payload) { return request.post('/interview/it/llm-configs', payload) },
+  listLlmConfigs(params) { return request.get('/interview/it/llm-configs', { params }) },
+  startProcess(payload) { return request.post('/interview/hr/processes', payload) },
+  listProcesses(params) { return request.get('/interview/hr/processes', { params }) },
+  listAiRecords(params) { return request.get('/interview/hr/ai-records', { params }) },
+  createVideoSession(processId, params) { return request.post(`/interview/hr/video-session/${processId}`, null, { params }) },
+  intervieweeJoin(processId) { return request.post(`/interview/interviewee/video-join/${processId}`) },
+  hrJoin(processId, params) { return request.post(`/interview/hr/video-join/${processId}`, null, { params }) },
+  completeVideo(processId, params) { return request.post(`/interview/hr/video-complete/${processId}`, null, { params }) },
+  approveAi(processId, payload) { return request.post(`/interview/hr/approve-ai/${processId}`, payload) },
+  approveVideo(processId, payload) { return request.post(`/interview/hr/approve-video/${processId}`, payload) },
+  approveOnsite(processId, payload) { return request.post(`/interview/hr/approve-onsite/${processId}`, payload) },
+  submitAiAnswer(payload) { return request.post('/interview/interviewee/ai-answer', payload) },
   getSystems() {
     return Promise.resolve({ success: true, message: 'system entries', data: [
       { code: 'ADMIN', name: '管理员门户', path: '/admin' },
@@ -89,6 +98,6 @@ export const interviewApi = {
     ] })
   },
   getCandidateEntry() {
-    return Promise.resolve({ success: true, message: 'candidate entries', data: { registerPath: '/user', onlineInterviewPath: '/candidate/interview' } })
+    return Promise.resolve({ success: true, message: 'candidate entries', data: { registerPath: '/user', onlineInterviewPath: '/interview/interviewee' } })
   },
 }

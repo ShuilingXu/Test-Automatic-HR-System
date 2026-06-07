@@ -11,10 +11,12 @@ const routes = [
   { path: '/', name: 'home', component: HomeView },
   { path: '/login', name: 'login', component: LoginView },
   { path: '/admin', name: 'admin', component: ConsoleView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'] } },
-  { path: '/admin/interview', name: 'interview-admin', component: InterviewAdminView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN'] } },
+  { path: '/admin/interview', redirect: '/interview/hr' },
+  { path: '/interview/hr', name: 'interview-hr', component: InterviewAdminView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'] } },
   { path: '/user', name: 'user-portal', component: UserPortalView, meta: { requiresAuth: true, roles: ['INTERVIEWEE'] } },
   { path: '/candidate/register', name: 'candidate-register', component: CandidateRegisterView, meta: { requiresAuth: true, roles: ['INTERVIEWEE'] } },
-  { path: '/candidate/interview', name: 'candidate-interview', component: CandidateInterviewView, meta: { requiresAuth: true, roles: ['INTERVIEWEE'] } },
+  { path: '/candidate/interview', redirect: '/interview/interviewee' },
+  { path: '/interview/interviewee', name: 'interview-interviewee', component: CandidateInterviewView, meta: { requiresAuth: true, roles: ['INTERVIEWEE'] } },
 ]
 
 const router = createRouter({
