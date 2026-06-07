@@ -13,7 +13,7 @@
       <div class="sub-tabs">
         <button :class="{ active: activeTab === 'kb' }" @click="activeTab = 'kb'">知识库</button>
         <button :class="{ active: activeTab === 'weights' }" @click="activeTab = 'weights'">岗位权重</button>
-        <button :class="{ active: activeTab === 'llm' }" @click="activeTab = 'llm'">LLM配置</button>
+        <button v-if="isItAdmin" :class="{ active: activeTab === 'llm' }" @click="activeTab = 'llm'">LLM配置</button>
         <button :class="{ active: activeTab === 'process' }" @click="activeTab = 'process'">面试流程</button>
       </div>
 
@@ -120,11 +120,13 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { interviewApi, recruitmentApi } from '../services/api'
+import { authApi, interviewApi, recruitmentApi } from '../services/api'
 
+const sessionUser = ref(JSON.parse(localStorage.getItem('session-user') || 'null'))
+const isItAdmin = computed(() => sessionUser.value?.roleCode === 'IT_ADMIN')
 const activeTab = ref('kb')
 const knowledgeBases = ref([])
 const knowledgeItems = ref([])
@@ -145,8 +147,16 @@ const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
 async function loadAll() {
   try {
+    sessionUser.value = (await authApi.getSession()).data
     knowledgeBases.value = (await interviewApi.listKnowledgeBases()).data
-    llmConfigs.value = (await interviewApi.listLlmConfigs()).data
+    if (isItAdmin.value) {
+      llmConfigs.value = (await interviewApi.listLlmConfigs()).data
+    } else {
+      llmConfigs.value = []
+      if (activeTab.value === 'llm') {
+        activeTab.value = 'kb'
+      }
+    }
     jobs.value = (await recruitmentApi.listAdminJobs()).data
     recruitmentCandidates.value = (await recruitmentApi.listCandidates()).data
     processes.value = (await interviewApi.listProcesses()).data

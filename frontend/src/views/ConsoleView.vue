@@ -10,8 +10,8 @@
         </button>
       </nav>
       <el-button class="side-link logout-btn" @click="logout">退出登录</el-button>
-      <RouterLink class="side-link" to="/candidate/interview">线上面试</RouterLink>
-      <RouterLink class="side-link" to="/admin/interview">面试系统管理</RouterLink>
+      <RouterLink class="side-link" to="/interview/hr">线上面试</RouterLink>
+      <RouterLink class="side-link" to="/interview/hr">面试系统管理</RouterLink>
     </aside>
 
     <main class="console-main">
@@ -49,7 +49,7 @@
         <el-form :model="userForm" label-position="top" class="form-grid">
           <el-form-item label="用户名"><el-input v-model="userForm.username" disabled /></el-form-item>
           <el-form-item label="姓名"><el-input v-model="userForm.displayName" /></el-form-item>
-          <el-form-item label="角色"><el-select v-model="userForm.roleCode"><el-option label="IT管理员" value="IT_ADMIN" /><el-option label="HR管理员" value="HR_ADMIN" /><el-option label="HR用户" value="HR_USER" /><el-option label="面试者" value="INTERVIEWEE" /></el-select></el-form-item>
+          <el-form-item label="角色"><el-select v-model="userForm.roleCode"><el-option v-if="isItAdmin" label="IT管理员" value="IT_ADMIN" /><el-option v-if="isItAdmin" label="HR管理员" value="HR_ADMIN" /><el-option label="HR用户" value="HR_USER" /><el-option label="面试者" value="INTERVIEWEE" /></el-select></el-form-item>
           <el-form-item label="状态"><el-select v-model="userForm.status"><el-option label="启用" :value="1" /><el-option label="停用" :value="0" /></el-select></el-form-item>
           <el-form-item label="手机号"><el-input v-model="userForm.mobilePhone" /></el-form-item>
           <el-form-item label="邮箱"><el-input v-model="userForm.email" /></el-form-item>
@@ -149,6 +149,7 @@ import { authApi, hrApi, recruitmentApi } from '../services/api'
 const router = useRouter()
 const sessionUser = ref(JSON.parse(localStorage.getItem('session-user') || 'null'))
 const isItAdmin = computed(() => sessionUser.value?.roleCode === 'IT_ADMIN')
+const isHrAdmin = computed(() => sessionUser.value?.roleCode === 'HR_ADMIN')
 const tabs = computed(() => {
   const base = [
     { key: 'dashboard', label: '总览' },
@@ -157,7 +158,7 @@ const tabs = computed(() => {
     { key: 'bindings', label: '挂接' },
     { key: 'recruitment', label: '招聘' },
   ]
-  if (isItAdmin.value) {
+  if (isItAdmin.value || isHrAdmin.value) {
     base.unshift({ key: 'users', label: '用户管理中心' })
   }
   return base
@@ -193,14 +194,14 @@ const metrics = computed(() => [
 const availableParentDepartments = computed(() => departments.value.filter((item) => item.id !== departmentForm.id))
 
 function fail(error) { ElMessage.error(error.message || '请求失败') }
-async function loadSession() { try { const response = await authApi.getSession(); sessionUser.value = response.data; localStorage.setItem('session-user', JSON.stringify(response.data)); if (!isItAdmin.value && activeTab.value === 'users') { activeTab.value = 'dashboard' } } catch (error) { fail(error); router.push('/login') } }
+async function loadSession() { try { const response = await authApi.getSession(); sessionUser.value = response.data; localStorage.setItem('session-user', JSON.stringify(response.data)); if (!(isItAdmin.value || isHrAdmin.value) && activeTab.value === 'users') { activeTab.value = 'dashboard' } } catch (error) { fail(error); router.push('/login') } }
 async function loadDashboard() { try { Object.assign(dashboard, (await hrApi.getDashboard()).data) } catch (error) { fail(error) } }
 async function loadDepartments() { try { departments.value = (await hrApi.listDepartments()).data } catch (error) { fail(error) } }
 async function loadEmployees() { try { employees.value = (await hrApi.listEmployees()).data } catch (error) { fail(error) } }
 async function loadBindings() { try { bindings.value = (await hrApi.listBindings()).data } catch (error) { fail(error) } }
 async function loadRecruitment() { try { jobs.value = (await recruitmentApi.listAdminJobs()).data; candidates.value = (await recruitmentApi.listCandidates()).data } catch (error) { fail(error) } }
-async function loadUsers() { if (!isItAdmin.value) return; try { users.value = (await authApi.listUsers?.() || { data: [] }).data } catch (error) { fail(error) } }
-async function loadAll() { await Promise.all([loadSession(), loadDashboard(), loadDepartments(), loadEmployees(), loadBindings(), loadRecruitment()]); if (isItAdmin.value) await loadUsers() }
+async function loadUsers() { if (!(isItAdmin.value || isHrAdmin.value)) return; try { users.value = (await authApi.listUsers()).data } catch (error) { fail(error) } }
+async function loadAll() { await Promise.all([loadSession(), loadDashboard(), loadDepartments(), loadEmployees(), loadBindings(), loadRecruitment()]); if (isItAdmin.value || isHrAdmin.value) await loadUsers() }
 async function saveDepartment() { try { await hrApi.saveDepartment({ ...departmentForm }); ElMessage.success('部门已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveEmployee() { try { await hrApi.saveEmployee({ ...employeeForm }); ElMessage.success('员工已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveBinding() { try { await hrApi.saveBinding({ ...bindingForm }); ElMessage.success('挂接已保存'); await loadAll() } catch (error) { fail(error) } }

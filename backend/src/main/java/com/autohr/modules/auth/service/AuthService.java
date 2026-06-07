@@ -15,7 +15,7 @@ public interface AuthService {
     SessionUserVO getCurrentUser();
     SessionUserVO updateCandidateProfile(Long userId, CandidateProfileUpdateRequest request);
     SessionUserVO loadUserByUsername(String username);
-    List<SessionUserVO> listUsers(String roleCode, Integer status, String keyword);
-    SessionUserVO updateUserByAdmin(Long id, UserAdminUpdateRequest request);
+    List<SessionUserVO> listUsers(String roleCode, Integer status, String keyword, String operatorRoleCode);
+    SessionUserVO updateUserByAdmin(Long id, UserAdminUpdateRequest request, String operatorRoleCode);
     void logout(String username);
 }

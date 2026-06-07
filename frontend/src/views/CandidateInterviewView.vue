@@ -39,11 +39,13 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { interviewApi } from '../services/api'
 
-const sessionForm = reactive({ processId: null })
+const route = useRoute()
+const sessionForm = reactive({ processId: route.query.processId ? Number(route.query.processId) : null })
 const aiAnswer = reactive({ answerContent: '' })
 const aiRecords = ref([])
 const processSummary = ref(null)
@@ -70,6 +72,12 @@ async function joinVideo() {
     ElMessage.success('已记录加入视频面时间')
   } catch (error) { fail(error) }
 }
+
+onMounted(async () => {
+  if (sessionForm.processId) {
+    await loadProcessRecords()
+  }
+})
 </script>
 
 <style scoped>

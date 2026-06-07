@@ -93,22 +93,32 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public List<SessionUserVO> listUsers(String roleCode, Integer status, String keyword) {
-        return sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
-                .eq(StrUtil.isNotBlank(roleCode), SysUser::getRoleCode, roleCode)
+    public List<SessionUserVO> listUsers(String roleCode, Integer status, String keyword, String operatorRoleCode) {
+        LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<SysUser>()
                 .eq(status != null, SysUser::getStatus, status)
                 .and(StrUtil.isNotBlank(keyword), q -> q.like(SysUser::getUsername, keyword)
                         .or().like(SysUser::getDisplayName, keyword)
                         .or().like(SysUser::getMobilePhone, keyword))
-                .orderByAsc(SysUser::getId))
-                .stream().map(this::toSessionUser).toList();
+                .orderByAsc(SysUser::getId);
+        if (StrUtil.equals(operatorRoleCode, "HR_ADMIN")) {
+            wrapper.in(SysUser::getRoleCode, "HR_USER", "INTERVIEWEE");
+        } else {
+            wrapper.eq(StrUtil.isNotBlank(roleCode), SysUser::getRoleCode, roleCode);
+        }
+        return sysUserMapper.selectList(wrapper).stream().map(this::toSessionUser).toList();
     }
 
     @Override
     @Transactional
-    public SessionUserVO updateUserByAdmin(Long id, UserAdminUpdateRequest request) {
+    public SessionUserVO updateUserByAdmin(Long id, UserAdminUpdateRequest request, String operatorRoleCode) {
         SysUser user = requireUser(id);
+        if (StrUtil.equals(operatorRoleCode, "HR_ADMIN") && !(StrUtil.equals(user.getRoleCode(), "HR_USER") || StrUtil.equals(user.getRoleCode(), "INTERVIEWEE"))) {
+            throw new BusinessException("HR管理员仅可维护HR用户和面试者用户");
+        }
         if (StrUtil.isNotBlank(request.getRoleCode())) {
+            if (StrUtil.equals(operatorRoleCode, "HR_ADMIN") && !(StrUtil.equals(request.getRoleCode(), "HR_USER") || StrUtil.equals(request.getRoleCode(), "INTERVIEWEE"))) {
+                throw new BusinessException("HR管理员仅可授予HR用户或面试者角色");
+            }
             user.setRoleCode(request.getRoleCode());
         }
         if (request.getStatus() != null) {

@@ -57,15 +57,19 @@ public class AuthController {
     }
 
     @GetMapping("/admin/users")
-    public ApiResponse<List<SessionUserVO>> listUsers(@RequestParam(required = false) String roleCode,
+    public ApiResponse<List<SessionUserVO>> listUsers(Authentication authentication,
+                                                      @RequestParam(required = false) String roleCode,
                                                       @RequestParam(required = false) Integer status,
                                                       @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(authService.listUsers(roleCode, status, keyword));
+        SessionUserVO current = authService.loadUserByUsername(authentication.getName());
+        return ApiResponse.success(authService.listUsers(roleCode, status, keyword, current.getRoleCode()));
     }
 
     @PostMapping("/admin/users/{id}")
-    public ApiResponse<SessionUserVO> updateUser(@PathVariable Long id,
+    public ApiResponse<SessionUserVO> updateUser(Authentication authentication,
+                                                 @PathVariable Long id,
                                                  @RequestBody UserAdminUpdateRequest request) {
-        return ApiResponse.success(authService.updateUserByAdmin(id, request));
+        SessionUserVO current = authService.loadUserByUsername(authentication.getName());
+        return ApiResponse.success(authService.updateUserByAdmin(id, request, current.getRoleCode()));
     }
 }
