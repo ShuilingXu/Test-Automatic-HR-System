@@ -6,9 +6,15 @@ import com.autohr.modules.recruitment.dto.CandidateVO;
 import com.autohr.modules.recruitment.dto.JobSaveRequest;
 import com.autohr.modules.recruitment.dto.JobVO;
 import com.autohr.modules.recruitment.dto.ResumeFileVO;
+import com.autohr.modules.recruitment.entity.RecruitmentResumeFile;
 import com.autohr.modules.recruitment.service.RecruitmentService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,6 +25,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 
 @RestController
@@ -81,5 +91,18 @@ public class RecruitmentController {
     public ApiResponse<ResumeFileVO> uploadResume(@PathVariable Long candidateId,
                                                   @RequestParam("file") MultipartFile file) {
         return ApiResponse.success(recruitmentService.uploadResume(candidateId, file));
+    }
+
+    @GetMapping("/resumes/{id}")
+    public ResponseEntity<Resource> downloadResume(@PathVariable Long id) {
+        RecruitmentResumeFile resumeFile = recruitmentService.getResumeFile(id);
+        Path path = Paths.get(resumeFile.getFilePath()).toAbsolutePath().normalize();
+        Resource resource = new FileSystemResource(path);
+        String fileName = URLEncoder.encode(resumeFile.getOriginalFileName(), StandardCharsets.UTF_8).replace("+", "%20");
+        String contentType = resumeFile.getContentType() == null ? "application/octet-stream" : resumeFile.getContentType();
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=UTF-8''" + fileName)
+                .body(resource);
     }
 }

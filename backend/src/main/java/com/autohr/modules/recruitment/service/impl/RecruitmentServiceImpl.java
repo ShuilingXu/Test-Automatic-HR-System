@@ -22,9 +22,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -37,7 +39,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RecruitmentServiceImpl implements RecruitmentService {
 
-    private static final Path RESUME_DIR = Paths.get("uploads", "resumes");
+    private static final Path RESUME_DIR = Paths.get(System.getProperty("user.dir"), "uploads", "resumes");
 
     private final RecruitmentJobMapper jobMapper;
     private final RecruitmentCandidateMapper candidateMapper;
@@ -132,8 +134,10 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             String originalName = Objects.requireNonNullElse(file.getOriginalFilename(), "resume.bin");
             String suffix = originalName.contains(".") ? originalName.substring(originalName.lastIndexOf('.')) : "";
             String storedName = UUID.randomUUID() + suffix;
-            Path target = RESUME_DIR.resolve(storedName).normalize();
-            file.transferTo(target.toFile());
+            Path target = RESUME_DIR.resolve(storedName).normalize().toAbsolutePath();
+            try (InputStream inputStream = file.getInputStream()) {
+                Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
+            }
             RecruitmentResumeFile resumeFile = new RecruitmentResumeFile();
             resumeFile.setId(nextId(resumeFileMapper.selectList(null).stream().map(RecruitmentResumeFile::getId).toList()));
             resumeFile.setCandidateId(candidateId);
@@ -149,6 +153,15 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         } catch (IOException ex) {
             throw new BusinessException("简历上传失败: " + ex.getMessage());
         }
+    }
+
+    @Override
+    public RecruitmentResumeFile getResumeFile(Long id) {
+        RecruitmentResumeFile resumeFile = resumeFileMapper.selectById(id);
+        if (resumeFile == null) {
+            throw new BusinessException("简历文件不存在: " + id);
+        }
+        return resumeFile;
     }
 
     private RecruitmentJob requireJob(Long id) {

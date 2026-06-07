@@ -94,12 +94,16 @@
           <el-form-item label="银行卡号"><el-input v-model="employeeForm.bankAccountNo" /></el-form-item>
           <el-form-item label="开户银行"><el-input v-model="employeeForm.bankName" /></el-form-item>
         </el-form>
-        <el-button type="primary" @click="saveEmployee">保存员工</el-button>
-        <el-table :data="employees" stripe class="data-table">
+        <div class="action-row">
+          <el-button type="primary" @click="saveEmployee">保存员工</el-button>
+          <el-button @click="resetEmployeeForm">清空</el-button>
+        </div>
+        <el-table :data="employees" stripe class="data-table" @row-click="editEmployee">
           <el-table-column prop="fullName" label="姓名" />
           <el-table-column prop="departmentName" label="部门" />
           <el-table-column prop="positionName" label="岗位" />
-          <el-table-column label="操作" width="100"><template #default="scope"><el-button text @click="loadEmployeeDetail(scope.row.id)">详情</el-button></template></el-table-column>
+          <el-table-column prop="mobilePhone" label="电话" />
+          <el-table-column label="操作" width="100"><template #default="scope"><el-button text @click.stop="loadEmployeeDetail(scope.row.id)">详情</el-button></template></el-table-column>
         </el-table>
         <pre v-if="employeeDetail">{{ employeeDetail }}</pre>
       </section>
@@ -140,7 +144,11 @@
         <el-form :model="jobForm" label-position="top" class="form-grid">
           <el-form-item label="岗位名称"><el-input v-model="jobForm.jobTitle" /></el-form-item>
           <el-form-item label="岗位编码"><el-input v-model="jobForm.jobCode" /></el-form-item>
-          <el-form-item label="招聘部门"><el-input v-model="jobForm.departmentName" /></el-form-item>
+          <el-form-item label="招聘部门">
+            <el-select v-model="jobForm.departmentName" filterable placeholder="从数据库部门中选择">
+              <el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.departmentName" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="工作地点"><el-input v-model="jobForm.workLocation" /></el-form-item>
           <el-form-item label="岗位类型"><el-input v-model="jobForm.jobType" /></el-form-item>
           <el-form-item label="招聘人数"><el-input-number v-model="jobForm.headcount" :min="1" /></el-form-item>
@@ -161,14 +169,38 @@
           <el-table-column label="操作" width="100"><template #default="scope"><el-button text @click="editJob(scope.row)">编辑</el-button></template></el-table-column>
         </el-table>
         <h3 class="sub-title">报名记录</h3>
-        <el-table :data="candidates" stripe class="data-table">
-          <el-table-column prop="fullName" label="姓名" min-width="100" />
+        <el-table :data="candidates" stripe class="data-table" @row-click="selectCandidate">
+          <el-table-column prop="fullName" label="报名者姓名" min-width="120" />
+          <el-table-column prop="mobilePhone" label="联系电话" min-width="130" />
           <el-table-column prop="jobTitle" label="岗位" min-width="140" />
-          <el-table-column prop="mobilePhone" label="手机号" min-width="120" />
-          <el-table-column prop="major" label="专业" min-width="120" />
-          <el-table-column prop="resumeFileName" label="简历" min-width="140" />
+          <el-table-column label="简历" min-width="150">
+            <template #default="scope">
+              <a v-if="scope.row.resumeFileId" class="resume-link" :href="resumeUrl(scope.row.resumeFileId)" target="_blank" @click.stop>{{ scope.row.resumeFileName || '查看简历' }}</a>
+              <span v-else>未上传</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="applicationStatus" label="状态" width="110" />
         </el-table>
+        <div v-if="selectedCandidate" class="candidate-detail">
+          <h3>报名者详情</h3>
+          <div class="detail-grid">
+            <div><span>姓名</span><strong>{{ selectedCandidate.fullName }}</strong></div>
+            <div><span>联系电话</span><strong>{{ selectedCandidate.mobilePhone }}</strong></div>
+            <div><span>应聘岗位</span><strong>{{ selectedCandidate.jobTitle }}</strong></div>
+            <div><span>专业</span><strong>{{ selectedCandidate.major }}</strong></div>
+            <div><span>邮箱</span><strong>{{ selectedCandidate.email || '-' }}</strong></div>
+            <div><span>身份证号</span><strong>{{ selectedCandidate.idCardNo || '-' }}</strong></div>
+            <div><span>学历</span><strong>{{ selectedCandidate.educationLevel || '-' }}</strong></div>
+            <div><span>毕业院校</span><strong>{{ selectedCandidate.graduationSchool || '-' }}</strong></div>
+            <div><span>工作年限</span><strong>{{ selectedCandidate.yearsOfExperience ?? '-' }}</strong></div>
+            <div><span>期望薪资</span><strong>{{ selectedCandidate.expectedSalary || '-' }}</strong></div>
+          </div>
+          <div class="intro-box">
+            <span>个人简介</span>
+            <p>{{ selectedCandidate.selfIntroduction || '未填写' }}</p>
+          </div>
+          <a v-if="selectedCandidate.resumeFileId" class="resume-link" :href="resumeUrl(selectedCandidate.resumeFileId)" target="_blank">打开 PDF / 简历文件</a>
+        </div>
       </section>
     </main>
   </div>
@@ -197,6 +229,7 @@ const jobs = ref([])
 const candidates = ref([])
 const departmentDetail = ref(null)
 const employeeDetail = ref(null)
+const selectedCandidate = ref(null)
 
 const departmentForm = reactive({ departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '' })
 const employeeForm = reactive({ fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' })
@@ -227,6 +260,10 @@ async function saveBinding() { try { await hrApi.saveBinding({ ...bindingForm })
 function resetJobForm() { Object.assign(jobForm, { id: null, jobTitle: '', jobCode: '', departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 }) }
 function editJob(row) { Object.assign(jobForm, row) }
 async function saveJob() { try { await recruitmentApi.saveJob({ ...jobForm }); ElMessage.success('招聘岗位已保存'); resetJobForm(); await loadRecruitment() } catch (error) { fail(error) } }
+function resetEmployeeForm() { Object.assign(employeeForm, { id: null, fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' }) }
+function editEmployee(row) { Object.assign(employeeForm, row) }
+function selectCandidate(row) { selectedCandidate.value = row }
+function resumeUrl(id) { return `/api/recruitment/resumes/${id}` }
 
 onMounted(loadAll)
 </script>
@@ -252,6 +289,13 @@ onMounted(loadAll)
 .list-block button { border: 0; border-radius: 16px; padding: 14px; background: #f8f5ef; display: flex; justify-content: space-between; cursor: pointer; }
 .action-row { display: flex; gap: 12px; margin-top: 4px; }
 .sub-title { margin: 24px 0 0; }
+.resume-link { color: #0f6c8f; font-weight: 700; text-decoration: none; }
+.candidate-detail { margin-top: 18px; padding: 18px; border-radius: 20px; background: #f8f5ef; }
+.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.detail-grid div, .intro-box { background: rgba(255,255,255,0.82); border-radius: 14px; padding: 12px; }
+.detail-grid span, .intro-box span { display: block; color: #6d7a83; margin-bottom: 6px; }
+.intro-box { margin: 12px 0; }
+.intro-box p { margin: 0; line-height: 1.7; }
 .data-table { margin-top: 18px; }
 pre { white-space: pre-wrap; background: #102532; color: #f4efe7; border-radius: 18px; padding: 16px; max-height: 300px; overflow: auto; }
 @media (max-width: 980px) { .console-shell { grid-template-columns: 1fr; } .metric-grid, .form-grid { grid-template-columns: 1fr; } }

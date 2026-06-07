@@ -5,6 +5,7 @@ import com.autohr.modules.recruitment.dto.CandidateVO;
 import com.autohr.modules.recruitment.dto.JobSaveRequest;
 import com.autohr.modules.recruitment.dto.JobVO;
 import com.autohr.modules.recruitment.dto.ResumeFileVO;
+import com.autohr.modules.recruitment.entity.RecruitmentResumeFile;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -26,4 +27,6 @@ public interface RecruitmentService {
     CandidateVO getCandidate(Long id);
 
     ResumeFileVO uploadResume(Long candidateId, MultipartFile file);
+
+    RecruitmentResumeFile getResumeFile(Long id);
 }
