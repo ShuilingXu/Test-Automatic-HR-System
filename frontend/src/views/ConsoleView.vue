@@ -10,8 +10,6 @@
         </button>
       </nav>
       <el-button class="side-link logout-btn" @click="logout">退出登录</el-button>
-      <RouterLink class="side-link" to="/login">统一登录</RouterLink>
-      <RouterLink class="side-link" to="/user">面试者门户</RouterLink>
       <RouterLink class="side-link" to="/candidate/interview">线上面试</RouterLink>
       <RouterLink class="side-link" to="/admin/interview">面试系统管理</RouterLink>
     </aside>

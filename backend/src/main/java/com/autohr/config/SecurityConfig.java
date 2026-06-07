@@ -5,7 +5,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -34,9 +33,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/recruitment/admin/**").hasAnyRole("IT_ADMIN", "HR_ADMIN")
                         .requestMatchers("/api/interview/admin/**").hasAnyRole("IT_ADMIN", "HR_ADMIN")
                         .requestMatchers("/api/interview/candidates/**", "/api/interview/submissions").hasRole("INTERVIEWEE")
-                        .requestMatchers("/api/auth/me", "/api/auth/profile").authenticated()
+                        .requestMatchers("/api/auth/me", "/api/auth/profile", "/api/auth/logout").authenticated()
                         .anyRequest().authenticated())
-                .httpBasic(Customizer.withDefaults())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

@@ -16,6 +16,10 @@ request.interceptors.request.use((config) => {
 request.interceptors.response.use(
   (response) => response.data,
   (error) => {
+    if (error.response?.status === 401) {
+      window.localStorage.removeItem('demo-token')
+      window.localStorage.removeItem('session-user')
+    }
     const message = error.response?.data?.message || error.message || '请求失败'
     return Promise.reject(new Error(message))
   },
