@@ -1,0 +1,12 @@
+spring:
+  datasource:
+    url: jdbc:sqlite:autohr-dev.db
+    driver-class-name: org.sqlite.JDBC
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: update
+
+logging:
+  level:
+    com.autohr: debug
