@@ -31,6 +31,6 @@ mybatis-plus:
       id-type: input
 
 jwt:
-  secret: YOUR_SECRET_KEY_HERE
+  secret: AUTOHR_SYSTEM_SECRET_KEY_2026_SECURE_TOKEN_1234567890
   expiration: 86400000
   header: Authorization

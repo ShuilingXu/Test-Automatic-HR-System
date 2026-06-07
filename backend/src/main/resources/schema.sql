@@ -169,3 +169,19 @@ CREATE INDEX IF NOT EXISTS idx_interview_batch_status ON interview_batch(status)
 CREATE INDEX IF NOT EXISTS idx_interview_question_status ON interview_question(status);
 CREATE INDEX IF NOT EXISTS idx_interview_candidate_batch_id ON interview_candidate(batch_id);
 CREATE INDEX IF NOT EXISTS idx_interview_submission_candidate_id ON interview_submission(interview_candidate_id);
+
+CREATE TABLE IF NOT EXISTS sys_user (
+    id INTEGER PRIMARY KEY,
+    username VARCHAR(64) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    role_code VARCHAR(32) NOT NULL,
+    display_name VARCHAR(64),
+    mobile_phone VARCHAR(32),
+    email VARCHAR(128),
+    status INTEGER NOT NULL DEFAULT 1,
+    profile_completed INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sys_user_username ON sys_user(username);

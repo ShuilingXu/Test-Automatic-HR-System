@@ -22,60 +22,26 @@ request.interceptors.response.use(
 )
 
 export const hrApi = {
-  getDashboard() {
-    return request.get('/hr/dashboard')
-  },
-  listDepartments() {
-    return request.get('/hr/departments')
-  },
-  getDepartmentTree() {
-    return request.get('/hr/departments/tree')
-  },
-  getDepartmentDetail(id) {
-    return request.get(`/hr/departments/${id}`)
-  },
-  saveDepartment(payload) {
-    return request.post('/hr/departments', payload)
-  },
-  listEmployees(params) {
-    return request.get('/hr/employees', { params })
-  },
-  getEmployeeDetail(id) {
-    return request.get(`/hr/employees/${id}`)
-  },
-  saveEmployee(payload) {
-    return request.post('/hr/employees', payload)
-  },
-  listBindings(params) {
-    return request.get('/hr/bindings', { params })
-  },
-  saveBinding(payload) {
-    return request.post('/hr/bindings', payload)
-  },
+  getDashboard() { return request.get('/hr/dashboard') },
+  listDepartments() { return request.get('/hr/departments') },
+  getDepartmentTree() { return request.get('/hr/departments/tree') },
+  getDepartmentDetail(id) { return request.get(`/hr/departments/${id}`) },
+  saveDepartment(payload) { return request.post('/hr/departments', payload) },
+  listEmployees(params) { return request.get('/hr/employees', { params }) },
+  getEmployeeDetail(id) { return request.get(`/hr/employees/${id}`) },
+  saveEmployee(payload) { return request.post('/hr/employees', payload) },
+  listBindings(params) { return request.get('/hr/bindings', { params }) },
+  saveBinding(payload) { return request.post('/hr/bindings', payload) },
 }
 
 export const recruitmentApi = {
-  saveJob(payload) {
-    return request.post('/recruitment/admin/jobs', payload)
-  },
-  listAdminJobs(params) {
-    return request.get('/recruitment/admin/jobs', { params })
-  },
-  getAdminJob(id) {
-    return request.get(`/recruitment/admin/jobs/${id}`)
-  },
-  deleteJob(id) {
-    return request.delete(`/recruitment/admin/jobs/${id}`)
-  },
-  listCandidates(params) {
-    return request.get('/recruitment/admin/candidates', { params })
-  },
-  listOpenJobs(params) {
-    return request.get('/recruitment/jobs', { params })
-  },
-  apply(payload) {
-    return request.post('/recruitment/candidates', payload)
-  },
+  saveJob(payload) { return request.post('/recruitment/admin/jobs', payload) },
+  listAdminJobs(params) { return request.get('/recruitment/admin/jobs', { params }) },
+  getAdminJob(id) { return request.get(`/recruitment/admin/jobs/${id}`) },
+  deleteJob(id) { return request.delete(`/recruitment/admin/jobs/${id}`) },
+  listCandidates(params) { return request.get('/recruitment/admin/candidates', { params }) },
+  listOpenJobs(params) { return request.get('/recruitment/jobs', { params }) },
+  apply(payload) { return request.post('/recruitment/candidates', payload) },
   uploadResume(candidateId, file) {
     const formData = new FormData()
     formData.append('file', file)
@@ -86,75 +52,35 @@ export const recruitmentApi = {
 }
 
 export const authApi = {
-  login(payload) {
-    return Promise.resolve({ success: true, message: '预留登录接口', data: payload })
-  },
+  login(payload) { return request.post('/auth/login', payload) },
+  register(payload) { return request.post('/auth/register', payload) },
+  getSession() { return request.get('/auth/me') },
+  updateProfile(payload) { return request.post('/auth/profile', payload) },
   logout() {
-    return Promise.resolve({ success: true, message: '预留登出接口', data: null })
-  },
-  getSession() {
-    return Promise.resolve({
-      success: true,
-      message: '预留会话接口',
-      data: {
-        authenticated: false,
-        userName: 'guest',
-        roles: ['tester'],
-      },
-    })
+    window.localStorage.removeItem('demo-token')
+    return Promise.resolve({ success: true, message: '已退出登录', data: null })
   },
 }
 
 export const interviewApi = {
-  saveBatch(payload) {
-    return request.post('/interview/admin/batches', payload)
-  },
-  listBatches(params) {
-    return request.get('/interview/admin/batches', { params })
-  },
-  saveQuestion(payload) {
-    return request.post('/interview/admin/questions', payload)
-  },
-  listQuestions(params) {
-    return request.get('/interview/admin/questions', { params })
-  },
-  assignCandidate(payload) {
-    return request.post('/interview/admin/candidates', payload)
-  },
-  listInterviewCandidates(params) {
-    return request.get('/interview/admin/candidates', { params })
-  },
-  listSubmissions(params) {
-    return request.get('/interview/admin/submissions', { params })
-  },
-  scoreSubmission(submissionId, payload) {
-    return request.post(`/interview/admin/submissions/${submissionId}/score`, payload)
-  },
-  listCandidateQuestions(interviewCandidateId) {
-    return request.get(`/interview/candidates/${interviewCandidateId}/questions`)
-  },
-  submitAnswer(payload) {
-    return request.post('/interview/submissions', payload)
-  },
+  saveBatch(payload) { return request.post('/interview/admin/batches', payload) },
+  listBatches(params) { return request.get('/interview/admin/batches', { params }) },
+  saveQuestion(payload) { return request.post('/interview/admin/questions', payload) },
+  listQuestions(params) { return request.get('/interview/admin/questions', { params }) },
+  assignCandidate(payload) { return request.post('/interview/admin/candidates', payload) },
+  listInterviewCandidates(params) { return request.get('/interview/admin/candidates', { params }) },
+  listSubmissions(params) { return request.get('/interview/admin/submissions', { params }) },
+  scoreSubmission(submissionId, payload) { return request.post(`/interview/admin/submissions/${submissionId}/score`, payload) },
+  listCandidateQuestions(interviewCandidateId) { return request.get(`/interview/candidates/${interviewCandidateId}/questions`) },
+  submitAnswer(payload) { return request.post('/interview/submissions', payload) },
   getSystems() {
-    return Promise.resolve({
-      success: true,
-      message: '预留系统入口',
-      data: [
-        { code: 'INTERVIEW', name: '面试系统管理入口', path: '/interview/admin' },
-        { code: 'RECRUITMENT', name: '招聘系统入口', path: '/recruitment' },
-        { code: 'PERFORMANCE', name: '绩效系统入口', path: '/performance' },
-      ],
-    })
+    return Promise.resolve({ success: true, message: 'system entries', data: [
+      { code: 'ADMIN', name: '管理员门户', path: '/admin' },
+      { code: 'USER', name: '面试者门户', path: '/user' },
+      { code: 'LOGIN', name: '统一登录', path: '/login' },
+    ] })
   },
   getCandidateEntry() {
-    return Promise.resolve({
-      success: true,
-      message: '预留测试者入口',
-      data: {
-        registerPath: '/candidate/register',
-        onlineInterviewPath: '/candidate/interview',
-      },
-    })
+    return Promise.resolve({ success: true, message: 'candidate entries', data: { registerPath: '/user', onlineInterviewPath: '/candidate/interview' } })
   },
 }

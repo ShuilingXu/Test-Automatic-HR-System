@@ -139,16 +139,17 @@ public class HrServiceImpl implements HrService {
     @Override
     @Transactional
     public EmployeeVO saveEmployee(EmployeeSaveRequest request) {
-        validateEmployee(request.getDepartmentId(), request.getManagerEmployeeId(), request.getId());
-        validateEmployeeUnique(request);
-        Employee employee = request.getId() == null ? new Employee() : requireEmployee(request.getId());
+        Long resolvedId = resolveEmployeeId(request);
+        validateEmployee(request.getDepartmentId(), request.getManagerEmployeeId(), resolvedId);
+        validateEmployeeUnique(request, resolvedId);
+        Employee employee = resolvedId == null ? new Employee() : requireEmployee(resolvedId);
         BeanUtils.copyProperties(request, employee);
         if (StrUtil.isBlank(employee.getEmployeeCode())) {
             employee.setEmployeeCode(buildEmployeeCode());
         }
         employee.setHireDate(Objects.requireNonNullElse(request.getHireDate(), LocalDate.now()));
         employee.setEmploymentStatus(Objects.requireNonNullElse(request.getEmploymentStatus(), EmploymentStatus.ACTIVE.getCode()));
-        if (request.getId() == null) {
+        if (resolvedId == null) {
             employee.setId(nextId(employeeMapper.selectList(null).stream().map(Employee::getId).toList()));
             employeeMapper.insert(employee);
         } else {
@@ -279,12 +280,25 @@ public class HrServiceImpl implements HrService {
         }
     }
 
-    private void validateEmployeeUnique(EmployeeSaveRequest request) {
-        ensureUnique(Employee::getIdCardNo, request.getIdCardNo(), request.getId(), "身份证号已存在");
-        ensureUnique(Employee::getMobilePhone, request.getMobilePhone(), request.getId(), "手机号已存在");
+    private void validateEmployeeUnique(EmployeeSaveRequest request, Long currentId) {
+        ensureUnique(Employee::getIdCardNo, request.getIdCardNo(), currentId, "身份证号已存在");
+        ensureUnique(Employee::getMobilePhone, request.getMobilePhone(), currentId, "手机号已存在");
         if (StrUtil.isNotBlank(request.getEmployeeCode())) {
-            ensureUnique(Employee::getEmployeeCode, request.getEmployeeCode(), request.getId(), "员工编码已存在");
+            ensureUnique(Employee::getEmployeeCode, request.getEmployeeCode(), currentId, "员工编码已存在");
         }
+    }
+
+    private Long resolveEmployeeId(EmployeeSaveRequest request) {
+        if (request.getId() != null) {
+            return request.getId();
+        }
+        if (StrUtil.isBlank(request.getEmployeeCode())) {
+            return null;
+        }
+        Employee existing = employeeMapper.selectOne(new LambdaQueryWrapper<Employee>()
+                .eq(Employee::getEmployeeCode, request.getEmployeeCode())
+                .last("LIMIT 1"));
+        return existing == null ? null : existing.getId();
     }
 
     private void ensureUnique(SFunction<Employee, String> column, String value, Long currentId, String message) {

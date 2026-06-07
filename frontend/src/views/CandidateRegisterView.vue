@@ -3,7 +3,7 @@
     <section class="page-card">
       <p class="page-eyebrow">Candidate</p>
       <h1 class="page-title">测试者报名</h1>
-      <p class="page-subtitle">选择开放招聘岗位，填写报名表并上传简历。提交成功后可继续进入线上面试入口。</p>
+      <p class="page-subtitle">登录并完成个人信息后，选择开放岗位，填写报名表并上传简历。</p>
       <div class="page-grid">
         <el-form :model="form" label-position="top" class="surface">
           <h3>报名信息</h3>
@@ -54,31 +54,43 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { useRouter, RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { recruitmentApi } from '../services/api'
+import { authApi, recruitmentApi } from '../services/api'
 
+const router = useRouter()
 const jobs = ref([])
 const resumeFile = ref(null)
 const submittedCandidate = ref(null)
-const form = reactive({
-  jobId: null,
-  fullName: '',
-  mobilePhone: '',
-  email: '',
-  idCardNo: '',
-  major: '',
-  educationLevel: '',
-  graduationSchool: '',
-  yearsOfExperience: 0,
-  expectedSalary: '',
-  selfIntroduction: '',
-})
+const form = reactive({ jobId: null, fullName: '', mobilePhone: '', email: '', idCardNo: '', major: '', educationLevel: '', graduationSchool: '', yearsOfExperience: 0, expectedSalary: '', selfIntroduction: '' })
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
 function pickResume(uploadFile) { resumeFile.value = uploadFile.raw }
 function removeResume() { resumeFile.value = null }
 async function loadJobs() { try { jobs.value = (await recruitmentApi.listOpenJobs()).data } catch (error) { fail(error) } }
+async function loadSession() {
+  try {
+    const response = await authApi.getSession()
+    const user = response.data
+    if (user.roleCode !== 'INTERVIEWEE') {
+      ElMessage.error('仅面试者可以报名')
+      router.push('/login')
+      return
+    }
+    if (user.profileCompleted !== 1) {
+      ElMessage.warning('请先在用户门户完善信息')
+      router.push('/user')
+      return
+    }
+    form.fullName = user.displayName || ''
+    form.mobilePhone = user.mobilePhone || ''
+    form.email = user.email || ''
+    localStorage.setItem('session-user', JSON.stringify(user))
+  } catch (error) {
+    fail(error)
+    router.push('/login')
+  }
+}
 async function submit() {
   try {
     const applyResponse = await recruitmentApi.apply({ ...form })
@@ -89,12 +101,13 @@ async function submit() {
     }
     submittedCandidate.value = candidate
     ElMessage.success('报名已提交')
-  } catch (error) {
-    fail(error)
-  }
+  } catch (error) { fail(error) }
 }
 
-onMounted(loadJobs)
+onMounted(async () => {
+  await loadSession()
+  await loadJobs()
+})
 </script>
 
 <style scoped>

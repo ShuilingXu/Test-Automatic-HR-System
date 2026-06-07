@@ -9,10 +9,11 @@
           {{ item.label }}
         </button>
       </nav>
-      <RouterLink class="side-link" to="/login">登录与会话预留</RouterLink>
+      <RouterLink class="side-link" to="/login">统一登录</RouterLink>
+      <RouterLink class="side-link" to="/user">面试者门户</RouterLink>
       <RouterLink class="side-link" to="/candidate/register">测试者报名</RouterLink>
       <RouterLink class="side-link" to="/candidate/interview">线上面试</RouterLink>
-      <RouterLink class="side-link" to="/interview/admin">面试系统管理</RouterLink>
+      <RouterLink class="side-link" to="/admin/interview">面试系统管理</RouterLink>
     </aside>
 
     <main class="console-main">
@@ -97,6 +98,7 @@
 
         <template v-if="employeeMode === 'create' || employeeMode === 'edit'">
           <el-form :model="employeeForm" label-position="top" class="form-grid">
+            <el-form-item label="工号"><el-input v-model="employeeForm.employeeCode" placeholder="查询和修改时作为业务主键" /></el-form-item>
             <el-form-item label="姓名"><el-input v-model="employeeForm.fullName" /></el-form-item>
             <el-form-item label="身份证号"><el-input v-model="employeeForm.idCardNo" /></el-form-item>
             <el-form-item label="手机号"><el-input v-model="employeeForm.mobilePhone" /></el-form-item>
@@ -126,6 +128,7 @@
 
         <template v-if="employeeMode === 'query'">
           <el-table :data="employees" stripe class="data-table" @row-click="editEmployee">
+            <el-table-column prop="employeeCode" label="工号" />
             <el-table-column prop="fullName" label="姓名" />
             <el-table-column prop="departmentName" label="部门" />
             <el-table-column prop="positionName" label="岗位" />
@@ -269,7 +272,7 @@ const candidates = ref([])
 const selectedCandidate = ref(null)
 
 const departmentForm = reactive({ id: null, departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '', sortOrder: 0, status: 1 })
-const employeeForm = reactive({ fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' })
+const employeeForm = reactive({ id: null, employeeCode: '', fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' })
 const bindingForm = reactive({ moduleCode: 'RECRUITMENT', businessType: 'EMPLOYEE_SYNC', employeeId: null, departmentId: null, externalRef: '', bindingStatus: 'ACTIVE', payload: '{"source":"frontend-demo"}' })
 const jobForm = reactive({ id: null, jobTitle: '', jobCode: '', departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 })
 
@@ -306,7 +309,7 @@ function editDepartment(row) {
   }
   departmentMode.value = 'edit'
 }
-function resetEmployeeForm() { Object.assign(employeeForm, { id: null, fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' }) }
+function resetEmployeeForm() { Object.assign(employeeForm, { id: null, employeeCode: '', fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' }) }
 function showCreateEmployee() { resetEmployeeForm(); employeeMode.value = 'create' }
 function editEmployee(row) { Object.assign(employeeForm, row); employeeMode.value = 'edit' }
 function selectCandidate(row) { selectedCandidate.value = row }

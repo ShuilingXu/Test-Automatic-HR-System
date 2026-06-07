@@ -1,0 +1,50 @@
+package com.autohr.modules.auth.service.impl;
+
+import com.autohr.modules.auth.entity.SysUser;
+import com.autohr.modules.auth.service.JwtService;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
+import java.util.Date;
+
+@Service
+public class JwtServiceImpl implements JwtService {
+
+    private final SecretKey secretKey;
+    private final long expiration;
+
+    public JwtServiceImpl(@Value("${jwt.secret}") String secret,
+                          @Value("${jwt.expiration}") long expiration) {
+        this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.expiration = expiration;
+    }
+
+    @Override
+    public String generateToken(SysUser user) {
+        Date now = new Date();
+        Date expireAt = new Date(now.getTime() + expiration);
+        return Jwts.builder()
+                .subject(user.getUsername())
+                .claim("roleCode", user.getRoleCode())
+                .claim("userId", user.getId())
+                .issuedAt(now)
+                .expiration(expireAt)
+                .signWith(secretKey)
+                .compact();
+    }
+
+    @Override
+    public Claims parseToken(String token) {
+        return Jwts.parser().verifyWith(secretKey).build().parseSignedClaims(token).getPayload();
+    }
+
+    @Override
+    public String extractUsername(String token) {
+        return parseToken(token).getSubject();
+    }
+}
