@@ -24,6 +24,7 @@ public class SysUser {
     private String email;
     private Integer status;
     private Integer profileCompleted;
+    private Integer tokenVersion;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

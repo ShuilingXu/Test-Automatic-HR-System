@@ -17,4 +17,5 @@ public interface AuthService {
     SessionUserVO loadUserByUsername(String username);
     List<SessionUserVO> listUsers(String roleCode, Integer status, String keyword);
     SessionUserVO updateUserByAdmin(Long id, UserAdminUpdateRequest request);
+    void logout(String username);
 }

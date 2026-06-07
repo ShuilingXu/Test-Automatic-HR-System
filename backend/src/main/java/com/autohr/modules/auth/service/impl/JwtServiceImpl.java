@@ -32,6 +32,7 @@ public class JwtServiceImpl implements JwtService {
                 .subject(user.getUsername())
                 .claim("roleCode", user.getRoleCode())
                 .claim("userId", user.getId())
+                .claim("tokenVersion", user.getTokenVersion() == null ? 0 : user.getTokenVersion())
                 .issuedAt(now)
                 .expiration(expireAt)
                 .signWith(secretKey)

@@ -5,10 +5,11 @@
       <h1>管理后台</h1>
       <p>用于直观测试 HR、招聘、面试与鉴权系统。用户管理中心仅 IT 管理员可见。</p>
       <nav>
-        <button v-for="item in visibleTabs" :key="item.key" :class="{ active: activeTab === item.key }" @click="activeTab = item.key">
+        <button v-for="item in tabs" :key="item.key" :class="{ active: activeTab === item.key }" @click="activeTab = item.key">
           {{ item.label }}
         </button>
       </nav>
+      <el-button class="side-link logout-btn" @click="logout">退出登录</el-button>
       <RouterLink class="side-link" to="/login">统一登录</RouterLink>
       <RouterLink class="side-link" to="/user">面试者门户</RouterLink>
       <RouterLink class="side-link" to="/candidate/interview">线上面试</RouterLink>
@@ -194,7 +195,7 @@ const metrics = computed(() => [
 const availableParentDepartments = computed(() => departments.value.filter((item) => item.id !== departmentForm.id))
 
 function fail(error) { ElMessage.error(error.message || '请求失败') }
-async function loadSession() { try { const response = await authApi.getSession(); sessionUser.value = response.data; localStorage.setItem('session-user', JSON.stringify(response.data)) } catch (error) { fail(error); router.push('/login') } }
+async function loadSession() { try { const response = await authApi.getSession(); sessionUser.value = response.data; localStorage.setItem('session-user', JSON.stringify(response.data)); if (!isItAdmin.value && activeTab.value === 'users') { activeTab.value = 'dashboard' } } catch (error) { fail(error); router.push('/login') } }
 async function loadDashboard() { try { Object.assign(dashboard, (await hrApi.getDashboard()).data) } catch (error) { fail(error) } }
 async function loadDepartments() { try { departments.value = (await hrApi.listDepartments()).data } catch (error) { fail(error) } }
 async function loadEmployees() { try { employees.value = (await hrApi.listEmployees()).data } catch (error) { fail(error) } }
@@ -219,6 +220,7 @@ function selectCandidate(row) { selectedCandidate.value = row }
 function resumeUrl(id) { return `/api/recruitment/resumes/${id}` }
 function editUser(row) { Object.assign(userForm, row) }
 async function saveUser() { try { await authApi.updateUser(userForm.id, { roleCode: userForm.roleCode, status: userForm.status, displayName: userForm.displayName, mobilePhone: userForm.mobilePhone, email: userForm.email }); ElMessage.success('用户已保存'); await loadUsers() } catch (error) { fail(error) } }
+async function logout() { try { await authApi.logout(); router.push('/login') } catch (error) { fail(error) } }
 
 onMounted(loadAll)
 </script>

@@ -59,9 +59,10 @@ export const authApi = {
   listUsers(params) { return request.get('/auth/admin/users', { params }) },
   updateUser(id, payload) { return request.post(`/auth/admin/users/${id}`, payload) },
   logout() {
-    window.localStorage.removeItem('demo-token')
-    window.localStorage.removeItem('session-user')
-    return Promise.resolve({ success: true, message: '已退出登录', data: null })
+    return request.post('/auth/logout').finally(() => {
+      window.localStorage.removeItem('demo-token')
+      window.localStorage.removeItem('session-user')
+    })
   },
 }
 

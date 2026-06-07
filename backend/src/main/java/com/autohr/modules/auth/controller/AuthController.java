@@ -43,6 +43,12 @@ public class AuthController {
         return ApiResponse.success(authService.getCurrentUser());
     }
 
+    @PostMapping("/logout")
+    public ApiResponse<Void> logout(Authentication authentication) {
+        authService.logout(authentication.getName());
+        return ApiResponse.success("logged out", null);
+    }
+
     @PostMapping("/profile")
     public ApiResponse<SessionUserVO> updateProfile(Authentication authentication,
                                                     @RequestBody CandidateProfileUpdateRequest request) {

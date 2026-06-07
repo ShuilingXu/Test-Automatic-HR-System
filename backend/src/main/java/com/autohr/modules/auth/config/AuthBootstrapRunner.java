@@ -38,6 +38,7 @@ public class AuthBootstrapRunner implements CommandLineRunner {
         user.setDisplayName(displayName);
         user.setStatus(1);
         user.setProfileCompleted(1);
+        user.setTokenVersion(0);
         sysUserMapper.insert(user);
     }
 

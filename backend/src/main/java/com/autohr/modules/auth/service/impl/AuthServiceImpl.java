@@ -61,6 +61,7 @@ public class AuthServiceImpl implements AuthService {
         user.setEmail(request.getEmail());
         user.setStatus(1);
         user.setProfileCompleted(0);
+        user.setTokenVersion(0);
         sysUserMapper.insert(user);
         return toSessionUser(user);
     }
@@ -124,6 +125,14 @@ public class AuthServiceImpl implements AuthService {
         }
         sysUserMapper.updateById(user);
         return toSessionUser(user);
+    }
+
+    @Override
+    @Transactional
+    public void logout(String username) {
+        SysUser user = requireUserByUsername(username);
+        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
+        sysUserMapper.updateById(user);
     }
 
     private void ensureUniqueUsername(String username) {
