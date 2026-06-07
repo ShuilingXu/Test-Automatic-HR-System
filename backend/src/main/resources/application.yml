@@ -6,15 +6,15 @@ spring:
     name: auto-hr-system
   profiles:
     active: dev
-  jpa:
-    hibernate:
-      ddl-auto: none
-    show-sql: false
   datasource:
     driver-class-name: org.sqlite.JDBC
     url: jdbc:sqlite:autohr.db
     username:
     password:
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
@@ -25,9 +25,6 @@ mybatis-plus:
   global-config:
     db-config:
       id-type: auto
-      logic-delete-field: deleted
-      logic-delete-value: 1
-      logic-not-delete-value: 0
 
 jwt:
   secret: YOUR_SECRET_KEY_HERE
