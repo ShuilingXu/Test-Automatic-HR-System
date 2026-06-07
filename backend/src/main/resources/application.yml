@@ -24,7 +24,7 @@ mybatis-plus:
   type-aliases-package: com.autohr.modules.**.entity
   global-config:
     db-config:
-      id-type: auto
+      id-type: input
 
 jwt:
   secret: YOUR_SECRET_KEY_HERE

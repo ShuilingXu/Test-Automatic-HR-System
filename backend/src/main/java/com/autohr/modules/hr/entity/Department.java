@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 @TableName("hr_department")
 public class Department {
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.INPUT)
     private Long id;
 
     private String departmentCode;

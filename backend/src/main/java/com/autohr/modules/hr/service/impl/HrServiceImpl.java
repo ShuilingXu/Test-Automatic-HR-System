@@ -56,6 +56,7 @@ public class HrServiceImpl implements HrService {
         department.setSortOrder(Objects.requireNonNullElse(request.getSortOrder(), 0));
         department.setStatus(Objects.requireNonNullElse(request.getStatus(), 1));
         if (request.getId() == null) {
+            department.setId(nextId(departmentMapper.selectList(null).stream().map(Department::getId).toList()));
             departmentMapper.insert(department);
         } else {
             departmentMapper.updateById(department);
@@ -146,8 +147,9 @@ public class HrServiceImpl implements HrService {
             employee.setEmployeeCode(buildEmployeeCode());
         }
         employee.setHireDate(Objects.requireNonNullElse(request.getHireDate(), LocalDate.now()));
-        employee.setEmploymentStatus(Objects.requireNonNullElse(request.getEmploymentStatus(), EmploymentStatus.PENDING_ONBOARDING.getCode()));
+        employee.setEmploymentStatus(Objects.requireNonNullElse(request.getEmploymentStatus(), EmploymentStatus.ACTIVE.getCode()));
         if (request.getId() == null) {
+            employee.setId(nextId(employeeMapper.selectList(null).stream().map(Employee::getId).toList()));
             employeeMapper.insert(employee);
         } else {
             employeeMapper.updateById(employee);
@@ -217,6 +219,7 @@ public class HrServiceImpl implements HrService {
         BeanUtils.copyProperties(request, binding);
         binding.setBindingStatus(StrUtil.blankToDefault(request.getBindingStatus(), "ACTIVE"));
         if (request.getId() == null) {
+            binding.setId(nextId(integrationBindingMapper.selectList(null).stream().map(IntegrationBinding::getId).toList()));
             integrationBindingMapper.insert(binding);
         } else {
             integrationBindingMapper.updateById(binding);
@@ -381,5 +384,13 @@ public class HrServiceImpl implements HrService {
     private String buildEmployeeCode() {
         long next = employeeMapper.selectCount(null) + 1;
         return String.format("EMP%05d", next);
+    }
+
+    private Long nextId(List<Long> ids) {
+        return ids.stream()
+                .filter(Objects::nonNull)
+                .max(Long::compareTo)
+                .map(id -> id + 1)
+                .orElse(1L);
     }
 }

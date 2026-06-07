@@ -83,6 +83,14 @@
               <el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" />
             </el-select>
           </el-form-item>
+          <el-form-item label="员工状态">
+            <el-select v-model="employeeForm.employmentStatus">
+              <el-option label="待入职" :value="0" />
+              <el-option label="已入职" :value="1" />
+              <el-option label="停用" :value="2" />
+              <el-option label="已离职" :value="3" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="银行卡号"><el-input v-model="employeeForm.bankAccountNo" /></el-form-item>
           <el-form-item label="开户银行"><el-input v-model="employeeForm.bankName" /></el-form-item>
         </el-form>
@@ -146,7 +154,7 @@ const departmentDetail = ref(null)
 const employeeDetail = ref(null)
 
 const departmentForm = reactive({ departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '' })
-const employeeForm = reactive({ fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, bankAccountNo: '', bankName: '' })
+const employeeForm = reactive({ fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' })
 const bindingForm = reactive({ moduleCode: 'RECRUITMENT', businessType: 'EMPLOYEE_SYNC', employeeId: null, departmentId: null, externalRef: '', bindingStatus: 'ACTIVE', payload: '{"source":"frontend-demo"}' })
 
 const metrics = computed(() => [
