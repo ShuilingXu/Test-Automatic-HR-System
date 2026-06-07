@@ -5,6 +5,9 @@ import com.autohr.modules.auth.dto.CandidateRegisterRequest;
 import com.autohr.modules.auth.dto.LoginRequest;
 import com.autohr.modules.auth.dto.LoginResponse;
 import com.autohr.modules.auth.dto.SessionUserVO;
+import com.autohr.modules.auth.dto.UserAdminUpdateRequest;
+
+import java.util.List;
 
 public interface AuthService {
     LoginResponse login(LoginRequest request);
@@ -12,4 +15,6 @@ public interface AuthService {
     SessionUserVO getCurrentUser();
     SessionUserVO updateCandidateProfile(Long userId, CandidateProfileUpdateRequest request);
     SessionUserVO loadUserByUsername(String username);
+    List<SessionUserVO> listUsers(String roleCode, Integer status, String keyword);
+    SessionUserVO updateUserByAdmin(Long id, UserAdminUpdateRequest request);
 }

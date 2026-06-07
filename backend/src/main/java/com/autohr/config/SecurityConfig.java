@@ -29,6 +29,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/login", "/api/auth/register").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/recruitment/jobs/**", "/api/recruitment/resumes/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/recruitment/candidates/**").hasRole("INTERVIEWEE")
+                        .requestMatchers("/api/auth/admin/**").hasRole("IT_ADMIN")
                         .requestMatchers("/api/hr/**").hasAnyRole("IT_ADMIN", "HR_ADMIN", "HR_USER")
                         .requestMatchers("/api/recruitment/admin/**").hasAnyRole("IT_ADMIN", "HR_ADMIN")
                         .requestMatchers("/api/interview/admin/**").hasAnyRole("IT_ADMIN", "HR_ADMIN")

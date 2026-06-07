@@ -5,12 +5,10 @@
         <div>
           <p class="page-eyebrow">Recruitment Home</p>
           <h1 class="page-title">招聘信息首页</h1>
-          <p class="page-subtitle">统一展示开放招聘岗位。管理员入口在 `/admin`，面试者登录后进入 `/user`。</p>
+          <p class="page-subtitle">统一展示开放招聘岗位。请通过统一登录/注册进入管理员门户或面试者门户。</p>
         </div>
         <div class="link-row">
-          <RouterLink class="link-chip" to="/login">统一登录</RouterLink>
-          <RouterLink class="link-chip" to="/admin">管理员门户</RouterLink>
-          <RouterLink class="link-chip" to="/user">面试者门户</RouterLink>
+          <RouterLink class="link-chip" to="/login">登录 / 注册</RouterLink>
         </div>
       </div>
       <div class="page-grid">

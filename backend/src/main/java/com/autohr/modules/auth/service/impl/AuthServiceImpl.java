@@ -7,6 +7,7 @@ import com.autohr.modules.auth.dto.CandidateRegisterRequest;
 import com.autohr.modules.auth.dto.LoginRequest;
 import com.autohr.modules.auth.dto.LoginResponse;
 import com.autohr.modules.auth.dto.SessionUserVO;
+import com.autohr.modules.auth.dto.UserAdminUpdateRequest;
 import com.autohr.modules.auth.entity.SysUser;
 import com.autohr.modules.auth.mapper.SysUserMapper;
 import com.autohr.modules.auth.service.AuthService;
@@ -88,6 +89,41 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public SessionUserVO loadUserByUsername(String username) {
         return toSessionUser(requireUserByUsername(username));
+    }
+
+    @Override
+    public List<SessionUserVO> listUsers(String roleCode, Integer status, String keyword) {
+        return sysUserMapper.selectList(new LambdaQueryWrapper<SysUser>()
+                .eq(StrUtil.isNotBlank(roleCode), SysUser::getRoleCode, roleCode)
+                .eq(status != null, SysUser::getStatus, status)
+                .and(StrUtil.isNotBlank(keyword), q -> q.like(SysUser::getUsername, keyword)
+                        .or().like(SysUser::getDisplayName, keyword)
+                        .or().like(SysUser::getMobilePhone, keyword))
+                .orderByAsc(SysUser::getId))
+                .stream().map(this::toSessionUser).toList();
+    }
+
+    @Override
+    @Transactional
+    public SessionUserVO updateUserByAdmin(Long id, UserAdminUpdateRequest request) {
+        SysUser user = requireUser(id);
+        if (StrUtil.isNotBlank(request.getRoleCode())) {
+            user.setRoleCode(request.getRoleCode());
+        }
+        if (request.getStatus() != null) {
+            user.setStatus(request.getStatus());
+        }
+        if (request.getDisplayName() != null) {
+            user.setDisplayName(request.getDisplayName());
+        }
+        if (request.getMobilePhone() != null) {
+            user.setMobilePhone(request.getMobilePhone());
+        }
+        if (request.getEmail() != null) {
+            user.setEmail(request.getEmail());
+        }
+        sysUserMapper.updateById(user);
+        return toSessionUser(user);
     }
 
     private void ensureUniqueUsername(String username) {
