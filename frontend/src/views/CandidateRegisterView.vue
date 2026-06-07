@@ -2,27 +2,50 @@
   <div class="page-shell">
     <section class="page-card">
       <p class="page-eyebrow">Candidate</p>
-      <h1 class="page-title">测试者报名页面原型</h1>
-      <p class="page-subtitle">用于后续接入招聘发布、候选人资料采集和面试批次分配。</p>
+      <h1 class="page-title">测试者报名</h1>
+      <p class="page-subtitle">选择开放招聘岗位，填写报名表并上传简历。提交成功后可继续进入线上面试入口。</p>
       <div class="page-grid">
         <el-form :model="form" label-position="top" class="surface">
           <h3>报名信息</h3>
-          <el-form-item label="姓名"><el-input v-model="form.name" /></el-form-item>
-          <el-form-item label="手机号"><el-input v-model="form.mobile" /></el-form-item>
-          <el-form-item label="应聘岗位"><el-input v-model="form.position" /></el-form-item>
+          <el-form-item label="应聘岗位">
+            <el-select v-model="form.jobId" placeholder="选择开放岗位">
+              <el-option v-for="item in jobs" :key="item.id" :label="`${item.jobTitle} / ${item.departmentName}`" :value="item.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="姓名"><el-input v-model="form.fullName" /></el-form-item>
+          <el-form-item label="手机号"><el-input v-model="form.mobilePhone" /></el-form-item>
+          <el-form-item label="邮箱"><el-input v-model="form.email" /></el-form-item>
+          <el-form-item label="身份证号"><el-input v-model="form.idCardNo" /></el-form-item>
           <el-form-item label="专业"><el-input v-model="form.major" /></el-form-item>
-          <el-form-item label="简历链接"><el-input v-model="form.resumeUrl" /></el-form-item>
-          <el-button type="primary" @click="submit">提交报名预留</el-button>
+          <el-form-item label="学历"><el-input v-model="form.educationLevel" /></el-form-item>
+          <el-form-item label="毕业院校"><el-input v-model="form.graduationSchool" /></el-form-item>
+          <el-form-item label="工作年限"><el-input-number v-model="form.yearsOfExperience" :min="0" /></el-form-item>
+          <el-form-item label="期望薪资"><el-input v-model="form.expectedSalary" /></el-form-item>
+          <el-form-item label="自我介绍"><el-input v-model="form.selfIntroduction" type="textarea" :rows="4" /></el-form-item>
+          <el-upload :auto-upload="false" :limit="1" :on-change="pickResume" :on-remove="removeResume">
+            <el-button>选择简历文件</el-button>
+            <template #tip><div class="upload-tip">支持 PDF、Word、图片等常见简历文件，后端当前限制 20MB。</div></template>
+          </el-upload>
+          <div class="link-row">
+            <el-button type="primary" @click="submit">提交报名并上传简历</el-button>
+            <RouterLink class="link-chip" to="/candidate/interview">进入线上面试</RouterLink>
+          </div>
         </el-form>
         <div class="surface">
-          <h3>报名流程预留</h3>
-          <ol>
-            <li>候选人提交报名信息。</li>
-            <li>招聘系统生成候选人记录。</li>
-            <li>面试系统分配线上面试链接。</li>
-            <li>入职后通过 HR 绑定表关联员工档案。</li>
-          </ol>
-          <RouterLink class="link-chip" to="/candidate/interview">进入线上面试</RouterLink>
+          <h3>开放岗位</h3>
+          <div class="job-list">
+            <button v-for="item in jobs" :key="item.id" @click="form.jobId = item.id">
+              <strong>{{ item.jobTitle }}</strong>
+              <span>{{ item.departmentName }} / {{ item.workLocation || '地点待定' }}</span>
+              <small>{{ item.salaryRange || '薪资面议' }}</small>
+            </button>
+          </div>
+          <div v-if="submittedCandidate" class="result-box">
+            <h3>报名成功</h3>
+            <p>报名编号：{{ submittedCandidate.id }}</p>
+            <p>应聘岗位：{{ submittedCandidate.jobTitle }}</p>
+            <p>简历：{{ submittedCandidate.resumeFileName || '未上传' }}</p>
+          </div>
         </div>
       </div>
     </section>
@@ -30,10 +53,55 @@
 </template>
 
 <script setup>
-import { reactive } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { recruitmentApi } from '../services/api'
 
-const form = reactive({ name: '', mobile: '', position: '', major: '', resumeUrl: '' })
-function submit() { ElMessage.success('报名接口已预留，当前为前端原型') }
+const jobs = ref([])
+const resumeFile = ref(null)
+const submittedCandidate = ref(null)
+const form = reactive({
+  jobId: null,
+  fullName: '',
+  mobilePhone: '',
+  email: '',
+  idCardNo: '',
+  major: '',
+  educationLevel: '',
+  graduationSchool: '',
+  yearsOfExperience: 0,
+  expectedSalary: '',
+  selfIntroduction: '',
+})
+
+function fail(error) { ElMessage.error(error.message || '操作失败') }
+function pickResume(uploadFile) { resumeFile.value = uploadFile.raw }
+function removeResume() { resumeFile.value = null }
+async function loadJobs() { try { jobs.value = (await recruitmentApi.listOpenJobs()).data } catch (error) { fail(error) } }
+async function submit() {
+  try {
+    const applyResponse = await recruitmentApi.apply({ ...form })
+    let candidate = applyResponse.data
+    if (resumeFile.value) {
+      const resumeResponse = await recruitmentApi.uploadResume(candidate.id, resumeFile.value)
+      candidate = { ...candidate, resumeFileId: resumeResponse.data.id, resumeFileName: resumeResponse.data.originalFileName }
+    }
+    submittedCandidate.value = candidate
+    ElMessage.success('报名已提交')
+  } catch (error) {
+    fail(error)
+  }
+}
+
+onMounted(loadJobs)
 </script>
+
+<style scoped>
+.job-list { display: grid; gap: 12px; }
+.job-list button { border: 0; border-radius: 16px; padding: 14px; text-align: left; background: rgba(255, 255, 255, 0.82); cursor: pointer; }
+.job-list strong, .job-list span, .job-list small { display: block; }
+.job-list span { margin: 6px 0; color: #61727d; }
+.upload-tip { color: #6d7a83; margin-top: 8px; }
+.result-box { margin-top: 20px; padding: 16px; border-radius: 18px; background: #102532; color: #f4efe7; }
+</style>

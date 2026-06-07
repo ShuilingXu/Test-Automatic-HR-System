@@ -128,6 +128,48 @@
           <el-table-column prop="departmentName" label="部门" />
         </el-table>
       </section>
+
+      <section v-if="activeTab === 'recruitment'" class="page-card">
+        <div class="topline">
+          <div>
+            <p class="page-eyebrow">Recruitment</p>
+            <h2>招聘岗位维护</h2>
+          </div>
+          <el-button @click="loadRecruitment">刷新</el-button>
+        </div>
+        <el-form :model="jobForm" label-position="top" class="form-grid">
+          <el-form-item label="岗位名称"><el-input v-model="jobForm.jobTitle" /></el-form-item>
+          <el-form-item label="岗位编码"><el-input v-model="jobForm.jobCode" /></el-form-item>
+          <el-form-item label="招聘部门"><el-input v-model="jobForm.departmentName" /></el-form-item>
+          <el-form-item label="工作地点"><el-input v-model="jobForm.workLocation" /></el-form-item>
+          <el-form-item label="岗位类型"><el-input v-model="jobForm.jobType" /></el-form-item>
+          <el-form-item label="招聘人数"><el-input-number v-model="jobForm.headcount" :min="1" /></el-form-item>
+          <el-form-item label="薪资范围"><el-input v-model="jobForm.salaryRange" /></el-form-item>
+          <el-form-item label="状态"><el-select v-model="jobForm.status"><el-option label="开放" :value="1" /><el-option label="关闭" :value="0" /></el-select></el-form-item>
+          <el-form-item label="岗位职责" class="wide"><el-input v-model="jobForm.responsibilities" type="textarea" :rows="3" /></el-form-item>
+          <el-form-item label="任职要求" class="wide"><el-input v-model="jobForm.requirements" type="textarea" :rows="3" /></el-form-item>
+        </el-form>
+        <div class="action-row">
+          <el-button type="primary" @click="saveJob">保存岗位</el-button>
+          <el-button @click="resetJobForm">清空</el-button>
+        </div>
+        <el-table :data="jobs" stripe class="data-table">
+          <el-table-column prop="jobTitle" label="岗位" min-width="140" />
+          <el-table-column prop="departmentName" label="部门" min-width="120" />
+          <el-table-column prop="headcount" label="人数" width="80" />
+          <el-table-column prop="status" label="状态" width="90"><template #default="scope">{{ scope.row.status === 1 ? '开放' : '关闭' }}</template></el-table-column>
+          <el-table-column label="操作" width="100"><template #default="scope"><el-button text @click="editJob(scope.row)">编辑</el-button></template></el-table-column>
+        </el-table>
+        <h3 class="sub-title">报名记录</h3>
+        <el-table :data="candidates" stripe class="data-table">
+          <el-table-column prop="fullName" label="姓名" min-width="100" />
+          <el-table-column prop="jobTitle" label="岗位" min-width="140" />
+          <el-table-column prop="mobilePhone" label="手机号" min-width="120" />
+          <el-table-column prop="major" label="专业" min-width="120" />
+          <el-table-column prop="resumeFileName" label="简历" min-width="140" />
+          <el-table-column prop="applicationStatus" label="状态" width="110" />
+        </el-table>
+      </section>
     </main>
   </div>
 </template>
@@ -136,13 +178,14 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { hrApi } from '../services/api'
+import { hrApi, recruitmentApi } from '../services/api'
 
 const tabs = [
   { key: 'dashboard', label: '总览' },
   { key: 'departments', label: '部门' },
   { key: 'employees', label: '员工' },
   { key: 'bindings', label: '挂接' },
+  { key: 'recruitment', label: '招聘' },
 ]
 
 const activeTab = ref('dashboard')
@@ -150,12 +193,15 @@ const dashboard = reactive({ departmentCount: 0, employeeCount: 0, activeEmploye
 const departments = ref([])
 const employees = ref([])
 const bindings = ref([])
+const jobs = ref([])
+const candidates = ref([])
 const departmentDetail = ref(null)
 const employeeDetail = ref(null)
 
 const departmentForm = reactive({ departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '' })
 const employeeForm = reactive({ fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' })
 const bindingForm = reactive({ moduleCode: 'RECRUITMENT', businessType: 'EMPLOYEE_SYNC', employeeId: null, departmentId: null, externalRef: '', bindingStatus: 'ACTIVE', payload: '{"source":"frontend-demo"}' })
+const jobForm = reactive({ id: null, jobTitle: '', jobCode: '', departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 })
 
 const metrics = computed(() => [
   { label: '部门', value: dashboard.departmentCount },
@@ -171,12 +217,16 @@ async function loadDashboard() { try { Object.assign(dashboard, (await hrApi.get
 async function loadDepartments() { try { departments.value = (await hrApi.listDepartments()).data } catch (error) { fail(error) } }
 async function loadEmployees() { try { employees.value = (await hrApi.listEmployees()).data } catch (error) { fail(error) } }
 async function loadBindings() { try { bindings.value = (await hrApi.listBindings()).data } catch (error) { fail(error) } }
-async function loadAll() { await Promise.all([loadDashboard(), loadDepartments(), loadEmployees(), loadBindings()]) }
+async function loadRecruitment() { try { jobs.value = (await recruitmentApi.listAdminJobs()).data; candidates.value = (await recruitmentApi.listCandidates()).data } catch (error) { fail(error) } }
+async function loadAll() { await Promise.all([loadDashboard(), loadDepartments(), loadEmployees(), loadBindings(), loadRecruitment()]) }
 async function loadDepartmentDetail(id) { try { departmentDetail.value = (await hrApi.getDepartmentDetail(id)).data } catch (error) { fail(error) } }
 async function loadEmployeeDetail(id) { try { employeeDetail.value = (await hrApi.getEmployeeDetail(id)).data } catch (error) { fail(error) } }
 async function saveDepartment() { try { await hrApi.saveDepartment({ ...departmentForm }); ElMessage.success('部门已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveEmployee() { try { await hrApi.saveEmployee({ ...employeeForm }); ElMessage.success('员工已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveBinding() { try { await hrApi.saveBinding({ ...bindingForm }); ElMessage.success('挂接已保存'); await loadAll() } catch (error) { fail(error) } }
+function resetJobForm() { Object.assign(jobForm, { id: null, jobTitle: '', jobCode: '', departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 }) }
+function editJob(row) { Object.assign(jobForm, row) }
+async function saveJob() { try { await recruitmentApi.saveJob({ ...jobForm }); ElMessage.success('招聘岗位已保存'); resetJobForm(); await loadRecruitment() } catch (error) { fail(error) } }
 
 onMounted(loadAll)
 </script>
@@ -200,6 +250,8 @@ onMounted(loadAll)
 .wide { grid-column: 1 / -1; }
 .list-block { display: grid; gap: 10px; margin-top: 18px; }
 .list-block button { border: 0; border-radius: 16px; padding: 14px; background: #f8f5ef; display: flex; justify-content: space-between; cursor: pointer; }
+.action-row { display: flex; gap: 12px; margin-top: 4px; }
+.sub-title { margin: 24px 0 0; }
 .data-table { margin-top: 18px; }
 pre { white-space: pre-wrap; background: #102532; color: #f4efe7; border-radius: 18px; padding: 16px; max-height: 300px; overflow: auto; }
 @media (max-width: 980px) { .console-shell { grid-template-columns: 1fr; } .metric-grid, .form-grid { grid-template-columns: 1fr; } }

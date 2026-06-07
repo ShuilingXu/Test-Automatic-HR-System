@@ -54,6 +54,34 @@ export const hrApi = {
   },
 }
 
+export const recruitmentApi = {
+  saveJob(payload) {
+    return request.post('/recruitment/admin/jobs', payload)
+  },
+  listAdminJobs(params) {
+    return request.get('/recruitment/admin/jobs', { params })
+  },
+  getAdminJob(id) {
+    return request.get(`/recruitment/admin/jobs/${id}`)
+  },
+  listCandidates(params) {
+    return request.get('/recruitment/admin/candidates', { params })
+  },
+  listOpenJobs(params) {
+    return request.get('/recruitment/jobs', { params })
+  },
+  apply(payload) {
+    return request.post('/recruitment/candidates', payload)
+  },
+  uploadResume(candidateId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request.post(`/recruitment/candidates/${candidateId}/resume`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+}
+
 export const authApi = {
   login(payload) {
     return Promise.resolve({ success: true, message: '预留登录接口', data: payload })
