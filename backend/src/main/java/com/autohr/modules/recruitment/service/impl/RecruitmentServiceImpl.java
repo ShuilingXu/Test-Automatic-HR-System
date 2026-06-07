@@ -2,6 +2,8 @@ package com.autohr.modules.recruitment.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.autohr.common.exception.BusinessException;
+import com.autohr.modules.auth.entity.SysUser;
+import com.autohr.modules.auth.mapper.SysUserMapper;
 import com.autohr.modules.recruitment.dto.CandidateApplyRequest;
 import com.autohr.modules.recruitment.dto.CandidateVO;
 import com.autohr.modules.recruitment.dto.JobSaveRequest;
@@ -44,6 +46,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     private final RecruitmentJobMapper jobMapper;
     private final RecruitmentCandidateMapper candidateMapper;
     private final RecruitmentResumeFileMapper resumeFileMapper;
+    private final SysUserMapper sysUserMapper;
 
     @Override
     @Transactional
@@ -93,12 +96,17 @@ public class RecruitmentServiceImpl implements RecruitmentService {
 
     @Override
     @Transactional
-    public CandidateVO apply(CandidateApplyRequest request) {
+    public CandidateVO apply(CandidateApplyRequest request, String intervieweeUsername) {
         requireJob(request.getJobId());
+        SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, intervieweeUsername).last("LIMIT 1"));
+        if (user == null) {
+            throw new BusinessException("面试者用户不存在");
+        }
         RecruitmentCandidate candidate = new RecruitmentCandidate();
         BeanUtils.copyProperties(request, candidate);
         candidate.setId(nextId(candidateMapper.selectList(null).stream().map(RecruitmentCandidate::getId).toList()));
         candidate.setApplicationStatus("SUBMITTED");
+        candidate.setIntervieweeUserId(user.getId());
         candidateMapper.insert(candidate);
         return toCandidateVO(requireCandidate(candidate.getId()), loadJobMap(), loadResumeMap());
     }
@@ -120,6 +128,14 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     @Override
     public CandidateVO getCandidate(Long id) {
         return toCandidateVO(requireCandidate(id), loadJobMap(), loadResumeMap());
+    }
+
+    @Override
+    @Transactional
+    public void deleteCandidate(Long id) {
+        RecruitmentCandidate candidate = requireCandidate(id);
+        resumeFileMapper.delete(new LambdaQueryWrapper<RecruitmentResumeFile>().eq(RecruitmentResumeFile::getCandidateId, id));
+        candidateMapper.deleteById(id);
     }
 
     @Override

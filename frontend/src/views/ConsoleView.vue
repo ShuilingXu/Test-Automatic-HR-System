@@ -132,8 +132,8 @@
           <el-table :data="jobs" stripe class="data-table" @row-click="editJob"><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="departmentName" label="部门" min-width="120" /><el-table-column prop="headcount" label="人数" width="80" /><el-table-column prop="status" label="状态" width="90"><template #default="scope">{{ scope.row.status === 1 ? '开放' : '关闭' }}</template></el-table-column><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteJob(scope.row.id)">删除</el-button></template></el-table-column></el-table>
         </template>
         <template v-if="recruitmentMode === 'candidates'">
-          <el-table :data="candidates" stripe class="data-table" @row-click="selectCandidate"><el-table-column prop="fullName" label="报名者姓名" min-width="120" /><el-table-column prop="mobilePhone" label="联系电话" min-width="130" /><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column label="简历" min-width="150"><template #default="scope"><a v-if="scope.row.resumeFileId" class="resume-link" :href="resumeUrl(scope.row.resumeFileId)" target="_blank" @click.stop>{{ scope.row.resumeFileName || '查看简历' }}</a><span v-else>未上传</span></template></el-table-column><el-table-column prop="applicationStatus" label="状态" width="110" /></el-table>
-          <div v-if="selectedCandidate" class="candidate-detail"><h3>候选人信息</h3><div class="detail-grid"><div><span>姓名</span><strong>{{ selectedCandidate.fullName }}</strong></div><div><span>联系电话</span><strong>{{ selectedCandidate.mobilePhone }}</strong></div><div><span>应聘岗位</span><strong>{{ selectedCandidate.jobTitle }}</strong></div><div><span>专业</span><strong>{{ selectedCandidate.major }}</strong></div><div><span>邮箱</span><strong>{{ selectedCandidate.email || '-' }}</strong></div><div><span>身份证号</span><strong>{{ selectedCandidate.idCardNo || '-' }}</strong></div><div><span>学历</span><strong>{{ selectedCandidate.educationLevel || '-' }}</strong></div><div><span>毕业院校</span><strong>{{ selectedCandidate.graduationSchool || '-' }}</strong></div><div><span>工作年限</span><strong>{{ selectedCandidate.yearsOfExperience ?? '-' }}</strong></div><div><span>期望薪资</span><strong>{{ selectedCandidate.expectedSalary || '-' }}</strong></div></div><div class="intro-box"><span>个人简介</span><p>{{ selectedCandidate.selfIntroduction || '未填写' }}</p></div><a v-if="selectedCandidate.resumeFileId" class="resume-link" :href="resumeUrl(selectedCandidate.resumeFileId)" target="_blank">打开 PDF / 简历文件</a></div>
+          <el-table :data="candidates" stripe class="data-table" @row-click="selectCandidate"><el-table-column prop="fullName" label="报名者姓名" min-width="120" /><el-table-column prop="mobilePhone" label="联系电话" min-width="130" /><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="interviewStageStatus" label="面试状态" min-width="120" /><el-table-column prop="interviewProcessId" label="流程流水号" min-width="120" /><el-table-column label="简历" min-width="150"><template #default="scope"><a v-if="scope.row.resumeFileId" class="resume-link" :href="resumeUrl(scope.row.resumeFileId)" target="_blank" @click.stop>{{ scope.row.resumeFileName || '查看简历' }}</a><span v-else>未上传</span></template></el-table-column><el-table-column label="操作" width="220"><template #default="scope"><el-button text @click.stop="startCandidateInterview(scope.row)">发起面试</el-button><el-button text type="danger" @click.stop="deleteCandidate(scope.row.id)">删除候选人</el-button></template></el-table-column><el-table-column prop="applicationStatus" label="状态" width="110" /></el-table>
+          <div v-if="selectedCandidate" class="candidate-detail"><h3>候选人信息</h3><div class="detail-grid"><div><span>姓名</span><strong>{{ selectedCandidate.fullName }}</strong></div><div><span>联系电话</span><strong>{{ selectedCandidate.mobilePhone }}</strong></div><div><span>应聘岗位</span><strong>{{ selectedCandidate.jobTitle }}</strong></div><div><span>面试状态</span><strong>{{ selectedCandidate.interviewStageStatus || '简历待查' }}</strong></div><div><span>流程流水号</span><strong>{{ selectedCandidate.interviewProcessId || '-' }}</strong></div><div><span>面试者用户ID</span><strong>{{ selectedCandidate.intervieweeUserId || '-' }}</strong></div><div><span>专业</span><strong>{{ selectedCandidate.major }}</strong></div><div><span>邮箱</span><strong>{{ selectedCandidate.email || '-' }}</strong></div><div><span>身份证号</span><strong>{{ selectedCandidate.idCardNo || '-' }}</strong></div><div><span>学历</span><strong>{{ selectedCandidate.educationLevel || '-' }}</strong></div><div><span>毕业院校</span><strong>{{ selectedCandidate.graduationSchool || '-' }}</strong></div><div><span>工作年限</span><strong>{{ selectedCandidate.yearsOfExperience ?? '-' }}</strong></div><div><span>期望薪资</span><strong>{{ selectedCandidate.expectedSalary || '-' }}</strong></div></div><div class="intro-box"><span>个人简介</span><p>{{ selectedCandidate.selfIntroduction || '未填写' }}</p></div><a v-if="selectedCandidate.resumeFileId" class="resume-link" :href="resumeUrl(selectedCandidate.resumeFileId)" target="_blank">打开 PDF / 简历文件</a></div>
         </template>
       </section>
     </main>
@@ -217,6 +217,29 @@ function showCreateEmployee() { resetEmployeeForm(); employeeMode.value = 'creat
 function editEmployee(row) { Object.assign(employeeForm, row); employeeMode.value = 'edit' }
 function selectCandidate(row) { selectedCandidate.value = row }
 function resumeUrl(id) { return `/api/recruitment/resumes/${id}` }
+async function startCandidateInterview(candidate) {
+  try {
+    const userList = (await authApi.listUsers({ roleCode: 'INTERVIEWEE', keyword: candidate.mobilePhone })).data
+    const interviewee = userList.find((item) => item.mobilePhone === candidate.mobilePhone)
+    if (!interviewee) {
+      ElMessage.warning('未找到对应面试者账号，请先注册并完善资料')
+      return
+    }
+    await interviewApi.startProcess({ recruitmentCandidateId: candidate.id, intervieweeUserId: interviewee.id, jobId: candidate.jobId, aiThresholdScore: 7 })
+    ElMessage.success('面试流程已发起')
+    await loadRecruitment()
+  } catch (error) { fail(error) }
+}
+async function deleteCandidate(id) {
+  try {
+    await recruitmentApi.deleteCandidate(id)
+    ElMessage.success('候选人已删除')
+    if (selectedCandidate.value?.id === id) {
+      selectedCandidate.value = null
+    }
+    await loadRecruitment()
+  } catch (error) { fail(error) }
+}
 function editUser(row) { Object.assign(userForm, row) }
 async function saveUser() { try { await authApi.updateUser(userForm.id, { roleCode: userForm.roleCode, status: userForm.status, displayName: userForm.displayName, mobilePhone: userForm.mobilePhone, email: userForm.email }); ElMessage.success('用户已保存'); await loadUsers() } catch (error) { fail(error) } }
 async function logout() { try { await authApi.logout(); router.push('/login') } catch (error) { fail(error) } }

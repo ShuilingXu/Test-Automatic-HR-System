@@ -20,11 +20,13 @@ public interface RecruitmentService {
 
     void deleteJob(Long id);
 
-    CandidateVO apply(CandidateApplyRequest request);
+    CandidateVO apply(CandidateApplyRequest request, String intervieweeUsername);
 
     List<CandidateVO> listCandidates(Long jobId, String status, String keyword);
 
     CandidateVO getCandidate(Long id);
+
+    void deleteCandidate(Long id);
 
     ResumeFileVO uploadResume(Long candidateId, MultipartFile file);
 

@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS recruitment_candidate (
     self_introduction VARCHAR(2000),
     application_status VARCHAR(32) NOT NULL DEFAULT 'SUBMITTED',
     interview_stage_status VARCHAR(64) NOT NULL DEFAULT '简历待查',
+    interviewee_user_id INTEGER,
     interview_process_id INTEGER,
     resume_file_id INTEGER,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

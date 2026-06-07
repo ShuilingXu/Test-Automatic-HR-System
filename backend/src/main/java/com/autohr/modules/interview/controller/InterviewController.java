@@ -84,6 +84,11 @@ public class InterviewController {
         return ApiResponse.success(interviewService.listProcesses(overallStatus, stageStatus, keyword));
     }
 
+    @GetMapping("/interviewee/process/{processId}")
+    public ApiResponse<InterviewVO> getIntervieweeProcess(@PathVariable Long processId) {
+        return ApiResponse.success(interviewService.getProcess(processId));
+    }
+
     @PostMapping("/interviewee/ai-answer")
     public ApiResponse<InterviewVO> submitAiAnswer(@Valid @RequestBody AiAnswerRequest request) {
         return ApiResponse.success(interviewService.submitAiAnswer(request));
@@ -91,6 +96,11 @@ public class InterviewController {
 
     @GetMapping("/hr/ai-records")
     public ApiResponse<List<InterviewVO>> listAiRecords(@RequestParam Long processId) {
+        return ApiResponse.success(interviewService.listAiRecords(processId));
+    }
+
+    @GetMapping("/interviewee/ai-records")
+    public ApiResponse<List<InterviewVO>> listIntervieweeAiRecords(@RequestParam Long processId) {
         return ApiResponse.success(interviewService.listAiRecords(processId));
     }
 
@@ -135,5 +145,11 @@ public class InterviewController {
     public ApiResponse<InterviewVO> approveOnsite(@PathVariable Long processId,
                                                   @Valid @RequestBody InterviewDecisionRequest request) {
         return ApiResponse.success(interviewService.decideOnsite(processId, request));
+    }
+
+    @PostMapping("/hr/terminate/{processId}")
+    public ApiResponse<InterviewVO> terminate(@PathVariable Long processId,
+                                              @Valid @RequestBody InterviewDecisionRequest request) {
+        return ApiResponse.success(interviewService.terminateProcess(processId, request));
     }
 }

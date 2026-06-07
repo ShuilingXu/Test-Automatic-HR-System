@@ -15,6 +15,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -72,6 +73,12 @@ public class RecruitmentController {
         return ApiResponse.success(recruitmentService.getCandidate(id));
     }
 
+    @DeleteMapping("/admin/candidates/{id}")
+    public ApiResponse<Void> deleteCandidate(@PathVariable Long id) {
+        recruitmentService.deleteCandidate(id);
+        return ApiResponse.success("deleted", null);
+    }
+
     @GetMapping("/jobs")
     public ApiResponse<List<JobVO>> listOpenJobs(@RequestParam(required = false) String keyword) {
         return ApiResponse.success(recruitmentService.listJobs(1, keyword));
@@ -83,8 +90,9 @@ public class RecruitmentController {
     }
 
     @PostMapping("/candidates")
-    public ApiResponse<CandidateVO> apply(@Valid @RequestBody CandidateApplyRequest request) {
-        return ApiResponse.success(recruitmentService.apply(request));
+    public ApiResponse<CandidateVO> apply(Authentication authentication,
+                                          @Valid @RequestBody CandidateApplyRequest request) {
+        return ApiResponse.success(recruitmentService.apply(request, authentication.getName()));
     }
 
     @PostMapping("/candidates/{candidateId}/resume")

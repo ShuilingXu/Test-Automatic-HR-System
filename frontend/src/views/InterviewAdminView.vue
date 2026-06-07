@@ -82,14 +82,16 @@
       <section v-if="activeTab === 'process'" class="surface">
         <h3>候选人面试流程</h3>
         <el-form :model="processForm" label-position="top" class="form-grid">
-          <el-form-item label="招聘候选人"><el-select v-model="processForm.recruitmentCandidateId"><el-option v-for="item in recruitmentCandidates" :key="item.id" :label="`${item.fullName} / ${item.mobilePhone}`" :value="item.id" /></el-select></el-form-item>
-          <el-form-item label="面试者用户ID"><el-input-number v-model="processForm.intervieweeUserId" :min="1" /></el-form-item>
+          <el-form-item label="招聘候选人"><el-select v-model="processForm.recruitmentCandidateId" @change="syncIntervieweeByCandidate"><el-option v-for="item in recruitmentCandidates" :key="item.id" :label="`${item.fullName} / ${item.mobilePhone}`" :value="item.id" /></el-select></el-form-item>
+          <el-form-item label="面试者用户ID"><el-input v-model="processForm.intervieweeUserId" disabled /></el-form-item>
           <el-form-item label="岗位"><el-select v-model="processForm.jobId"><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
           <el-form-item label="AI通过阈值"><el-input-number v-model="processForm.aiThresholdScore" :min="1" :max="10" /></el-form-item>
         </el-form>
         <div class="link-row"><el-button type="primary" @click="startProcess">发起面试流程</el-button></div>
         <el-table :data="processes" stripe class="data-table" @row-click="selectProcess">
+          <el-table-column prop="id" label="流程流水号" width="110" />
           <el-table-column prop="recruitmentCandidateId" label="候选人ID" />
+          <el-table-column prop="intervieweeUserId" label="面试者用户ID" width="130" />
           <el-table-column prop="currentStage" label="当前轮次" />
           <el-table-column prop="processStatusView" label="状态展示" />
           <el-table-column prop="aiAverageScore" label="AI均分" />
@@ -97,6 +99,11 @@
         </el-table>
         <div v-if="selectedProcess" class="surface inner-surface detail-surface">
           <h3>流程审批</h3>
+          <p class="serial-line">流程流水号：{{ selectedProcess.id }}</p>
+          <div v-if="selectedProcess.videoJoinLink || selectedProcess.videoSerialNo" class="serial-line">
+            <span v-if="selectedProcess.videoSerialNo">视频流水号：{{ selectedProcess.videoSerialNo }}</span>
+            <a v-if="selectedProcess.videoJoinLink" :href="selectedProcess.videoJoinLink" target="_blank" class="video-link">打开面试链接</a>
+          </div>
           <div class="link-row">
             <el-button @click="approveAi(1)">AI通过进视频面</el-button>
             <el-button @click="approveAi(0)">AI拒绝</el-button>
@@ -105,6 +112,7 @@
             <el-button @click="approveVideo(0)">视频面拒绝</el-button>
             <el-button @click="approveOnsite(1)">线下面通过</el-button>
             <el-button @click="approveOnsite(0)">线下面拒绝</el-button>
+            <el-button type="danger" @click="terminateProcess">终止流程</el-button>
           </div>
           <el-table :data="aiRecords" stripe class="data-table">
             <el-table-column prop="sequenceNo" label="题号" width="70" />
@@ -142,7 +150,7 @@ const kbForm = reactive({ id: null, knowledgeBaseName: '', techCategory: '', job
 const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '', knowledgeContent: '', status: 1 })
 const weightForm = reactive({ id: null, jobId: null, knowledgeBaseId: null, knowledgePoint: '', weight: 1 })
 const llmForm = reactive({ id: null, configName: '', modelRole: 'INTERVIEWER', baseUrl: '', apiKeyMasked: '', modelName: '', promptTemplate: '', status: 1 })
-const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: null, jobId: null, aiThresholdScore: 7 })
+const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 7 })
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
 async function loadAll() {
@@ -170,12 +178,39 @@ async function saveKnowledgeBase() { try { await interviewApi.saveKnowledgeBase(
 async function saveKnowledgeItem() { try { await interviewApi.saveKnowledgeItem({ ...itemForm }); ElMessage.success('知识点已保存'); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
 async function saveWeight() { try { await interviewApi.saveJobKnowledgeWeight({ ...weightForm }); ElMessage.success('权重已保存'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
 async function saveLlmConfig() { try { await interviewApi.saveLlmConfig({ ...llmForm }); ElMessage.success('LLM配置已保存'); await loadAll() } catch (error) { fail(error) } }
-async function startProcess() { try { await interviewApi.startProcess({ ...processForm }); ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
+async function syncIntervieweeByCandidate(candidateId) {
+  const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId)
+  if (!candidate) {
+    processForm.intervieweeUserId = ''
+    return
+  }
+  processForm.intervieweeUserId = candidate.intervieweeUserId ? String(candidate.intervieweeUserId) : ''
+}
+async function startProcess() {
+  try {
+    if (!processForm.intervieweeUserId) {
+      ElMessage.warning('未匹配到面试者账号，请先注册面试者并确保手机号一致')
+      return
+    }
+    const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) })
+    selectedProcess.value = response.data
+    ElMessage.success('面试流程已发起')
+    await loadAll()
+  } catch (error) { fail(error) }
+}
 async function selectProcess(row) { selectedProcess.value = row; aiRecords.value = (await interviewApi.listAiRecords({ processId: row.id })).data }
 async function approveAi(approved) { try { await interviewApi.approveAi(selectedProcess.value.id, { approved, approverName: 'HR审批人' }); ElMessage.success('AI审批完成'); await loadAll() } catch (error) { fail(error) } }
-async function createVideo() { try { await interviewApi.createVideoSession(selectedProcess.value.id, { approverName: 'HR审批人' }); ElMessage.success('视频面试链接已生成'); await loadAll() } catch (error) { fail(error) } }
+async function createVideo() {
+  try {
+    const response = await interviewApi.createVideoSession(selectedProcess.value.id, { approverName: 'HR审批人' })
+    selectedProcess.value = { ...selectedProcess.value, videoSerialNo: response.data.videoSerialNo, videoJoinLink: response.data.videoJoinLink }
+    ElMessage.success('视频面试链接已生成')
+    await loadAll()
+  } catch (error) { fail(error) }
+}
 async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved, approverName: 'HR审批人' }); ElMessage.success('视频面审批完成'); await loadAll() } catch (error) { fail(error) } }
 async function approveOnsite(approved) { try { await interviewApi.approveOnsite(selectedProcess.value.id, { approved, approverName: 'HR审批人' }); ElMessage.success('线下面审批完成'); await loadAll() } catch (error) { fail(error) } }
+async function terminateProcess() { try { await interviewApi.terminateProcess(selectedProcess.value.id, { approved: 0, approverName: 'HR审批人' }); ElMessage.success('流程已终止'); await loadAll() } catch (error) { fail(error) } }
 
 onMounted(loadAll)
 </script>
@@ -189,6 +224,8 @@ onMounted(loadAll)
 .wide { grid-column: 1 / -1; }
 .inner-surface { background: rgba(255,255,255,0.82); }
 .detail-surface { margin-top: 18px; }
+.serial-line { margin: 8px 0 14px; color: #42515b; }
+.video-link { margin-left: 12px; color: #0f6c8f; font-weight: 700; text-decoration: none; }
 .data-table { margin-top: 18px; }
 @media (max-width: 900px) { .form-grid { grid-template-columns: 1fr; } }
 </style>

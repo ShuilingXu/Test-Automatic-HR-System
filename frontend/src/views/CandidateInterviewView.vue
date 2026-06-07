@@ -53,9 +53,12 @@ const processSummary = ref(null)
 function fail(error) { ElMessage.error(error.message || '操作失败') }
 async function loadProcessRecords() {
   try {
-    const processList = (await interviewApi.listProcesses()).data
-    processSummary.value = processList.find((item) => item.id === sessionForm.processId) || null
-    aiRecords.value = (await interviewApi.listAiRecords({ processId: sessionForm.processId })).data
+    if (!sessionForm.processId) {
+      ElMessage.warning('请输入面试流程ID')
+      return
+    }
+    processSummary.value = (await interviewApi.getIntervieweeProcess(sessionForm.processId)).data
+    aiRecords.value = (await interviewApi.listIntervieweeAiRecords({ processId: sessionForm.processId })).data
   } catch (error) { fail(error) }
 }
 async function submitAiAnswer() {

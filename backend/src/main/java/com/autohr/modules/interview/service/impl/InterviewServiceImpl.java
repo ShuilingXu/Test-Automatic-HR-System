@@ -192,6 +192,11 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     @Override
+    public InterviewVO getProcess(Long processId) {
+        return toProcessVO(requireProcess(processId));
+    }
+
+    @Override
     @Transactional
     public InterviewVO submitAiAnswer(AiAnswerRequest request) {
         InterviewProcess process = requireProcess(request.getProcessId());
@@ -352,6 +357,20 @@ public class InterviewServiceImpl implements InterviewService {
         }
         processMapper.updateById(process);
         updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+        return toProcessVO(process);
+    }
+
+    @Override
+    @Transactional
+    public InterviewVO terminateProcess(Long processId, InterviewDecisionRequest request) {
+        InterviewProcess process = requireProcess(processId);
+        process.setOverallStatus("TERMINATED");
+        process.setStageStatus("TERMINATED");
+        process.setProcessStatusView("已终止");
+        process.setApprovedHrUserId(request.getApproverUserId());
+        process.setApprovedHrName(request.getApproverName());
+        processMapper.updateById(process);
+        updateCandidateStage(process.getRecruitmentCandidateId(), "已终止");
         return toProcessVO(process);
     }
 

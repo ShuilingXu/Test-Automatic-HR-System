@@ -22,6 +22,7 @@ public class CandidateVO {
     private String selfIntroduction;
     private String applicationStatus;
     private String interviewStageStatus;
+    private Long intervieweeUserId;
     private Long interviewProcessId;
     private Long resumeFileId;
     private String resumeFileName;

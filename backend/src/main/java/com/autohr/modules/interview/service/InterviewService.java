@@ -22,6 +22,7 @@ public interface InterviewService {
     List<InterviewVO> listLlmConfigs(String modelRole, Integer status);
     InterviewVO startInterviewProcess(StartInterviewProcessRequest request);
     List<InterviewVO> listProcesses(String overallStatus, String stageStatus, String keyword);
+    InterviewVO getProcess(Long processId);
     InterviewVO submitAiAnswer(AiAnswerRequest request);
     List<InterviewVO> listAiRecords(Long processId);
     InterviewVO createVideoSession(Long processId, Long approverUserId, String approverName);
@@ -31,4 +32,5 @@ public interface InterviewService {
     InterviewVO approveAiToVideo(Long processId, InterviewDecisionRequest request);
     InterviewVO approveVideoToOnsite(Long processId, InterviewDecisionRequest request);
     InterviewVO decideOnsite(Long processId, InterviewDecisionRequest request);
+    InterviewVO terminateProcess(Long processId, InterviewDecisionRequest request);
 }

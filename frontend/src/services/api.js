@@ -44,6 +44,7 @@ export const recruitmentApi = {
   getAdminJob(id) { return request.get(`/recruitment/admin/jobs/${id}`) },
   deleteJob(id) { return request.delete(`/recruitment/admin/jobs/${id}`) },
   listCandidates(params) { return request.get('/recruitment/admin/candidates', { params }) },
+  deleteCandidate(id) { return request.delete(`/recruitment/admin/candidates/${id}`) },
   listOpenJobs(params) { return request.get('/recruitment/jobs', { params }) },
   apply(payload) { return request.post('/recruitment/candidates', payload) },
   uploadResume(candidateId, file) {
@@ -81,7 +82,9 @@ export const interviewApi = {
   listLlmConfigs(params) { return request.get('/interview/it/llm-configs', { params }) },
   startProcess(payload) { return request.post('/interview/hr/processes', payload) },
   listProcesses(params) { return request.get('/interview/hr/processes', { params }) },
+  getIntervieweeProcess(processId) { return request.get(`/interview/interviewee/process/${processId}`) },
   listAiRecords(params) { return request.get('/interview/hr/ai-records', { params }) },
+  listIntervieweeAiRecords(params) { return request.get('/interview/interviewee/ai-records', { params }) },
   createVideoSession(processId, params) { return request.post(`/interview/hr/video-session/${processId}`, null, { params }) },
   intervieweeJoin(processId) { return request.post(`/interview/interviewee/video-join/${processId}`) },
   hrJoin(processId, params) { return request.post(`/interview/hr/video-join/${processId}`, null, { params }) },
@@ -89,6 +92,7 @@ export const interviewApi = {
   approveAi(processId, payload) { return request.post(`/interview/hr/approve-ai/${processId}`, payload) },
   approveVideo(processId, payload) { return request.post(`/interview/hr/approve-video/${processId}`, payload) },
   approveOnsite(processId, payload) { return request.post(`/interview/hr/approve-onsite/${processId}`, payload) },
+  terminateProcess(processId, payload) { return request.post(`/interview/hr/terminate/${processId}`, payload) },
   submitAiAnswer(payload) { return request.post('/interview/interviewee/ai-answer', payload) },
   getSystems() {
     return Promise.resolve({ success: true, message: 'system entries', data: [
