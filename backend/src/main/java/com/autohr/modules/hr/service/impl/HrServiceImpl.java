@@ -2,10 +2,14 @@ package com.autohr.modules.hr.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.autohr.common.exception.BusinessException;
+import com.autohr.modules.hr.dto.DepartmentDetailVO;
 import com.autohr.modules.hr.dto.DepartmentSaveRequest;
+import com.autohr.modules.hr.dto.DepartmentTreeNodeVO;
 import com.autohr.modules.hr.dto.DepartmentVO;
+import com.autohr.modules.hr.dto.EmployeeDetailVO;
 import com.autohr.modules.hr.dto.EmployeeSaveRequest;
 import com.autohr.modules.hr.dto.EmployeeVO;
+import com.autohr.modules.hr.dto.HrDashboardVO;
 import com.autohr.modules.hr.dto.IntegrationBindingSaveRequest;
 import com.autohr.modules.hr.dto.IntegrationBindingVO;
 import com.autohr.modules.hr.entity.Department;
@@ -17,12 +21,15 @@ import com.autohr.modules.hr.mapper.EmployeeMapper;
 import com.autohr.modules.hr.mapper.IntegrationBindingMapper;
 import com.autohr.modules.hr.service.HrService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -58,12 +65,58 @@ public class HrServiceImpl implements HrService {
 
     @Override
     public List<DepartmentVO> listDepartments() {
-        List<Department> departments = departmentMapper.selectList(new LambdaQueryWrapper<Department>()
-                .orderByAsc(Department::getSortOrder)
-                .orderByAsc(Department::getId));
+        List<Department> departments = listDepartmentEntities();
         Map<Long, Department> departmentMap = departments.stream().collect(Collectors.toMap(Department::getId, Function.identity()));
         Map<Long, Employee> employeeMap = loadEmployeeMap();
         return departments.stream().map(item -> toDepartmentVO(item, departmentMap, employeeMap)).toList();
+    }
+
+    @Override
+    public DepartmentDetailVO getDepartmentDetail(Long id) {
+        Department department = requireDepartment(id);
+        Map<Long, Department> departmentMap = loadDepartmentMap();
+        Map<Long, Employee> employeeMap = loadEmployeeMap();
+        List<Employee> directEmployees = employeeMapper.selectList(new LambdaQueryWrapper<Employee>()
+                .eq(Employee::getDepartmentId, id)
+                .orderByAsc(Employee::getId));
+        DepartmentDetailVO detailVO = new DepartmentDetailVO();
+        detailVO.setDepartment(toDepartmentVO(department, departmentMap, employeeMap));
+        detailVO.setEmployeeCount(directEmployees.size());
+        detailVO.setDirectEmployees(directEmployees.stream().map(item -> toEmployeeVO(item, departmentMap, employeeMap)).toList());
+        return detailVO;
+    }
+
+    @Override
+    public List<DepartmentTreeNodeVO> getDepartmentTree() {
+        List<Department> departments = listDepartmentEntities();
+        Map<Long, Employee> employeeMap = loadEmployeeMap();
+        Map<Long, Long> employeeCountMap = employeeMapper.selectList(null).stream()
+                .collect(Collectors.groupingBy(Employee::getDepartmentId, Collectors.counting()));
+        Map<Long, DepartmentTreeNodeVO> nodeMap = new LinkedHashMap<>();
+        for (Department department : departments) {
+            DepartmentTreeNodeVO node = new DepartmentTreeNodeVO();
+            BeanUtils.copyProperties(department, node);
+            Employee manager = employeeMap.get(department.getManagerEmployeeId());
+            if (manager != null) {
+                node.setManagerEmployeeName(manager.getFullName());
+            }
+            node.setEmployeeCount(employeeCountMap.getOrDefault(department.getId(), 0L).intValue());
+            nodeMap.put(node.getId(), node);
+        }
+        List<DepartmentTreeNodeVO> roots = new ArrayList<>();
+        for (DepartmentTreeNodeVO node : nodeMap.values()) {
+            if (node.getParentDepartmentId() == null) {
+                roots.add(node);
+                continue;
+            }
+            DepartmentTreeNodeVO parent = nodeMap.get(node.getParentDepartmentId());
+            if (parent == null) {
+                roots.add(node);
+            } else {
+                parent.getChildren().add(node);
+            }
+        }
+        return roots;
     }
 
     @Override
@@ -78,6 +131,7 @@ public class HrServiceImpl implements HrService {
         if (childCount > 0) {
             throw new BusinessException("该部门下仍有子部门，不能删除");
         }
+        integrationBindingMapper.delete(new LambdaQueryWrapper<IntegrationBinding>().eq(IntegrationBinding::getDepartmentId, id));
         departmentMapper.deleteById(id);
     }
 
@@ -103,18 +157,36 @@ public class HrServiceImpl implements HrService {
 
     @Override
     public List<EmployeeVO> listEmployees(Long departmentId, Integer employmentStatus, String keyword) {
-        LambdaQueryWrapper<Employee> wrapper = new LambdaQueryWrapper<Employee>()
+        List<Employee> employees = employeeMapper.selectList(new LambdaQueryWrapper<Employee>()
                 .eq(departmentId != null, Employee::getDepartmentId, departmentId)
                 .eq(employmentStatus != null, Employee::getEmploymentStatus, employmentStatus)
                 .and(StrUtil.isNotBlank(keyword), q -> q.like(Employee::getFullName, keyword)
                         .or().like(Employee::getEmployeeCode, keyword)
                         .or().like(Employee::getMobilePhone, keyword)
                         .or().like(Employee::getPositionName, keyword))
-                .orderByDesc(Employee::getId);
-        List<Employee> employees = employeeMapper.selectList(wrapper);
+                .orderByDesc(Employee::getId));
         Map<Long, Department> departmentMap = loadDepartmentMap();
         Map<Long, Employee> employeeMap = loadEmployeeMap();
         return employees.stream().map(item -> toEmployeeVO(item, departmentMap, employeeMap)).toList();
+    }
+
+    @Override
+    public EmployeeDetailVO getEmployeeDetail(Long id) {
+        Employee employee = requireEmployee(id);
+        Map<Long, Department> departmentMap = loadDepartmentMap();
+        Map<Long, Employee> employeeMap = loadEmployeeMap();
+        EmployeeDetailVO detailVO = new EmployeeDetailVO();
+        detailVO.setEmployee(toEmployeeVO(employee, departmentMap, employeeMap));
+        Department department = departmentMap.get(employee.getDepartmentId());
+        if (department != null) {
+            detailVO.setDepartment(toDepartmentVO(department, departmentMap, employeeMap));
+        }
+        Employee manager = employeeMap.get(employee.getManagerEmployeeId());
+        if (manager != null) {
+            detailVO.setManager(toEmployeeVO(manager, departmentMap, employeeMap));
+        }
+        detailVO.setBindings(listBindings(null, id, null));
+        return detailVO;
     }
 
     @Override
@@ -164,6 +236,24 @@ public class HrServiceImpl implements HrService {
         return bindings.stream().map(item -> toBindingVO(item, departmentMap, employeeMap)).toList();
     }
 
+    @Override
+    public HrDashboardVO getDashboard() {
+        HrDashboardVO dashboard = new HrDashboardVO();
+        dashboard.setDepartmentCount(departmentMapper.selectCount(null));
+        dashboard.setEmployeeCount(employeeMapper.selectCount(null));
+        dashboard.setActiveEmployeeCount(employeeMapper.selectCount(new LambdaQueryWrapper<Employee>()
+                .eq(Employee::getEmploymentStatus, EmploymentStatus.ACTIVE.getCode())));
+        dashboard.setPendingOnboardingCount(employeeMapper.selectCount(new LambdaQueryWrapper<Employee>()
+                .eq(Employee::getEmploymentStatus, EmploymentStatus.PENDING_ONBOARDING.getCode())));
+        dashboard.setResignedCount(employeeMapper.selectCount(new LambdaQueryWrapper<Employee>()
+                .eq(Employee::getEmploymentStatus, EmploymentStatus.RESIGNED.getCode())));
+        dashboard.setRecruitmentBindingCount(integrationBindingMapper.selectCount(new LambdaQueryWrapper<IntegrationBinding>()
+                .eq(IntegrationBinding::getModuleCode, "RECRUITMENT")));
+        dashboard.setPerformanceBindingCount(integrationBindingMapper.selectCount(new LambdaQueryWrapper<IntegrationBinding>()
+                .eq(IntegrationBinding::getModuleCode, "PERFORMANCE")));
+        return dashboard;
+    }
+
     private void validateDepartment(Long parentDepartmentId, Long managerEmployeeId, Long currentId) {
         if (parentDepartmentId != null) {
             Department parent = requireDepartment(parentDepartmentId);
@@ -194,10 +284,7 @@ public class HrServiceImpl implements HrService {
         }
     }
 
-    private void ensureUnique(com.baomidou.mybatisplus.core.toolkit.support.SFunction<Employee, String> column,
-                              String value,
-                              Long currentId,
-                              String message) {
+    private void ensureUnique(SFunction<Employee, String> column, String value, Long currentId, String message) {
         LambdaQueryWrapper<Employee> wrapper = new LambdaQueryWrapper<Employee>().eq(column, value);
         if (currentId != null) {
             wrapper.ne(Employee::getId, currentId);
@@ -229,6 +316,12 @@ public class HrServiceImpl implements HrService {
             throw new BusinessException("绑定记录不存在: " + id);
         }
         return binding;
+    }
+
+    private List<Department> listDepartmentEntities() {
+        return departmentMapper.selectList(new LambdaQueryWrapper<Department>()
+                .orderByAsc(Department::getSortOrder)
+                .orderByAsc(Department::getId));
     }
 
     private Map<Long, Department> loadDepartmentMap() {

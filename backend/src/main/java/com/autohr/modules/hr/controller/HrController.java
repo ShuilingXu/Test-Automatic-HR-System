@@ -1,10 +1,14 @@
 package com.autohr.modules.hr.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.modules.hr.dto.DepartmentDetailVO;
 import com.autohr.modules.hr.dto.DepartmentSaveRequest;
+import com.autohr.modules.hr.dto.DepartmentTreeNodeVO;
 import com.autohr.modules.hr.dto.DepartmentVO;
+import com.autohr.modules.hr.dto.EmployeeDetailVO;
 import com.autohr.modules.hr.dto.EmployeeSaveRequest;
 import com.autohr.modules.hr.dto.EmployeeVO;
+import com.autohr.modules.hr.dto.HrDashboardVO;
 import com.autohr.modules.hr.dto.IntegrationBindingSaveRequest;
 import com.autohr.modules.hr.dto.IntegrationBindingVO;
 import com.autohr.modules.hr.service.HrService;
@@ -28,6 +32,11 @@ public class HrController {
 
     private final HrService hrService;
 
+    @GetMapping("/dashboard")
+    public ApiResponse<HrDashboardVO> getDashboard() {
+        return ApiResponse.success(hrService.getDashboard());
+    }
+
     @PostMapping("/departments")
     public ApiResponse<DepartmentVO> saveDepartment(@Valid @RequestBody DepartmentSaveRequest request) {
         return ApiResponse.success(hrService.saveDepartment(request));
@@ -36,6 +45,16 @@ public class HrController {
     @GetMapping("/departments")
     public ApiResponse<List<DepartmentVO>> listDepartments() {
         return ApiResponse.success(hrService.listDepartments());
+    }
+
+    @GetMapping("/departments/tree")
+    public ApiResponse<List<DepartmentTreeNodeVO>> getDepartmentTree() {
+        return ApiResponse.success(hrService.getDepartmentTree());
+    }
+
+    @GetMapping("/departments/{id}")
+    public ApiResponse<DepartmentDetailVO> getDepartmentDetail(@PathVariable Long id) {
+        return ApiResponse.success(hrService.getDepartmentDetail(id));
     }
 
     @DeleteMapping("/departments/{id}")
@@ -54,6 +73,11 @@ public class HrController {
                                                        @RequestParam(required = false) Integer employmentStatus,
                                                        @RequestParam(required = false) String keyword) {
         return ApiResponse.success(hrService.listEmployees(departmentId, employmentStatus, keyword));
+    }
+
+    @GetMapping("/employees/{id}")
+    public ApiResponse<EmployeeDetailVO> getEmployeeDetail(@PathVariable Long id) {
+        return ApiResponse.success(hrService.getEmployeeDetail(id));
     }
 
     @DeleteMapping("/employees/{id}")
