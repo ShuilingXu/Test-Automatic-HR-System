@@ -40,28 +40,45 @@
           </div>
           <el-button @click="loadDepartments">刷新</el-button>
         </div>
-        <el-form :model="departmentForm" label-position="top" class="form-grid">
-          <el-form-item label="部门名称"><el-input v-model="departmentForm.departmentName" /></el-form-item>
-          <el-form-item label="部门编码"><el-input v-model="departmentForm.departmentCode" /></el-form-item>
-          <el-form-item label="上级部门">
-            <el-select v-model="departmentForm.parentDepartmentId" clearable>
-              <el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="部门负责人">
-            <el-select v-model="departmentForm.managerEmployeeId" clearable>
-              <el-option v-for="item in employees" :key="item.id" :label="item.fullName" :value="item.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="部门职能简介" class="wide"><el-input v-model="departmentForm.description" type="textarea" :rows="3" /></el-form-item>
-        </el-form>
-        <el-button type="primary" @click="saveDepartment">保存部门</el-button>
-        <div class="list-block">
-          <button v-for="item in departments" :key="item.id" @click="loadDepartmentDetail(item.id)">
-            <strong>{{ item.departmentName }}</strong><span>{{ item.managerEmployeeName || '未设置负责人' }}</span>
-          </button>
+        <div class="sub-tabs">
+          <button :class="{ active: departmentMode === 'create' }" @click="showCreateDepartment">新增部门</button>
+          <button :class="{ active: departmentMode === 'query' }" @click="departmentMode = 'query'">查询部门</button>
+          <button :class="{ active: departmentMode === 'edit' }" @click="departmentMode = 'edit'">修改部门</button>
         </div>
-        <pre v-if="departmentDetail">{{ departmentDetail }}</pre>
+
+        <template v-if="departmentMode === 'create' || departmentMode === 'edit'">
+          <el-form :model="departmentForm" label-position="top" class="form-grid">
+            <el-form-item label="部门名称"><el-input v-model="departmentForm.departmentName" /></el-form-item>
+            <el-form-item label="部门编码"><el-input v-model="departmentForm.departmentCode" /></el-form-item>
+            <el-form-item label="上级部门">
+              <el-select v-model="departmentForm.parentDepartmentId" clearable placeholder="不能选择本部门">
+                <el-option v-for="item in availableParentDepartments" :key="item.id" :label="item.departmentName" :value="item.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="部门负责人">
+              <el-select v-model="departmentForm.managerEmployeeId" clearable filterable placeholder="从员工列表选择负责人">
+                <el-option v-for="item in employees" :key="item.id" :label="item.fullName" :value="item.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="部门状态"><el-select v-model="departmentForm.status"><el-option label="启用" :value="1" /><el-option label="停用" :value="0" /></el-select></el-form-item>
+            <el-form-item label="排序"><el-input-number v-model="departmentForm.sortOrder" :min="0" /></el-form-item>
+            <el-form-item label="部门职能简介" class="wide"><el-input v-model="departmentForm.description" type="textarea" :rows="3" /></el-form-item>
+          </el-form>
+          <div class="action-row">
+            <el-button type="primary" @click="saveDepartment">{{ departmentMode === 'create' ? '新增部门' : '保存修改' }}</el-button>
+            <el-button @click="resetDepartmentForm">清空</el-button>
+          </div>
+        </template>
+
+        <template v-if="departmentMode === 'query'">
+          <el-table :data="departments" stripe class="data-table" @row-click="editDepartment">
+            <el-table-column prop="departmentName" label="部门名称" min-width="140" />
+            <el-table-column prop="departmentCode" label="部门编码" min-width="120" />
+            <el-table-column prop="parentDepartmentName" label="上级部门" min-width="120" />
+            <el-table-column prop="managerEmployeeName" label="部门负责人" min-width="120" />
+            <el-table-column prop="description" label="部门职能简介" min-width="180" />
+          </el-table>
+        </template>
       </section>
 
       <section v-if="activeTab === 'employees'" class="page-card">
@@ -72,40 +89,50 @@
           </div>
           <el-button @click="loadEmployees">刷新</el-button>
         </div>
-        <el-form :model="employeeForm" label-position="top" class="form-grid">
-          <el-form-item label="姓名"><el-input v-model="employeeForm.fullName" /></el-form-item>
-          <el-form-item label="身份证号"><el-input v-model="employeeForm.idCardNo" /></el-form-item>
-          <el-form-item label="手机号"><el-input v-model="employeeForm.mobilePhone" /></el-form-item>
-          <el-form-item label="招聘专业"><el-input v-model="employeeForm.recruitmentMajor" /></el-form-item>
-          <el-form-item label="岗位"><el-input v-model="employeeForm.positionName" /></el-form-item>
-          <el-form-item label="直属部门">
-            <el-select v-model="employeeForm.departmentId">
-              <el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="员工状态">
-            <el-select v-model="employeeForm.employmentStatus">
-              <el-option label="待入职" :value="0" />
-              <el-option label="已入职" :value="1" />
-              <el-option label="停用" :value="2" />
-              <el-option label="已离职" :value="3" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="银行卡号"><el-input v-model="employeeForm.bankAccountNo" /></el-form-item>
-          <el-form-item label="开户银行"><el-input v-model="employeeForm.bankName" /></el-form-item>
-        </el-form>
-        <div class="action-row">
-          <el-button type="primary" @click="saveEmployee">保存员工</el-button>
-          <el-button @click="resetEmployeeForm">清空</el-button>
+        <div class="sub-tabs">
+          <button :class="{ active: employeeMode === 'create' }" @click="showCreateEmployee">新增员工</button>
+          <button :class="{ active: employeeMode === 'query' }" @click="employeeMode = 'query'">查询员工</button>
+          <button :class="{ active: employeeMode === 'edit' }" @click="employeeMode = 'edit'">修改员工</button>
         </div>
-        <el-table :data="employees" stripe class="data-table" @row-click="editEmployee">
-          <el-table-column prop="fullName" label="姓名" />
-          <el-table-column prop="departmentName" label="部门" />
-          <el-table-column prop="positionName" label="岗位" />
-          <el-table-column prop="mobilePhone" label="电话" />
-          <el-table-column label="操作" width="100"><template #default="scope"><el-button text @click.stop="loadEmployeeDetail(scope.row.id)">详情</el-button></template></el-table-column>
-        </el-table>
-        <pre v-if="employeeDetail">{{ employeeDetail }}</pre>
+
+        <template v-if="employeeMode === 'create' || employeeMode === 'edit'">
+          <el-form :model="employeeForm" label-position="top" class="form-grid">
+            <el-form-item label="姓名"><el-input v-model="employeeForm.fullName" /></el-form-item>
+            <el-form-item label="身份证号"><el-input v-model="employeeForm.idCardNo" /></el-form-item>
+            <el-form-item label="手机号"><el-input v-model="employeeForm.mobilePhone" /></el-form-item>
+            <el-form-item label="招聘专业"><el-input v-model="employeeForm.recruitmentMajor" /></el-form-item>
+            <el-form-item label="岗位"><el-input v-model="employeeForm.positionName" /></el-form-item>
+            <el-form-item label="直属部门">
+              <el-select v-model="employeeForm.departmentId">
+                <el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="员工状态">
+              <el-select v-model="employeeForm.employmentStatus">
+                <el-option label="待入职" :value="0" />
+                <el-option label="已入职" :value="1" />
+                <el-option label="停用" :value="2" />
+                <el-option label="已离职" :value="3" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="银行卡号"><el-input v-model="employeeForm.bankAccountNo" /></el-form-item>
+            <el-form-item label="开户银行"><el-input v-model="employeeForm.bankName" /></el-form-item>
+          </el-form>
+          <div class="action-row">
+            <el-button type="primary" @click="saveEmployee">{{ employeeMode === 'create' ? '新增员工' : '保存修改' }}</el-button>
+            <el-button @click="resetEmployeeForm">清空</el-button>
+          </div>
+        </template>
+
+        <template v-if="employeeMode === 'query'">
+          <el-table :data="employees" stripe class="data-table" @row-click="editEmployee">
+            <el-table-column prop="fullName" label="姓名" />
+            <el-table-column prop="departmentName" label="部门" />
+            <el-table-column prop="positionName" label="岗位" />
+            <el-table-column prop="mobilePhone" label="电话" />
+            <el-table-column prop="bankName" label="开户银行" />
+          </el-table>
+        </template>
       </section>
 
       <section v-if="activeTab === 'bindings'" class="page-card">
@@ -137,70 +164,79 @@
         <div class="topline">
           <div>
             <p class="page-eyebrow">Recruitment</p>
-            <h2>招聘岗位维护</h2>
+            <h2>招聘后台</h2>
           </div>
           <el-button @click="loadRecruitment">刷新</el-button>
         </div>
-        <el-form :model="jobForm" label-position="top" class="form-grid">
-          <el-form-item label="岗位名称"><el-input v-model="jobForm.jobTitle" /></el-form-item>
-          <el-form-item label="岗位编码"><el-input v-model="jobForm.jobCode" /></el-form-item>
-          <el-form-item label="招聘部门">
-            <el-select v-model="jobForm.departmentName" filterable placeholder="从数据库部门中选择">
-              <el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.departmentName" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="工作地点"><el-input v-model="jobForm.workLocation" /></el-form-item>
-          <el-form-item label="岗位类型"><el-input v-model="jobForm.jobType" /></el-form-item>
-          <el-form-item label="招聘人数"><el-input-number v-model="jobForm.headcount" :min="1" /></el-form-item>
-          <el-form-item label="薪资范围"><el-input v-model="jobForm.salaryRange" /></el-form-item>
-          <el-form-item label="状态"><el-select v-model="jobForm.status"><el-option label="开放" :value="1" /><el-option label="关闭" :value="0" /></el-select></el-form-item>
-          <el-form-item label="岗位职责" class="wide"><el-input v-model="jobForm.responsibilities" type="textarea" :rows="3" /></el-form-item>
-          <el-form-item label="任职要求" class="wide"><el-input v-model="jobForm.requirements" type="textarea" :rows="3" /></el-form-item>
-        </el-form>
-        <div class="action-row">
-          <el-button type="primary" @click="saveJob">保存岗位</el-button>
-          <el-button @click="resetJobForm">清空</el-button>
+        <div class="sub-tabs">
+          <button :class="{ active: recruitmentMode === 'jobs' }" @click="recruitmentMode = 'jobs'">增 / 删 / 改岗位信息</button>
+          <button :class="{ active: recruitmentMode === 'candidates' }" @click="recruitmentMode = 'candidates'">候选人信息</button>
         </div>
-        <el-table :data="jobs" stripe class="data-table">
-          <el-table-column prop="jobTitle" label="岗位" min-width="140" />
-          <el-table-column prop="departmentName" label="部门" min-width="120" />
-          <el-table-column prop="headcount" label="人数" width="80" />
-          <el-table-column prop="status" label="状态" width="90"><template #default="scope">{{ scope.row.status === 1 ? '开放' : '关闭' }}</template></el-table-column>
-          <el-table-column label="操作" width="100"><template #default="scope"><el-button text @click="editJob(scope.row)">编辑</el-button></template></el-table-column>
-        </el-table>
-        <h3 class="sub-title">报名记录</h3>
-        <el-table :data="candidates" stripe class="data-table" @row-click="selectCandidate">
-          <el-table-column prop="fullName" label="报名者姓名" min-width="120" />
-          <el-table-column prop="mobilePhone" label="联系电话" min-width="130" />
-          <el-table-column prop="jobTitle" label="岗位" min-width="140" />
-          <el-table-column label="简历" min-width="150">
-            <template #default="scope">
-              <a v-if="scope.row.resumeFileId" class="resume-link" :href="resumeUrl(scope.row.resumeFileId)" target="_blank" @click.stop>{{ scope.row.resumeFileName || '查看简历' }}</a>
-              <span v-else>未上传</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="applicationStatus" label="状态" width="110" />
-        </el-table>
-        <div v-if="selectedCandidate" class="candidate-detail">
-          <h3>报名者详情</h3>
-          <div class="detail-grid">
-            <div><span>姓名</span><strong>{{ selectedCandidate.fullName }}</strong></div>
-            <div><span>联系电话</span><strong>{{ selectedCandidate.mobilePhone }}</strong></div>
-            <div><span>应聘岗位</span><strong>{{ selectedCandidate.jobTitle }}</strong></div>
-            <div><span>专业</span><strong>{{ selectedCandidate.major }}</strong></div>
-            <div><span>邮箱</span><strong>{{ selectedCandidate.email || '-' }}</strong></div>
-            <div><span>身份证号</span><strong>{{ selectedCandidate.idCardNo || '-' }}</strong></div>
-            <div><span>学历</span><strong>{{ selectedCandidate.educationLevel || '-' }}</strong></div>
-            <div><span>毕业院校</span><strong>{{ selectedCandidate.graduationSchool || '-' }}</strong></div>
-            <div><span>工作年限</span><strong>{{ selectedCandidate.yearsOfExperience ?? '-' }}</strong></div>
-            <div><span>期望薪资</span><strong>{{ selectedCandidate.expectedSalary || '-' }}</strong></div>
+
+        <template v-if="recruitmentMode === 'jobs'">
+          <el-form :model="jobForm" label-position="top" class="form-grid">
+            <el-form-item label="岗位名称"><el-input v-model="jobForm.jobTitle" /></el-form-item>
+            <el-form-item label="岗位编码"><el-input v-model="jobForm.jobCode" /></el-form-item>
+            <el-form-item label="招聘部门">
+              <el-select v-model="jobForm.departmentName" filterable placeholder="从数据库部门中选择">
+                <el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.departmentName" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="工作地点"><el-input v-model="jobForm.workLocation" /></el-form-item>
+            <el-form-item label="岗位类型"><el-input v-model="jobForm.jobType" /></el-form-item>
+            <el-form-item label="招聘人数"><el-input-number v-model="jobForm.headcount" :min="1" /></el-form-item>
+            <el-form-item label="薪资范围"><el-input v-model="jobForm.salaryRange" /></el-form-item>
+            <el-form-item label="状态"><el-select v-model="jobForm.status"><el-option label="开放" :value="1" /><el-option label="关闭" :value="0" /></el-select></el-form-item>
+            <el-form-item label="岗位职责" class="wide"><el-input v-model="jobForm.responsibilities" type="textarea" :rows="3" /></el-form-item>
+            <el-form-item label="任职要求" class="wide"><el-input v-model="jobForm.requirements" type="textarea" :rows="3" /></el-form-item>
+          </el-form>
+          <div class="action-row">
+            <el-button type="primary" @click="saveJob">保存岗位</el-button>
+            <el-button @click="resetJobForm">清空</el-button>
           </div>
-          <div class="intro-box">
-            <span>个人简介</span>
-            <p>{{ selectedCandidate.selfIntroduction || '未填写' }}</p>
+          <el-table :data="jobs" stripe class="data-table" @row-click="editJob">
+            <el-table-column prop="jobTitle" label="岗位" min-width="140" />
+            <el-table-column prop="departmentName" label="部门" min-width="120" />
+            <el-table-column prop="headcount" label="人数" width="80" />
+            <el-table-column prop="status" label="状态" width="90"><template #default="scope">{{ scope.row.status === 1 ? '开放' : '关闭' }}</template></el-table-column>
+            <el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteJob(scope.row.id)">删除</el-button></template></el-table-column>
+          </el-table>
+        </template>
+
+        <template v-if="recruitmentMode === 'candidates'">
+          <el-table :data="candidates" stripe class="data-table" @row-click="selectCandidate">
+            <el-table-column prop="fullName" label="报名者姓名" min-width="120" />
+            <el-table-column prop="mobilePhone" label="联系电话" min-width="130" />
+            <el-table-column prop="jobTitle" label="岗位" min-width="140" />
+            <el-table-column label="简历" min-width="150">
+              <template #default="scope">
+                <a v-if="scope.row.resumeFileId" class="resume-link" :href="resumeUrl(scope.row.resumeFileId)" target="_blank" @click.stop>{{ scope.row.resumeFileName || '查看简历' }}</a>
+                <span v-else>未上传</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="applicationStatus" label="状态" width="110" />
+          </el-table>
+          <div v-if="selectedCandidate" class="candidate-detail">
+            <h3>候选人信息</h3>
+            <div class="detail-grid">
+              <div><span>姓名</span><strong>{{ selectedCandidate.fullName }}</strong></div>
+              <div><span>联系电话</span><strong>{{ selectedCandidate.mobilePhone }}</strong></div>
+              <div><span>应聘岗位</span><strong>{{ selectedCandidate.jobTitle }}</strong></div>
+              <div><span>专业</span><strong>{{ selectedCandidate.major }}</strong></div>
+              <div><span>邮箱</span><strong>{{ selectedCandidate.email || '-' }}</strong></div>
+              <div><span>身份证号</span><strong>{{ selectedCandidate.idCardNo || '-' }}</strong></div>
+              <div><span>学历</span><strong>{{ selectedCandidate.educationLevel || '-' }}</strong></div>
+              <div><span>毕业院校</span><strong>{{ selectedCandidate.graduationSchool || '-' }}</strong></div>
+              <div><span>工作年限</span><strong>{{ selectedCandidate.yearsOfExperience ?? '-' }}</strong></div>
+              <div><span>期望薪资</span><strong>{{ selectedCandidate.expectedSalary || '-' }}</strong></div>
+            </div>
+            <div class="intro-box">
+              <span>个人简介</span>
+              <p>{{ selectedCandidate.selfIntroduction || '未填写' }}</p>
+            </div>
+            <a v-if="selectedCandidate.resumeFileId" class="resume-link" :href="resumeUrl(selectedCandidate.resumeFileId)" target="_blank">打开 PDF / 简历文件</a>
           </div>
-          <a v-if="selectedCandidate.resumeFileId" class="resume-link" :href="resumeUrl(selectedCandidate.resumeFileId)" target="_blank">打开 PDF / 简历文件</a>
-        </div>
+        </template>
       </section>
     </main>
   </div>
@@ -221,17 +257,18 @@ const tabs = [
 ]
 
 const activeTab = ref('dashboard')
+const departmentMode = ref('create')
+const employeeMode = ref('create')
+const recruitmentMode = ref('jobs')
 const dashboard = reactive({ departmentCount: 0, employeeCount: 0, activeEmployeeCount: 0, pendingOnboardingCount: 0, recruitmentBindingCount: 0, performanceBindingCount: 0 })
 const departments = ref([])
 const employees = ref([])
 const bindings = ref([])
 const jobs = ref([])
 const candidates = ref([])
-const departmentDetail = ref(null)
-const employeeDetail = ref(null)
 const selectedCandidate = ref(null)
 
-const departmentForm = reactive({ departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '' })
+const departmentForm = reactive({ id: null, departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '', sortOrder: 0, status: 1 })
 const employeeForm = reactive({ fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' })
 const bindingForm = reactive({ moduleCode: 'RECRUITMENT', businessType: 'EMPLOYEE_SYNC', employeeId: null, departmentId: null, externalRef: '', bindingStatus: 'ACTIVE', payload: '{"source":"frontend-demo"}' })
 const jobForm = reactive({ id: null, jobTitle: '', jobCode: '', departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 })
@@ -244,6 +281,7 @@ const metrics = computed(() => [
   { label: '招聘挂接', value: dashboard.recruitmentBindingCount },
   { label: '绩效挂接', value: dashboard.performanceBindingCount },
 ])
+const availableParentDepartments = computed(() => departments.value.filter((item) => item.id !== departmentForm.id))
 
 function fail(error) { ElMessage.error(error.message || '请求失败') }
 async function loadDashboard() { try { Object.assign(dashboard, (await hrApi.getDashboard()).data) } catch (error) { fail(error) } }
@@ -252,16 +290,25 @@ async function loadEmployees() { try { employees.value = (await hrApi.listEmploy
 async function loadBindings() { try { bindings.value = (await hrApi.listBindings()).data } catch (error) { fail(error) } }
 async function loadRecruitment() { try { jobs.value = (await recruitmentApi.listAdminJobs()).data; candidates.value = (await recruitmentApi.listCandidates()).data } catch (error) { fail(error) } }
 async function loadAll() { await Promise.all([loadDashboard(), loadDepartments(), loadEmployees(), loadBindings(), loadRecruitment()]) }
-async function loadDepartmentDetail(id) { try { departmentDetail.value = (await hrApi.getDepartmentDetail(id)).data } catch (error) { fail(error) } }
-async function loadEmployeeDetail(id) { try { employeeDetail.value = (await hrApi.getEmployeeDetail(id)).data } catch (error) { fail(error) } }
 async function saveDepartment() { try { await hrApi.saveDepartment({ ...departmentForm }); ElMessage.success('部门已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveEmployee() { try { await hrApi.saveEmployee({ ...employeeForm }); ElMessage.success('员工已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveBinding() { try { await hrApi.saveBinding({ ...bindingForm }); ElMessage.success('挂接已保存'); await loadAll() } catch (error) { fail(error) } }
 function resetJobForm() { Object.assign(jobForm, { id: null, jobTitle: '', jobCode: '', departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 }) }
 function editJob(row) { Object.assign(jobForm, row) }
 async function saveJob() { try { await recruitmentApi.saveJob({ ...jobForm }); ElMessage.success('招聘岗位已保存'); resetJobForm(); await loadRecruitment() } catch (error) { fail(error) } }
+async function deleteJob(id) { try { await recruitmentApi.deleteJob(id); ElMessage.success('岗位已删除'); resetJobForm(); await loadRecruitment() } catch (error) { fail(error) } }
+function resetDepartmentForm() { Object.assign(departmentForm, { id: null, departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '', sortOrder: 0, status: 1 }) }
+function showCreateDepartment() { resetDepartmentForm(); departmentMode.value = 'create' }
+function editDepartment(row) {
+  Object.assign(departmentForm, row)
+  if (departmentForm.parentDepartmentId === departmentForm.id) {
+    departmentForm.parentDepartmentId = null
+  }
+  departmentMode.value = 'edit'
+}
 function resetEmployeeForm() { Object.assign(employeeForm, { id: null, fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' }) }
-function editEmployee(row) { Object.assign(employeeForm, row) }
+function showCreateEmployee() { resetEmployeeForm(); employeeMode.value = 'create' }
+function editEmployee(row) { Object.assign(employeeForm, row); employeeMode.value = 'edit' }
 function selectCandidate(row) { selectedCandidate.value = row }
 function resumeUrl(id) { return `/api/recruitment/resumes/${id}` }
 
@@ -287,6 +334,9 @@ onMounted(loadAll)
 .wide { grid-column: 1 / -1; }
 .list-block { display: grid; gap: 10px; margin-top: 18px; }
 .list-block button { border: 0; border-radius: 16px; padding: 14px; background: #f8f5ef; display: flex; justify-content: space-between; cursor: pointer; }
+.sub-tabs { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+.sub-tabs button { border: 1px solid rgba(16, 37, 50, 0.12); background: #f8f5ef; color: #102532; border-radius: 999px; padding: 10px 16px; cursor: pointer; }
+.sub-tabs button.active { background: #102532; color: #f4efe7; }
 .action-row { display: flex; gap: 12px; margin-top: 4px; }
 .sub-title { margin: 24px 0 0; }
 .resume-link { color: #0f6c8f; font-weight: 700; text-decoration: none; }

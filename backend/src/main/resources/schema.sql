@@ -110,3 +110,62 @@ CREATE INDEX IF NOT EXISTS idx_recruitment_job_status ON recruitment_job(status)
 CREATE INDEX IF NOT EXISTS idx_recruitment_candidate_job_id ON recruitment_candidate(job_id);
 CREATE INDEX IF NOT EXISTS idx_recruitment_candidate_status ON recruitment_candidate(application_status);
 CREATE INDEX IF NOT EXISTS idx_recruitment_resume_candidate_id ON recruitment_resume_file(candidate_id);
+
+CREATE TABLE IF NOT EXISTS interview_batch (
+    id INTEGER PRIMARY KEY,
+    batch_code VARCHAR(64) NOT NULL UNIQUE,
+    batch_name VARCHAR(128) NOT NULL,
+    job_id INTEGER,
+    start_time DATETIME,
+    end_time DATETIME,
+    description VARCHAR(1000),
+    status INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_question (
+    id INTEGER PRIMARY KEY,
+    question_title VARCHAR(128) NOT NULL,
+    question_type VARCHAR(32) NOT NULL DEFAULT 'TEXT',
+    difficulty VARCHAR(32),
+    tags VARCHAR(255),
+    content VARCHAR(3000) NOT NULL,
+    reference_answer VARCHAR(3000),
+    score INTEGER NOT NULL DEFAULT 10,
+    status INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_candidate (
+    id INTEGER PRIMARY KEY,
+    batch_id INTEGER NOT NULL,
+    recruitment_candidate_id INTEGER NOT NULL,
+    candidate_name VARCHAR(64) NOT NULL,
+    mobile_phone VARCHAR(32) NOT NULL,
+    interview_status VARCHAR(32) NOT NULL DEFAULT 'ASSIGNED',
+    total_score INTEGER NOT NULL DEFAULT 0,
+    interviewer_comment VARCHAR(1000),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (batch_id) REFERENCES interview_batch(id)
+);
+
+CREATE TABLE IF NOT EXISTS interview_submission (
+    id INTEGER PRIMARY KEY,
+    interview_candidate_id INTEGER NOT NULL,
+    question_id INTEGER NOT NULL,
+    answer_content VARCHAR(5000) NOT NULL,
+    score INTEGER,
+    reviewer_comment VARCHAR(1000),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (interview_candidate_id) REFERENCES interview_candidate(id),
+    FOREIGN KEY (question_id) REFERENCES interview_question(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_interview_batch_status ON interview_batch(status);
+CREATE INDEX IF NOT EXISTS idx_interview_question_status ON interview_question(status);
+CREATE INDEX IF NOT EXISTS idx_interview_candidate_batch_id ON interview_candidate(batch_id);
+CREATE INDEX IF NOT EXISTS idx_interview_submission_candidate_id ON interview_submission(interview_candidate_id);

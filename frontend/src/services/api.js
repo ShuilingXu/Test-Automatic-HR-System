@@ -64,6 +64,9 @@ export const recruitmentApi = {
   getAdminJob(id) {
     return request.get(`/recruitment/admin/jobs/${id}`)
   },
+  deleteJob(id) {
+    return request.delete(`/recruitment/admin/jobs/${id}`)
+  },
   listCandidates(params) {
     return request.get('/recruitment/admin/candidates', { params })
   },
@@ -103,6 +106,36 @@ export const authApi = {
 }
 
 export const interviewApi = {
+  saveBatch(payload) {
+    return request.post('/interview/admin/batches', payload)
+  },
+  listBatches(params) {
+    return request.get('/interview/admin/batches', { params })
+  },
+  saveQuestion(payload) {
+    return request.post('/interview/admin/questions', payload)
+  },
+  listQuestions(params) {
+    return request.get('/interview/admin/questions', { params })
+  },
+  assignCandidate(payload) {
+    return request.post('/interview/admin/candidates', payload)
+  },
+  listInterviewCandidates(params) {
+    return request.get('/interview/admin/candidates', { params })
+  },
+  listSubmissions(params) {
+    return request.get('/interview/admin/submissions', { params })
+  },
+  scoreSubmission(submissionId, payload) {
+    return request.post(`/interview/admin/submissions/${submissionId}/score`, payload)
+  },
+  listCandidateQuestions(interviewCandidateId) {
+    return request.get(`/interview/candidates/${interviewCandidateId}/questions`)
+  },
+  submitAnswer(payload) {
+    return request.post('/interview/submissions', payload)
+  },
   getSystems() {
     return Promise.resolve({
       success: true,
