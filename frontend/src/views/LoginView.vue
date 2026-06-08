@@ -4,10 +4,10 @@
       <p class="page-eyebrow">Unified Login</p>
       <h1 class="page-title">统一登录</h1>
       <div class="page-grid">
-        <el-form :model="loginForm" label-position="top" class="surface login-form">
+        <el-form :model="loginForm" label-position="top" class="surface login-form" autocomplete="off">
           <h3>登录</h3>
-          <el-form-item label="用户名"><el-input v-model="loginForm.username" /></el-form-item>
-          <el-form-item label="密码"><el-input v-model="loginForm.password" type="password" show-password /></el-form-item>
+          <el-form-item label="用户名"><el-input v-model="loginForm.username" autocomplete="off" /></el-form-item>
+          <el-form-item label="密码"><el-input v-model="loginForm.password" type="password" show-password autocomplete="new-password" /></el-form-item>
           <div class="link-row">
             <el-button type="primary" @click="login">登录</el-button>
             <RouterLink class="link-chip" to="/">返回首页</RouterLink>
@@ -34,7 +34,7 @@ import { ElMessage } from 'element-plus'
 import { authApi } from '../services/api'
 
 const router = useRouter()
-const loginForm = reactive({ username: 'hradmin', password: '123456' })
+const loginForm = reactive({ username: '', password: '' })
 const registerForm = reactive({ username: '', password: '', displayName: '', mobilePhone: '', email: '' })
 
 function targetByRole(roleCode) {
