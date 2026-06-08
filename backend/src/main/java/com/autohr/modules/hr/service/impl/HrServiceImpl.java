@@ -65,9 +65,16 @@ public class HrServiceImpl implements HrService {
     }
 
     @Override
-    public List<DepartmentVO> listDepartments() {
-        List<Department> departments = listDepartmentEntities();
-        Map<Long, Department> departmentMap = departments.stream().collect(Collectors.toMap(Department::getId, Function.identity()));
+    public List<DepartmentVO> listDepartments(Long parentDepartmentId, Integer status, String keyword) {
+        List<Department> departments = departmentMapper.selectList(new LambdaQueryWrapper<Department>()
+                .eq(parentDepartmentId != null, Department::getParentDepartmentId, parentDepartmentId)
+                .eq(status != null, Department::getStatus, status)
+                .and(StrUtil.isNotBlank(keyword), q -> q.like(Department::getDepartmentName, keyword)
+                        .or().like(Department::getDepartmentCode, keyword)
+                        .or().like(Department::getDescription, keyword))
+                .orderByAsc(Department::getSortOrder)
+                .orderByAsc(Department::getId));
+        Map<Long, Department> departmentMap = loadDepartmentMap();
         Map<Long, Employee> employeeMap = loadEmployeeMap();
         return departments.stream().map(item -> toDepartmentVO(item, departmentMap, employeeMap)).toList();
     }

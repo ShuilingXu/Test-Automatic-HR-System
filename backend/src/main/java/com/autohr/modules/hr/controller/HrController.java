@@ -1,6 +1,9 @@
 package com.autohr.modules.hr.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.modules.auth.dto.SessionUserVO;
+import com.autohr.modules.auth.service.AuthService;
+import com.autohr.modules.auth.service.AuditLogService;
 import com.autohr.modules.hr.dto.DepartmentDetailVO;
 import com.autohr.modules.hr.dto.DepartmentSaveRequest;
 import com.autohr.modules.hr.dto.DepartmentTreeNodeVO;
@@ -14,6 +17,7 @@ import com.autohr.modules.hr.dto.IntegrationBindingVO;
 import com.autohr.modules.hr.service.HrService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,6 +35,8 @@ import java.util.List;
 public class HrController {
 
     private final HrService hrService;
+    private final AuthService authService;
+    private final AuditLogService auditLogService;
 
     @GetMapping("/dashboard")
     public ApiResponse<HrDashboardVO> getDashboard() {
@@ -38,13 +44,19 @@ public class HrController {
     }
 
     @PostMapping("/departments")
-    public ApiResponse<DepartmentVO> saveDepartment(@Valid @RequestBody DepartmentSaveRequest request) {
-        return ApiResponse.success(hrService.saveDepartment(request));
+    public ApiResponse<DepartmentVO> saveDepartment(Authentication authentication,
+                                                    @Valid @RequestBody DepartmentSaveRequest request) {
+        DepartmentVO saved = hrService.saveDepartment(request);
+        SessionUserVO current = currentUser(authentication);
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "ADMIN", request.getId() == null ? "CREATE_DEPARTMENT" : "UPDATE_DEPARTMENT", "HR_DEPARTMENT", String.valueOf(saved.getId()), saved.getDepartmentName());
+        return ApiResponse.success(saved);
     }
 
     @GetMapping("/departments")
-    public ApiResponse<List<DepartmentVO>> listDepartments() {
-        return ApiResponse.success(hrService.listDepartments());
+    public ApiResponse<List<DepartmentVO>> listDepartments(@RequestParam(required = false) Long parentDepartmentId,
+                                                           @RequestParam(required = false) Integer status,
+                                                           @RequestParam(required = false) String keyword) {
+        return ApiResponse.success(hrService.listDepartments(parentDepartmentId, status, keyword));
     }
 
     @GetMapping("/departments/tree")
@@ -58,14 +70,21 @@ public class HrController {
     }
 
     @DeleteMapping("/departments/{id}")
-    public ApiResponse<Void> deleteDepartment(@PathVariable Long id) {
+    public ApiResponse<Void> deleteDepartment(Authentication authentication,
+                                             @PathVariable Long id) {
         hrService.deleteDepartment(id);
+        SessionUserVO current = currentUser(authentication);
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "ADMIN", "DELETE_DEPARTMENT", "HR_DEPARTMENT", String.valueOf(id), "删除部门");
         return ApiResponse.success("deleted", null);
     }
 
     @PostMapping("/employees")
-    public ApiResponse<EmployeeVO> saveEmployee(@Valid @RequestBody EmployeeSaveRequest request) {
-        return ApiResponse.success(hrService.saveEmployee(request));
+    public ApiResponse<EmployeeVO> saveEmployee(Authentication authentication,
+                                                @Valid @RequestBody EmployeeSaveRequest request) {
+        EmployeeVO saved = hrService.saveEmployee(request);
+        SessionUserVO current = currentUser(authentication);
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "ADMIN", request.getId() == null ? "CREATE_EMPLOYEE" : "UPDATE_EMPLOYEE", "HR_EMPLOYEE", String.valueOf(saved.getId()), saved.getFullName());
+        return ApiResponse.success(saved);
     }
 
     @GetMapping("/employees")
@@ -81,14 +100,21 @@ public class HrController {
     }
 
     @DeleteMapping("/employees/{id}")
-    public ApiResponse<Void> deleteEmployee(@PathVariable Long id) {
+    public ApiResponse<Void> deleteEmployee(Authentication authentication,
+                                           @PathVariable Long id) {
         hrService.deleteEmployee(id);
+        SessionUserVO current = currentUser(authentication);
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "ADMIN", "DELETE_EMPLOYEE", "HR_EMPLOYEE", String.valueOf(id), "删除员工");
         return ApiResponse.success("deleted", null);
     }
 
     @PostMapping("/bindings")
-    public ApiResponse<IntegrationBindingVO> saveBinding(@Valid @RequestBody IntegrationBindingSaveRequest request) {
-        return ApiResponse.success(hrService.saveBinding(request));
+    public ApiResponse<IntegrationBindingVO> saveBinding(Authentication authentication,
+                                                         @Valid @RequestBody IntegrationBindingSaveRequest request) {
+        IntegrationBindingVO saved = hrService.saveBinding(request);
+        SessionUserVO current = currentUser(authentication);
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "ADMIN", request.getId() == null ? "CREATE_BINDING" : "UPDATE_BINDING", "HR_INTEGRATION_BINDING", String.valueOf(saved.getId()), saved.getModuleCode());
+        return ApiResponse.success(saved);
     }
 
     @GetMapping("/bindings")
@@ -96,5 +122,9 @@ public class HrController {
                                                                 @RequestParam(required = false) Long employeeId,
                                                                 @RequestParam(required = false) Long departmentId) {
         return ApiResponse.success(hrService.listBindings(moduleCode, employeeId, departmentId));
+    }
+
+    private SessionUserVO currentUser(Authentication authentication) {
+        return authService.loadUserByUsername(authentication.getName());
     }
 }

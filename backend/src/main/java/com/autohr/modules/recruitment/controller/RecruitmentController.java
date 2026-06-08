@@ -1,6 +1,9 @@
 package com.autohr.modules.recruitment.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.modules.auth.dto.SessionUserVO;
+import com.autohr.modules.auth.service.AuthService;
+import com.autohr.modules.auth.service.AuditLogService;
 import com.autohr.modules.recruitment.dto.CandidateApplyRequest;
 import com.autohr.modules.recruitment.dto.CandidateVO;
 import com.autohr.modules.recruitment.dto.JobSaveRequest;
@@ -38,16 +41,24 @@ import java.util.List;
 public class RecruitmentController {
 
     private final RecruitmentService recruitmentService;
+    private final AuthService authService;
+    private final AuditLogService auditLogService;
 
     @PostMapping("/admin/jobs")
-    public ApiResponse<JobVO> saveJob(@Valid @RequestBody JobSaveRequest request) {
-        return ApiResponse.success(recruitmentService.saveJob(request));
+    public ApiResponse<JobVO> saveJob(Authentication authentication,
+                                      @Valid @RequestBody JobSaveRequest request) {
+        JobVO saved = recruitmentService.saveJob(request);
+        SessionUserVO current = currentUser(authentication);
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "ADMIN", request.getId() == null ? "CREATE_RECRUITMENT_JOB" : "UPDATE_RECRUITMENT_JOB", "RECRUITMENT_JOB", String.valueOf(saved.getId()), saved.getJobTitle());
+        return ApiResponse.success(saved);
     }
 
     @GetMapping("/admin/jobs")
     public ApiResponse<List<JobVO>> listAdminJobs(@RequestParam(required = false) Integer status,
+                                                  @RequestParam(required = false) String departmentName,
+                                                  @RequestParam(required = false) String jobType,
                                                   @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(recruitmentService.listJobs(status, keyword));
+        return ApiResponse.success(recruitmentService.listJobs(status, departmentName, jobType, keyword));
     }
 
     @GetMapping("/admin/jobs/{id}")
@@ -56,16 +67,20 @@ public class RecruitmentController {
     }
 
     @DeleteMapping("/admin/jobs/{id}")
-    public ApiResponse<Void> deleteJob(@PathVariable Long id) {
+    public ApiResponse<Void> deleteJob(Authentication authentication,
+                                       @PathVariable Long id) {
         recruitmentService.deleteJob(id);
+        SessionUserVO current = currentUser(authentication);
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "ADMIN", "DELETE_RECRUITMENT_JOB", "RECRUITMENT_JOB", String.valueOf(id), "删除招聘岗位");
         return ApiResponse.success("deleted", null);
     }
 
     @GetMapping("/admin/candidates")
     public ApiResponse<List<CandidateVO>> listCandidates(@RequestParam(required = false) Long jobId,
-                                                         @RequestParam(required = false) String status,
-                                                         @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(recruitmentService.listCandidates(jobId, status, keyword));
+                                                          @RequestParam(required = false) String status,
+                                                          @RequestParam(required = false) String interviewStageStatus,
+                                                          @RequestParam(required = false) String keyword) {
+        return ApiResponse.success(recruitmentService.listCandidates(jobId, status, interviewStageStatus, keyword));
     }
 
     @GetMapping("/admin/candidates/{id}")
@@ -74,14 +89,17 @@ public class RecruitmentController {
     }
 
     @DeleteMapping("/admin/candidates/{id}")
-    public ApiResponse<Void> deleteCandidate(@PathVariable Long id) {
+    public ApiResponse<Void> deleteCandidate(Authentication authentication,
+                                             @PathVariable Long id) {
         recruitmentService.deleteCandidate(id);
+        SessionUserVO current = currentUser(authentication);
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "ADMIN", "DELETE_RECRUITMENT_CANDIDATE", "RECRUITMENT_CANDIDATE", String.valueOf(id), "删除候选人");
         return ApiResponse.success("deleted", null);
     }
 
     @GetMapping("/jobs")
     public ApiResponse<List<JobVO>> listOpenJobs(@RequestParam(required = false) String keyword) {
-        return ApiResponse.success(recruitmentService.listJobs(1, keyword));
+        return ApiResponse.success(recruitmentService.listJobs(1, null, null, keyword));
     }
 
     @GetMapping("/jobs/{id}")
@@ -112,5 +130,9 @@ public class RecruitmentController {
                 .contentType(MediaType.parseMediaType(contentType))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=UTF-8''" + fileName)
                 .body(resource);
+    }
+
+    private SessionUserVO currentUser(Authentication authentication) {
+        return authService.loadUserByUsername(authentication.getName());
     }
 }

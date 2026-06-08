@@ -14,7 +14,7 @@ public interface RecruitmentService {
 
     JobVO saveJob(JobSaveRequest request);
 
-    List<JobVO> listJobs(Integer status, String keyword);
+    List<JobVO> listJobs(Integer status, String departmentName, String jobType, String keyword);
 
     JobVO getJob(Long id);
 
@@ -22,7 +22,7 @@ public interface RecruitmentService {
 
     CandidateVO apply(CandidateApplyRequest request, String intervieweeUsername);
 
-    List<CandidateVO> listCandidates(Long jobId, String status, String keyword);
+    List<CandidateVO> listCandidates(Long jobId, String status, String interviewStageStatus, String keyword);
 
     CandidateVO getCandidate(Long id);
 

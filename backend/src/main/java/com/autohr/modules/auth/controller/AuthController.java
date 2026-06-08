@@ -73,7 +73,10 @@ public class AuthController {
                                                  @PathVariable Long id,
                                                  @RequestBody UserAdminUpdateRequest request) {
         SessionUserVO current = authService.loadUserByUsername(authentication.getName());
-        return ApiResponse.success(authService.updateUserByAdmin(id, request, current.getRoleCode()));
+        SessionUserVO updated = authService.updateUserByAdmin(id, request, current.getRoleCode());
+        String action = request.getNewPassword() == null || request.getNewPassword().isBlank() ? "UPDATE_USER" : "RESET_USER_PASSWORD";
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "ADMIN", action, "SYS_USER", String.valueOf(updated.getId()), updated.getUsername());
+        return ApiResponse.success(updated);
     }
 
     @GetMapping("/admin/audit-logs")

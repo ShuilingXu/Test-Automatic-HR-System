@@ -76,6 +76,7 @@ public class InterviewVO {
     private LocalDateTime intervieweeJoinTime;
     private LocalDateTime hrJoinTime;
     private String recordingPath;
+    private String recordingFileName;
     private String sessionStatus;
 
     private LocalDateTime createdAt;

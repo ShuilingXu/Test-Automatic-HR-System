@@ -115,16 +115,15 @@
             <div class="video-box"><span>面试者远端视频</span><video ref="hrRemoteVideo" autoplay playsinline></video></div>
           </div>
           <div class="link-row">
-            <el-button @click="startHrVideoCall">开始视频面</el-button>
-            <el-button @click="stopHrRecording">结束并上传录制</el-button>
-            <el-button @click="approveAi(1)">AI通过进视频面</el-button>
-            <el-button @click="approveAi(0)">AI拒绝</el-button>
-            <el-button @click="createVideo">生成视频面链接</el-button>
-            <el-button @click="approveVideo(1)">视频面通过进线下面</el-button>
-            <el-button @click="approveVideo(0)">视频面拒绝</el-button>
-            <el-button @click="approveOnsite(1)">线下面通过</el-button>
-            <el-button @click="approveOnsite(0)">线下面拒绝</el-button>
-            <el-button type="danger" @click="terminateProcess">终止流程</el-button>
+            <el-button v-if="canApproveAi" @click="approveAi(1)">AI通过并生成视频任务</el-button>
+            <el-button v-if="canApproveAi" @click="approveAi(0)">AI不通过</el-button>
+            <el-button v-if="canStartVideo" @click="startHrVideoCall">开始视频面</el-button>
+            <el-button v-if="canStopVideo" @click="stopHrRecording">结束并上传录制</el-button>
+            <el-button v-if="canApproveVideo" @click="approveVideo(1)">视频面通过进线下面</el-button>
+            <el-button v-if="canApproveVideo" @click="approveVideo(0)">视频面不通过</el-button>
+            <el-button v-if="canApproveOnsite" @click="approveOnsite(1)">线下面通过</el-button>
+            <el-button v-if="canApproveOnsite" @click="approveOnsite(0)">线下面不通过</el-button>
+            <el-button v-if="canTerminate" type="danger" @click="terminateProcess">终止流程</el-button>
           </div>
           <el-table :data="aiRecords" stripe class="data-table">
             <el-table-column prop="sequenceNo" label="题号" width="70" />
@@ -157,6 +156,7 @@ const recruitmentCandidates = ref([])
 const processes = ref([])
 const aiRecords = ref([])
 const selectedProcess = ref(null)
+const videoActive = ref(false)
 
 const hrLocalVideo = ref(null)
 const hrRemoteVideo = ref(null)
@@ -173,6 +173,13 @@ const weightForm = reactive({ id: null, jobId: null, knowledgeBaseId: null, weig
 const llmForm = reactive({ id: null, configName: '', modelRole: 'INTERVIEWER', baseUrl: '', apiKey: '', apiKeyMasked: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 })
 const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 7 })
 
+const canTerminate = computed(() => selectedProcess.value?.overallStatus === 'IN_PROGRESS')
+const canApproveAi = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'AI')
+const canStartVideo = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'VIDEO' && selectedProcess.value?.videoJoinLink && !videoActive.value)
+const canStopVideo = computed(() => videoActive.value)
+const canApproveVideo = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'VIDEO' && ['WAITING_APPROVAL', 'RECORDED'].includes(selectedProcess.value?.sessionStatus))
+const canApproveOnsite = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'ONSITE')
+
 function fail(error) { ElMessage.error(error.message || '操作失败') }
 async function loadAll() {
   try {
@@ -187,6 +194,9 @@ async function loadAll() {
     jobs.value = (await recruitmentApi.listAdminJobs()).data
     recruitmentCandidates.value = (await recruitmentApi.listCandidates()).data
     processes.value = (await interviewApi.listProcesses()).data
+    if (selectedProcess.value) {
+      selectedProcess.value = processes.value.find((item) => item.id === selectedProcess.value.id) || selectedProcess.value
+    }
   } catch (error) { fail(error) }
 }
 async function selectKnowledgeBase(row) { itemForm.knowledgeBaseId = row.id; knowledgeItems.value = (await interviewApi.listKnowledgeItems({ knowledgeBaseId: row.id })).data }
@@ -203,7 +213,6 @@ async function syncIntervieweeByCandidate(candidateId) { const candidate = recru
 async function startProcess() { try { if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到面试者账号'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
 async function selectProcess(row) { selectedProcess.value = row; aiRecords.value = (await interviewApi.listAiRecords({ processId: row.id })).data }
 async function approveAi(approved) { try { await interviewApi.approveAi(selectedProcess.value.id, { approved }); ElMessage.success('AI审批完成'); await loadAll() } catch (error) { fail(error) } }
-async function createVideo() { try { const response = await interviewApi.createVideoSession(selectedProcess.value.id); selectedProcess.value = { ...selectedProcess.value, videoSerialNo: response.data.videoSerialNo, videoJoinLink: response.data.videoJoinLink }; ElMessage.success('视频面试链接已生成'); await loadAll() } catch (error) { fail(error) } }
 async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved }); ElMessage.success('视频面审批完成'); await loadAll() } catch (error) { fail(error) } }
 async function approveOnsite(approved) { try { await interviewApi.approveOnsite(selectedProcess.value.id, { approved }); ElMessage.success('线下面审批完成'); await loadAll() } catch (error) { fail(error) } }
 async function terminateProcess() { try { await interviewApi.terminateProcess(selectedProcess.value.id, { approved: 0 }); ElMessage.success('流程已终止'); await loadAll() } catch (error) { fail(error) } }
@@ -230,6 +239,7 @@ async function startHrVideoCall() {
     hrRecordedChunks = []
     hrRecorder.ondataavailable = (event) => { if (event.data.size > 0) hrRecordedChunks.push(event.data) }
     hrRecorder.start(1000)
+    videoActive.value = true
     hrPollTimer = setInterval(async () => {
       const state = (await interviewApi.getHrVideoState(selectedProcess.value.id)).data
       if (state.answerSdp && !hrPeer.currentRemoteDescription) {
@@ -262,14 +272,26 @@ async function stopHrRecording() {
       await interviewApi.completeVideo(selectedProcess.value.id)
       ElMessage.success('录制已上传')
     }
-    clearInterval(hrPollTimer)
+    disconnectHrVideo()
+    await loadAll()
   } catch (error) { fail(error) }
 }
 
-onBeforeUnmount(() => {
+function disconnectHrVideo() {
   clearInterval(hrPollTimer)
+  hrPollTimer = null
+  hrPeer?.getSenders?.().forEach((sender) => sender.track?.stop())
   hrPeer?.close()
+  hrPeer = null
   hrLocalStream?.getTracks().forEach((track) => track.stop())
+  hrLocalStream = null
+  if (hrLocalVideo.value) hrLocalVideo.value.srcObject = null
+  if (hrRemoteVideo.value) hrRemoteVideo.value.srcObject = null
+  videoActive.value = false
+}
+
+onBeforeUnmount(() => {
+  disconnectHrVideo()
 })
 
 onMounted(loadAll)

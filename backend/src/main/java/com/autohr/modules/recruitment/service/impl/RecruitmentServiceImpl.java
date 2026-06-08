@@ -4,6 +4,13 @@ import cn.hutool.core.util.StrUtil;
 import com.autohr.common.exception.BusinessException;
 import com.autohr.modules.auth.entity.SysUser;
 import com.autohr.modules.auth.mapper.SysUserMapper;
+import com.autohr.modules.auth.service.AuditLogService;
+import com.autohr.modules.interview.entity.InterviewProcess;
+import com.autohr.modules.interview.entity.InterviewAiRecord;
+import com.autohr.modules.interview.entity.InterviewVideoSession;
+import com.autohr.modules.interview.mapper.InterviewAiRecordMapper;
+import com.autohr.modules.interview.mapper.InterviewProcessMapper;
+import com.autohr.modules.interview.mapper.InterviewVideoSessionMapper;
 import com.autohr.modules.recruitment.dto.CandidateApplyRequest;
 import com.autohr.modules.recruitment.dto.CandidateVO;
 import com.autohr.modules.recruitment.dto.JobSaveRequest;
@@ -47,6 +54,10 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     private final RecruitmentCandidateMapper candidateMapper;
     private final RecruitmentResumeFileMapper resumeFileMapper;
     private final SysUserMapper sysUserMapper;
+    private final AuditLogService auditLogService;
+    private final InterviewProcessMapper interviewProcessMapper;
+    private final InterviewAiRecordMapper interviewAiRecordMapper;
+    private final InterviewVideoSessionMapper interviewVideoSessionMapper;
 
     @Override
     @Transactional
@@ -68,12 +79,16 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     @Override
-    public List<JobVO> listJobs(Integer status, String keyword) {
+    public List<JobVO> listJobs(Integer status, String departmentName, String jobType, String keyword) {
         List<RecruitmentJob> jobs = jobMapper.selectList(new LambdaQueryWrapper<RecruitmentJob>()
                 .eq(status != null, RecruitmentJob::getStatus, status)
+                .eq(StrUtil.isNotBlank(departmentName), RecruitmentJob::getDepartmentName, departmentName)
+                .eq(StrUtil.isNotBlank(jobType), RecruitmentJob::getJobType, jobType)
                 .and(StrUtil.isNotBlank(keyword), q -> q.like(RecruitmentJob::getJobTitle, keyword)
                         .or().like(RecruitmentJob::getDepartmentName, keyword)
-                        .or().like(RecruitmentJob::getJobCode, keyword))
+                        .or().like(RecruitmentJob::getJobCode, keyword)
+                        .or().like(RecruitmentJob::getWorkLocation, keyword)
+                        .or().like(RecruitmentJob::getSalaryRange, keyword))
                 .orderByDesc(RecruitmentJob::getId));
         return jobs.stream().map(this::toJobVO).toList();
     }
@@ -108,17 +123,21 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         candidate.setApplicationStatus("SUBMITTED");
         candidate.setIntervieweeUserId(user.getId());
         candidateMapper.insert(candidate);
+        auditLogService.log(user.getId(), displayName(user), user.getRoleCode(), "RECRUITMENT", "APPLY_CANDIDATE", "RECRUITMENT_CANDIDATE", String.valueOf(candidate.getId()), candidate.getFullName() + " 投递岗位 " + request.getJobId());
         return toCandidateVO(requireCandidate(candidate.getId()), loadJobMap(), loadResumeMap());
     }
 
     @Override
-    public List<CandidateVO> listCandidates(Long jobId, String status, String keyword) {
+    public List<CandidateVO> listCandidates(Long jobId, String status, String interviewStageStatus, String keyword) {
         List<RecruitmentCandidate> candidates = candidateMapper.selectList(new LambdaQueryWrapper<RecruitmentCandidate>()
                 .eq(jobId != null, RecruitmentCandidate::getJobId, jobId)
                 .eq(StrUtil.isNotBlank(status), RecruitmentCandidate::getApplicationStatus, status)
+                .eq(StrUtil.isNotBlank(interviewStageStatus), RecruitmentCandidate::getInterviewStageStatus, interviewStageStatus)
                 .and(StrUtil.isNotBlank(keyword), q -> q.like(RecruitmentCandidate::getFullName, keyword)
                         .or().like(RecruitmentCandidate::getMobilePhone, keyword)
-                        .or().like(RecruitmentCandidate::getMajor, keyword))
+                        .or().like(RecruitmentCandidate::getMajor, keyword)
+                        .or().like(RecruitmentCandidate::getEmail, keyword)
+                        .or().like(RecruitmentCandidate::getGraduationSchool, keyword))
                 .orderByDesc(RecruitmentCandidate::getId));
         Map<Long, RecruitmentJob> jobMap = loadJobMap();
         Map<Long, RecruitmentResumeFile> resumeMap = loadResumeMap();
@@ -134,6 +153,13 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     @Transactional
     public void deleteCandidate(Long id) {
         RecruitmentCandidate candidate = requireCandidate(id);
+        List<InterviewProcess> processes = interviewProcessMapper.selectList(new LambdaQueryWrapper<InterviewProcess>()
+                .eq(InterviewProcess::getRecruitmentCandidateId, id));
+        for (InterviewProcess process : processes) {
+            interviewAiRecordMapper.delete(new LambdaQueryWrapper<InterviewAiRecord>().eq(InterviewAiRecord::getProcessId, process.getId()));
+            interviewVideoSessionMapper.delete(new LambdaQueryWrapper<InterviewVideoSession>().eq(InterviewVideoSession::getProcessId, process.getId()));
+            interviewProcessMapper.deleteById(process.getId());
+        }
         resumeFileMapper.delete(new LambdaQueryWrapper<RecruitmentResumeFile>().eq(RecruitmentResumeFile::getCandidateId, id));
         candidateMapper.deleteById(id);
     }
@@ -165,6 +191,8 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             resumeFileMapper.insert(resumeFile);
             candidate.setResumeFileId(resumeFile.getId());
             candidateMapper.updateById(candidate);
+            SysUser user = candidate.getIntervieweeUserId() == null ? null : sysUserMapper.selectById(candidate.getIntervieweeUserId());
+            auditLogService.log(candidate.getIntervieweeUserId(), user == null ? candidate.getFullName() : displayName(user), user == null ? "INTERVIEWEE" : user.getRoleCode(), "RECRUITMENT", "UPLOAD_RESUME", "RECRUITMENT_RESUME", String.valueOf(resumeFile.getId()), originalName);
             return toResumeFileVO(resumeFileMapper.selectById(resumeFile.getId()));
         } catch (IOException ex) {
             throw new BusinessException("简历上传失败: " + ex.getMessage());
@@ -232,6 +260,10 @@ public class RecruitmentServiceImpl implements RecruitmentService {
 
     private String buildJobCode(String jobTitle) {
         return "JOB-" + Math.abs(Objects.requireNonNullElse(jobTitle, "RECRUITMENT").hashCode());
+    }
+
+    private String displayName(SysUser user) {
+        return StrUtil.blankToDefault(user.getDisplayName(), user.getUsername());
     }
 
     private Long nextId(List<Long> ids) {

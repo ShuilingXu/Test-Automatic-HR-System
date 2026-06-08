@@ -133,6 +133,13 @@ public class AuthServiceImpl implements AuthService {
         if (request.getEmail() != null) {
             user.setEmail(request.getEmail());
         }
+        if (StrUtil.isNotBlank(request.getNewPassword())) {
+            if (request.getNewPassword().length() < 6) {
+                throw new BusinessException("新密码长度不能少于6位");
+            }
+            user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+            user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
+        }
         sysUserMapper.updateById(user);
         return toSessionUser(user);
     }

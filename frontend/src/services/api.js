@@ -27,7 +27,7 @@ request.interceptors.response.use(
 
 export const hrApi = {
   getDashboard() { return request.get('/hr/dashboard') },
-  listDepartments() { return request.get('/hr/departments') },
+  listDepartments(params) { return request.get('/hr/departments', { params }) },
   getDepartmentTree() { return request.get('/hr/departments/tree') },
   getDepartmentDetail(id) { return request.get(`/hr/departments/${id}`) },
   saveDepartment(payload) { return request.post('/hr/departments', payload) },

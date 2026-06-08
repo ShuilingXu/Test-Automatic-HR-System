@@ -35,8 +35,10 @@ public class AuditLogServiceImpl implements AuditLogService {
 
     @Override
     public List<AuditLogVO> list(String moduleCode, String actionCode, String keyword) {
+        boolean adminCategory = "ADMIN".equals(moduleCode);
         return auditLogMapper.selectList(new LambdaQueryWrapper<SysAuditLog>()
-                .eq(moduleCode != null && !moduleCode.isBlank(), SysAuditLog::getModuleCode, moduleCode)
+                .eq(moduleCode != null && !moduleCode.isBlank() && !adminCategory, SysAuditLog::getModuleCode, moduleCode)
+                .notIn(adminCategory, SysAuditLog::getModuleCode, "INTERVIEW", "RECRUITMENT")
                 .eq(actionCode != null && !actionCode.isBlank(), SysAuditLog::getActionCode, actionCode)
                 .and(keyword != null && !keyword.isBlank(), q -> q.like(SysAuditLog::getOperatorUsername, keyword)
                         .or().like(SysAuditLog::getDetail, keyword)

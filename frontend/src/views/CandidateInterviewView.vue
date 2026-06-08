@@ -137,14 +137,24 @@ async function stopRecording() {
       await interviewApi.uploadVideoRecording(sessionForm.processId, file)
       ElMessage.success('录制文件已上传')
     }
-    clearInterval(pollTimer)
+    disconnectVideo()
   } catch (error) { fail(error) }
 }
 
-onBeforeUnmount(() => {
+function disconnectVideo() {
   clearInterval(pollTimer)
+  pollTimer = null
+  peer?.getSenders?.().forEach((sender) => sender.track?.stop())
   peer?.close()
+  peer = null
   localStream?.getTracks().forEach((track) => track.stop())
+  localStream = null
+  if (localVideo.value) localVideo.value.srcObject = null
+  if (remoteVideo.value) remoteVideo.value.srcObject = null
+}
+
+onBeforeUnmount(() => {
+  disconnectVideo()
 })
 
 onMounted(async () => {

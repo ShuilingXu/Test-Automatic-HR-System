@@ -297,9 +297,8 @@ public class InterviewServiceImpl implements InterviewService {
         int currentAverage = Math.round(total / (float) count);
         process.setAiAverageScore(currentAverage);
         if (currentAverage >= process.getAiThresholdScore()) {
-            process.setStageStatus("PASSED");
-            process.setCurrentStage("VIDEO");
-            process.setProcessStatusView("视频面");
+            process.setStageStatus("WAITING_APPROVAL");
+            process.setProcessStatusView("AI待审批");
         } else {
             generateNextQuestion(process);
         }
@@ -333,18 +332,11 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO createVideoSession(Long processId, Long approverUserId, String approverName) {
         InterviewProcess process = requireProcess(processId);
+        ensureInProgress(process);
         if (!StrUtil.equals(process.getCurrentStage(), "VIDEO")) {
             throw new BusinessException("当前流程不在视频面试阶段");
         }
-        InterviewVideoSession session = new InterviewVideoSession();
-        session.setId(nextId(videoSessionMapper.selectList(null).stream().map(InterviewVideoSession::getId).toList()));
-        session.setProcessId(processId);
-        session.setVideoSerialNo("VID-" + UUID.randomUUID());
-        session.setVideoJoinLink("/interview/interviewee?processId=" + processId + "&serial=" + session.getVideoSerialNo());
-        session.setApproverUserId(approverUserId);
-        session.setApproverName(approverName);
-        session.setSessionStatus("CREATED");
-        videoSessionMapper.insert(session);
+        InterviewVideoSession session = ensureVideoSession(processId, approverUserId, approverName);
         auditLogService.log(approverUserId, displayName(approverName, "HR"), "HR_ADMIN", "INTERVIEW", "CREATE_VIDEO_SESSION", "VIDEO_SESSION", String.valueOf(session.getId()), session.getVideoSerialNo());
         return toVideoSessionVO(session);
     }
@@ -388,6 +380,13 @@ public class InterviewServiceImpl implements InterviewService {
         }
         session.setSessionStatus("WAITING_APPROVAL");
         videoSessionMapper.updateById(session);
+        InterviewProcess process = requireProcess(processId);
+        if (StrUtil.equals(process.getCurrentStage(), "VIDEO") && StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
+            process.setStageStatus("WAITING_APPROVAL");
+            process.setProcessStatusView("视频待审批");
+            processMapper.updateById(process);
+            updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+        }
         return toVideoSessionVO(session);
     }
 
@@ -395,6 +394,10 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO approveAiToVideo(Long processId, InterviewDecisionRequest request) {
         InterviewProcess process = requireProcess(processId);
+        ensureInProgress(process);
+        if (!StrUtil.equals(process.getCurrentStage(), "AI")) {
+            throw new BusinessException("当前流程不在AI审批阶段");
+        }
         if (request.getApproved() == 1) {
             process.setCurrentStage("VIDEO");
             process.setStageStatus("READY");
@@ -402,10 +405,14 @@ public class InterviewServiceImpl implements InterviewService {
         } else {
             process.setOverallStatus("REJECTED");
             process.setStageStatus("REJECTED");
+            process.setProcessStatusView("已拒绝");
         }
         process.setApprovedHrUserId(request.getApproverUserId());
         process.setApprovedHrName(request.getApproverName());
         processMapper.updateById(process);
+        if (request.getApproved() == 1) {
+            ensureVideoSession(processId, request.getApproverUserId(), request.getApproverName());
+        }
         updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
         auditLogService.log(request.getApproverUserId(), displayName(request.getApproverName(), "HR"), "HR_ADMIN", "INTERVIEW", "APPROVE_AI", "INTERVIEW_PROCESS", String.valueOf(processId), process.getProcessStatusView());
         return toProcessVO(process);
@@ -415,6 +422,14 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO approveVideoToOnsite(Long processId, InterviewDecisionRequest request) {
         InterviewProcess process = requireProcess(processId);
+        ensureInProgress(process);
+        if (!StrUtil.equals(process.getCurrentStage(), "VIDEO")) {
+            throw new BusinessException("当前流程不在视频审批阶段");
+        }
+        InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        if (!(StrUtil.equals(session.getSessionStatus(), "WAITING_APPROVAL") || StrUtil.equals(session.getSessionStatus(), "RECORDED"))) {
+            throw new BusinessException("视频面试尚未结束，不能审批");
+        }
         process.setVideoApproved(request.getApproved());
         process.setApprovedHrUserId(request.getApproverUserId());
         process.setApprovedHrName(request.getApproverName());
@@ -425,6 +440,7 @@ public class InterviewServiceImpl implements InterviewService {
         } else {
             process.setOverallStatus("REJECTED");
             process.setStageStatus("REJECTED");
+            process.setProcessStatusView("已拒绝");
         }
         processMapper.updateById(process);
         updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
@@ -436,6 +452,10 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO decideOnsite(Long processId, InterviewDecisionRequest request) {
         InterviewProcess process = requireProcess(processId);
+        ensureInProgress(process);
+        if (!StrUtil.equals(process.getCurrentStage(), "ONSITE")) {
+            throw new BusinessException("当前流程不在线下面审批阶段");
+        }
         process.setOnsiteApproved(request.getApproved());
         process.setApprovedHrUserId(request.getApproverUserId());
         process.setApprovedHrName(request.getApproverName());
@@ -459,6 +479,7 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO terminateProcess(Long processId, InterviewDecisionRequest request) {
         InterviewProcess process = requireProcess(processId);
+        ensureInProgress(process);
         process.setOverallStatus("TERMINATED");
         process.setStageStatus("TERMINATED");
         process.setProcessStatusView("已终止");
@@ -640,6 +661,31 @@ public class InterviewServiceImpl implements InterviewService {
         return entity;
     }
 
+    private InterviewVideoSession ensureVideoSession(Long processId, Long approverUserId, String approverName) {
+        InterviewVideoSession existing = videoSessionMapper.selectOne(new LambdaQueryWrapper<InterviewVideoSession>()
+                .eq(InterviewVideoSession::getProcessId, processId)
+                .last("LIMIT 1"));
+        if (existing != null) {
+            return existing;
+        }
+        InterviewVideoSession session = new InterviewVideoSession();
+        session.setId(nextId(videoSessionMapper.selectList(null).stream().map(InterviewVideoSession::getId).toList()));
+        session.setProcessId(processId);
+        session.setVideoSerialNo("VID-" + UUID.randomUUID());
+        session.setVideoJoinLink("/interview/interviewee?processId=" + processId + "&serial=" + session.getVideoSerialNo());
+        session.setApproverUserId(approverUserId);
+        session.setApproverName(approverName);
+        session.setSessionStatus("CREATED");
+        videoSessionMapper.insert(session);
+        return session;
+    }
+
+    private void ensureInProgress(InterviewProcess process) {
+        if (!StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
+            throw new BusinessException("当前流程已结束，不能重复审批或回退");
+        }
+    }
+
     private RecruitmentCandidate requireRecruitmentCandidate(Long id) {
         RecruitmentCandidate entity = recruitmentCandidateMapper.selectById(id);
         if (entity == null) throw new BusinessException("招聘候选人不存在: " + id);
@@ -811,6 +857,7 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setApprovedHrUserId(entity.getApprovedHrUserId());
         vo.setApprovedHrName(entity.getApprovedHrName());
         vo.setProcessStatusView(entity.getProcessStatusView());
+        fillVideoSessionSummary(vo, entity.getId());
         vo.setCreatedAt(entity.getCreatedAt());
         vo.setUpdatedAt(entity.getUpdatedAt());
         return vo;
@@ -850,8 +897,25 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setStartTime(entity.getStartTime());
         vo.setEndTime(entity.getEndTime());
         vo.setRecordingPath(entity.getRecordingPath());
+        vo.setRecordingFileName(entity.getRecordingFileName());
         vo.setSessionStatus(entity.getSessionStatus());
         return vo;
+    }
+
+    private void fillVideoSessionSummary(InterviewVO vo, Long processId) {
+        InterviewVideoSession session = videoSessionMapper.selectOne(new LambdaQueryWrapper<InterviewVideoSession>()
+                .eq(InterviewVideoSession::getProcessId, processId)
+                .last("LIMIT 1"));
+        if (session == null) {
+            return;
+        }
+        vo.setVideoSerialNo(session.getVideoSerialNo());
+        vo.setVideoJoinLink(session.getVideoJoinLink());
+        vo.setIntervieweeJoinTime(session.getIntervieweeJoinTime());
+        vo.setHrJoinTime(session.getHrJoinTime());
+        vo.setRecordingPath(session.getRecordingPath());
+        vo.setRecordingFileName(session.getRecordingFileName());
+        vo.setSessionStatus(session.getSessionStatus());
     }
 
     private VideoSignalVO toVideoSignalVO(InterviewVideoSession entity) {

@@ -17,7 +17,7 @@ public interface HrService {
 
     DepartmentVO saveDepartment(DepartmentSaveRequest request);
 
-    List<DepartmentVO> listDepartments();
+    List<DepartmentVO> listDepartments(Long parentDepartmentId, Integer status, String keyword);
 
     DepartmentDetailVO getDepartmentDetail(Long id);
 

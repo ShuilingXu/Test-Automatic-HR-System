@@ -9,4 +9,5 @@ public class UserAdminUpdateRequest {
     private String displayName;
     private String mobilePhone;
     private String email;
+    private String newPassword;
 }
