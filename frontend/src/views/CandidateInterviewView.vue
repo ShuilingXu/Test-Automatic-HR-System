@@ -67,6 +67,7 @@ let peer = null
 let pollTimer = null
 let recorder = null
 let recordedChunks = []
+let addedHrIce = new Set()
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
 async function loadProcessRecords() {
@@ -94,6 +95,7 @@ async function joinVideo() {
     localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
     localVideo.value.srcObject = localStream
     peer = new RTCPeerConnection()
+    addedHrIce = new Set()
     localStream.getTracks().forEach((track) => peer.addTrack(track, localStream))
     peer.ontrack = (event) => { remoteVideo.value.srcObject = event.streams[0] }
     peer.onicecandidate = async (event) => {
@@ -116,7 +118,10 @@ async function joinVideo() {
       if (state.hrIceCandidates) {
         const candidates = state.hrIceCandidates.split('\n').filter(Boolean)
         for (const item of candidates) {
-          try { await peer.addIceCandidate(JSON.parse(item)) } catch {}
+          if (!addedHrIce.has(item)) {
+            addedHrIce.add(item)
+            try { await peer.addIceCandidate(JSON.parse(item)) } catch {}
+          }
         }
       }
     }, 2000)

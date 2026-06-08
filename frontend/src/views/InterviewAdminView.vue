@@ -108,6 +108,7 @@
           <div v-if="selectedProcess.videoJoinLink || selectedProcess.videoSerialNo" class="serial-line">
             <span v-if="selectedProcess.videoSerialNo">视频流水号：{{ selectedProcess.videoSerialNo }}</span>
             <a v-if="selectedProcess.videoJoinLink" :href="selectedProcess.videoJoinLink" target="_blank" class="video-link">打开面试链接</a>
+            <a v-if="selectedProcess.recordingPath || selectedProcess.recordingFileName" :href="interviewApi.getRecordingUrl(selectedProcess.id)" target="_blank" class="video-link">查看录制文件</a>
           </div>
           <div class="video-grid">
             <div class="video-box"><span>HR本地视频</span><video ref="hrLocalVideo" autoplay muted playsinline></video></div>
@@ -164,6 +165,7 @@ let hrPeer = null
 let hrPollTimer = null
 let hrRecorder = null
 let hrRecordedChunks = []
+let addedIntervieweeIce = new Set()
 
 const kbForm = reactive({ id: null, knowledgeBaseName: '', techCategory: '', jobCategory: '', status: 1 })
 const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '', knowledgeContent: '', status: 1 })
@@ -200,11 +202,11 @@ function editLlmConfig(row) { Object.assign(llmForm, row) }
 async function syncIntervieweeByCandidate(candidateId) { const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId); processForm.intervieweeUserId = candidate?.intervieweeUserId ? String(candidate.intervieweeUserId) : '' }
 async function startProcess() { try { if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到面试者账号'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
 async function selectProcess(row) { selectedProcess.value = row; aiRecords.value = (await interviewApi.listAiRecords({ processId: row.id })).data }
-async function approveAi(approved) { try { await interviewApi.approveAi(selectedProcess.value.id, { approved, approverName: 'HR审批人' }); ElMessage.success('AI审批完成'); await loadAll() } catch (error) { fail(error) } }
-async function createVideo() { try { const response = await interviewApi.createVideoSession(selectedProcess.value.id, { approverName: 'HR审批人' }); selectedProcess.value = { ...selectedProcess.value, videoSerialNo: response.data.videoSerialNo, videoJoinLink: response.data.videoJoinLink }; ElMessage.success('视频面试链接已生成'); await loadAll() } catch (error) { fail(error) } }
-async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved, approverName: 'HR审批人' }); ElMessage.success('视频面审批完成'); await loadAll() } catch (error) { fail(error) } }
-async function approveOnsite(approved) { try { await interviewApi.approveOnsite(selectedProcess.value.id, { approved, approverName: 'HR审批人' }); ElMessage.success('线下面审批完成'); await loadAll() } catch (error) { fail(error) } }
-async function terminateProcess() { try { await interviewApi.terminateProcess(selectedProcess.value.id, { approved: 0, approverName: 'HR审批人' }); ElMessage.success('流程已终止'); await loadAll() } catch (error) { fail(error) } }
+async function approveAi(approved) { try { await interviewApi.approveAi(selectedProcess.value.id, { approved }); ElMessage.success('AI审批完成'); await loadAll() } catch (error) { fail(error) } }
+async function createVideo() { try { const response = await interviewApi.createVideoSession(selectedProcess.value.id); selectedProcess.value = { ...selectedProcess.value, videoSerialNo: response.data.videoSerialNo, videoJoinLink: response.data.videoJoinLink }; ElMessage.success('视频面试链接已生成'); await loadAll() } catch (error) { fail(error) } }
+async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved }); ElMessage.success('视频面审批完成'); await loadAll() } catch (error) { fail(error) } }
+async function approveOnsite(approved) { try { await interviewApi.approveOnsite(selectedProcess.value.id, { approved }); ElMessage.success('线下面审批完成'); await loadAll() } catch (error) { fail(error) } }
+async function terminateProcess() { try { await interviewApi.terminateProcess(selectedProcess.value.id, { approved: 0 }); ElMessage.success('流程已终止'); await loadAll() } catch (error) { fail(error) } }
 
 async function startHrVideoCall() {
   if (!selectedProcess.value) return
@@ -212,6 +214,7 @@ async function startHrVideoCall() {
     hrLocalStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
     hrLocalVideo.value.srcObject = hrLocalStream
     hrPeer = new RTCPeerConnection()
+    addedIntervieweeIce = new Set()
     hrLocalStream.getTracks().forEach((track) => hrPeer.addTrack(track, hrLocalStream))
     hrPeer.ontrack = (event) => { hrRemoteVideo.value.srcObject = event.streams[0] }
     hrPeer.onicecandidate = async (event) => {
@@ -222,20 +225,23 @@ async function startHrVideoCall() {
     const offer = await hrPeer.createOffer()
     await hrPeer.setLocalDescription(offer)
     await interviewApi.publishVideoOffer(selectedProcess.value.id, { offerSdp: JSON.stringify(offer) })
-    await interviewApi.hrJoin(selectedProcess.value.id, { approverName: 'HR审批人' })
+    await interviewApi.hrJoin(selectedProcess.value.id)
     hrRecorder = new MediaRecorder(hrLocalStream)
     hrRecordedChunks = []
     hrRecorder.ondataavailable = (event) => { if (event.data.size > 0) hrRecordedChunks.push(event.data) }
     hrRecorder.start(1000)
     hrPollTimer = setInterval(async () => {
-      const state = (await interviewApi.getVideoState(selectedProcess.value.id)).data
+      const state = (await interviewApi.getHrVideoState(selectedProcess.value.id)).data
       if (state.answerSdp && !hrPeer.currentRemoteDescription) {
         await hrPeer.setRemoteDescription(JSON.parse(state.answerSdp))
       }
       if (state.intervieweeIceCandidates) {
         const candidates = state.intervieweeIceCandidates.split('\n').filter(Boolean)
         for (const item of candidates) {
-          try { await hrPeer.addIceCandidate(JSON.parse(item)) } catch {}
+          if (!addedIntervieweeIce.has(item)) {
+            addedIntervieweeIce.add(item)
+            try { await hrPeer.addIceCandidate(JSON.parse(item)) } catch {}
+          }
         }
       }
     }, 2000)
@@ -252,8 +258,8 @@ async function stopHrRecording() {
       })
       const blob = new Blob(hrRecordedChunks, { type: 'video/webm' })
       const file = new File([blob], `hr-${selectedProcess.value.id}.webm`, { type: 'video/webm' })
-      await interviewApi.uploadVideoRecording(selectedProcess.value.id, file)
-      await interviewApi.completeVideo(selectedProcess.value.id, { recordingPath: 'uploaded-by-hr' })
+      await interviewApi.uploadHrVideoRecording(selectedProcess.value.id, file)
+      await interviewApi.completeVideo(selectedProcess.value.id)
       ElMessage.success('录制已上传')
     }
     clearInterval(hrPollTimer)

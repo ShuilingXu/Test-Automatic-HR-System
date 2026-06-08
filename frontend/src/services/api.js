@@ -62,6 +62,7 @@ export const authApi = {
   getSession() { return request.get('/auth/me') },
   updateProfile(payload) { return request.post('/auth/profile', payload) },
   listUsers(params) { return request.get('/auth/admin/users', { params }) },
+  listAuditLogs(params) { return request.get('/auth/admin/audit-logs', { params }) },
   updateUser(id, payload) { return request.post(`/auth/admin/users/${id}`, payload) },
   logout() {
     return request.post('/auth/logout').finally(() => {
@@ -93,6 +94,7 @@ export const interviewApi = {
   createVideoSession(processId, params) { return request.post(`/interview/hr/video-session/${processId}`, null, { params }) },
   publishVideoOffer(processId, payload) { return request.post(`/interview/hr/video-offer/${processId}`, payload) },
   getVideoState(processId) { return request.get(`/interview/interviewee/video-state/${processId}`) },
+  getHrVideoState(processId) { return request.get(`/interview/hr/video-state/${processId}`) },
   submitVideoAnswer(processId, payload) { return request.post(`/interview/interviewee/video-answer/${processId}`, payload) },
   addHrIce(processId, payload) { return request.post(`/interview/hr/video-ice/${processId}`, payload) },
   addIntervieweeIce(processId, payload) { return request.post(`/interview/interviewee/video-ice/${processId}`, payload) },
@@ -105,6 +107,16 @@ export const interviewApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  uploadHrVideoRecording(processId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('originalFileName', file.name)
+    formData.append('contentType', file.type || 'video/webm')
+    return request.post(`/interview/hr/video-recording/${processId}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  getRecordingUrl(processId) { return `/api/interview/hr/video-recording/${processId}` },
 
   intervieweeJoin(processId) { return request.post(`/interview/interviewee/video-join/${processId}`) },
   hrJoin(processId, params) { return request.post(`/interview/hr/video-join/${processId}`, null, { params }) },

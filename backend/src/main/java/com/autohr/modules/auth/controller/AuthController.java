@@ -3,11 +3,13 @@ package com.autohr.modules.auth.controller;
 import com.autohr.common.api.ApiResponse;
 import com.autohr.modules.auth.dto.CandidateProfileUpdateRequest;
 import com.autohr.modules.auth.dto.CandidateRegisterRequest;
+import com.autohr.modules.auth.dto.AuditLogVO;
 import com.autohr.modules.auth.dto.LoginRequest;
 import com.autohr.modules.auth.dto.LoginResponse;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.dto.UserAdminUpdateRequest;
 import com.autohr.modules.auth.service.AuthService;
+import com.autohr.modules.auth.service.AuditLogService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -27,6 +29,7 @@ import java.util.List;
 public class AuthController {
 
     private final AuthService authService;
+    private final AuditLogService auditLogService;
 
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
@@ -71,5 +74,12 @@ public class AuthController {
                                                  @RequestBody UserAdminUpdateRequest request) {
         SessionUserVO current = authService.loadUserByUsername(authentication.getName());
         return ApiResponse.success(authService.updateUserByAdmin(id, request, current.getRoleCode()));
+    }
+
+    @GetMapping("/admin/audit-logs")
+    public ApiResponse<List<AuditLogVO>> listAuditLogs(@RequestParam(required = false) String moduleCode,
+                                                       @RequestParam(required = false) String actionCode,
+                                                       @RequestParam(required = false) String keyword) {
+        return ApiResponse.success(auditLogService.list(moduleCode, actionCode, keyword));
     }
 }

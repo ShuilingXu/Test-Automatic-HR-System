@@ -31,3 +31,4 @@ Thumbs.db
 .env.local
 *.log
 /backend/uploads/resumes
+/backend/uploads

@@ -31,6 +31,26 @@
         </div>
       </section>
 
+      <section v-if="activeTab === 'audit'" class="page-card">
+        <div class="topline">
+          <div>
+            <p class="page-eyebrow">Audit</p>
+            <h2>审计日志</h2>
+          </div>
+          <el-button @click="loadAuditLogs">刷新</el-button>
+        </div>
+        <el-table :data="auditLogs" stripe class="data-table">
+          <el-table-column prop="operatorUsername" label="操作人" />
+          <el-table-column prop="operatorRoleCode" label="角色" />
+          <el-table-column prop="moduleCode" label="模块" />
+          <el-table-column prop="actionCode" label="动作" />
+          <el-table-column prop="targetType" label="对象类型" />
+          <el-table-column prop="targetId" label="对象ID" />
+          <el-table-column prop="detail" label="详情" min-width="240" />
+          <el-table-column prop="createdAt" label="时间" min-width="170" />
+        </el-table>
+      </section>
+
       <section v-if="activeTab === 'users'" class="page-card">
         <div class="topline">
           <div>
@@ -159,6 +179,7 @@ const tabs = computed(() => {
     { key: 'recruitment', label: '招聘' },
   ]
   if (isItAdmin.value || isHrAdmin.value) {
+    base.unshift({ key: 'audit', label: '审计日志' })
     base.unshift({ key: 'users', label: '用户管理中心' })
   }
   return base
@@ -175,6 +196,7 @@ const bindings = ref([])
 const jobs = ref([])
 const candidates = ref([])
 const users = ref([])
+const auditLogs = ref([])
 const selectedCandidate = ref(null)
 
 const userForm = reactive({ id: null, username: '', displayName: '', roleCode: 'HR_USER', status: 1, mobilePhone: '', email: '' })
@@ -201,7 +223,8 @@ async function loadEmployees() { try { employees.value = (await hrApi.listEmploy
 async function loadBindings() { try { bindings.value = (await hrApi.listBindings()).data } catch (error) { fail(error) } }
 async function loadRecruitment() { try { jobs.value = (await recruitmentApi.listAdminJobs()).data; candidates.value = (await recruitmentApi.listCandidates()).data } catch (error) { fail(error) } }
 async function loadUsers() { if (!(isItAdmin.value || isHrAdmin.value)) return; try { users.value = (await authApi.listUsers()).data } catch (error) { fail(error) } }
-async function loadAll() { await Promise.all([loadSession(), loadDashboard(), loadDepartments(), loadEmployees(), loadBindings(), loadRecruitment()]); if (isItAdmin.value || isHrAdmin.value) await loadUsers() }
+async function loadAuditLogs() { if (!(isItAdmin.value || isHrAdmin.value)) return; try { auditLogs.value = (await authApi.listAuditLogs()).data } catch (error) { fail(error) } }
+async function loadAll() { await Promise.all([loadSession(), loadDashboard(), loadDepartments(), loadEmployees(), loadBindings(), loadRecruitment()]); if (isItAdmin.value || isHrAdmin.value) { await Promise.all([loadUsers(), loadAuditLogs()]) } }
 async function saveDepartment() { try { await hrApi.saveDepartment({ ...departmentForm }); ElMessage.success('部门已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveEmployee() { try { await hrApi.saveEmployee({ ...employeeForm }); ElMessage.success('员工已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveBinding() { try { await hrApi.saveBinding({ ...bindingForm }); ElMessage.success('挂接已保存'); await loadAll() } catch (error) { fail(error) } }

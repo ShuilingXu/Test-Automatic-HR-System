@@ -1,6 +1,8 @@
 package com.autohr.modules.interview.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.modules.auth.dto.SessionUserVO;
+import com.autohr.modules.auth.service.AuthService;
 import com.autohr.modules.interview.dto.AiAnswerRequest;
 import com.autohr.modules.interview.dto.InterviewDecisionRequest;
 import com.autohr.modules.interview.dto.InterviewVO;
@@ -14,6 +16,12 @@ import com.autohr.modules.interview.dto.VideoSignalVO;
 import com.autohr.modules.interview.service.InterviewService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,6 +31,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 
 @RestController
@@ -31,6 +43,7 @@ import java.util.List;
 public class InterviewController {
 
     private final InterviewService interviewService;
+    private final AuthService authService;
 
     @PostMapping("/hr/knowledge-bases")
     public ApiResponse<InterviewVO> saveKnowledgeBase(@Valid @RequestBody KnowledgeBaseSaveRequest request) {
@@ -112,18 +125,24 @@ public class InterviewController {
     }
 
     @GetMapping("/interviewee/process/{processId}")
-    public ApiResponse<InterviewVO> getIntervieweeProcess(@PathVariable Long processId) {
-        return ApiResponse.success(interviewService.getProcess(processId));
+    public ApiResponse<InterviewVO> getIntervieweeProcess(Authentication authentication,
+                                                          @PathVariable Long processId) {
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.getIntervieweeProcess(processId, current.getId()));
     }
 
     @GetMapping("/interviewee/next-question/{processId}")
-    public ApiResponse<InterviewVO> getNextQuestion(@PathVariable Long processId) {
-        return ApiResponse.success(interviewService.getNextAiQuestion(processId));
+    public ApiResponse<InterviewVO> getNextQuestion(Authentication authentication,
+                                                    @PathVariable Long processId) {
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.getIntervieweeNextAiQuestion(processId, current.getId()));
     }
 
     @PostMapping("/interviewee/ai-answer")
-    public ApiResponse<InterviewVO> submitAiAnswer(@Valid @RequestBody AiAnswerRequest request) {
-        return ApiResponse.success(interviewService.submitAiAnswer(request));
+    public ApiResponse<InterviewVO> submitAiAnswer(Authentication authentication,
+                                                   @Valid @RequestBody AiAnswerRequest request) {
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.submitIntervieweeAiAnswer(request, current.getId()));
     }
 
     @GetMapping("/hr/ai-records")
@@ -132,33 +151,53 @@ public class InterviewController {
     }
 
     @GetMapping("/interviewee/ai-records")
-    public ApiResponse<List<InterviewVO>> listIntervieweeAiRecords(@RequestParam Long processId) {
-        return ApiResponse.success(interviewService.listAiRecords(processId));
+    public ApiResponse<List<InterviewVO>> listIntervieweeAiRecords(Authentication authentication,
+                                                                   @RequestParam Long processId) {
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.listIntervieweeAiRecords(processId, current.getId()));
     }
 
     @PostMapping("/hr/video-session/{processId}")
-    public ApiResponse<InterviewVO> createVideoSession(@PathVariable Long processId,
+    public ApiResponse<InterviewVO> createVideoSession(Authentication authentication,
+                                                       @PathVariable Long processId,
                                                        @RequestParam(required = false) Long approverUserId,
                                                        @RequestParam(required = false) String approverName) {
+        SessionUserVO current = currentUser(authentication);
+        approverUserId = approverUserId == null ? current.getId() : approverUserId;
+        approverName = approverName == null || approverName.isBlank() ? current.getDisplayName() : approverName;
         return ApiResponse.success(interviewService.createVideoSession(processId, approverUserId, approverName));
     }
 
     @PostMapping("/interviewee/video-join/{processId}")
-    public ApiResponse<InterviewVO> intervieweeJoin(@PathVariable Long processId) {
-        return ApiResponse.success(interviewService.intervieweeJoinVideo(processId));
+    public ApiResponse<InterviewVO> intervieweeJoin(Authentication authentication,
+                                                    @PathVariable Long processId) {
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.intervieweeJoinVideo(processId, current.getId(), current.getDisplayName()));
     }
 
     @PostMapping("/hr/video-join/{processId}")
-    public ApiResponse<InterviewVO> hrJoin(@PathVariable Long processId,
+    public ApiResponse<InterviewVO> hrJoin(Authentication authentication,
+                                           @PathVariable Long processId,
                                            @RequestParam(required = false) Long approverUserId,
                                            @RequestParam(required = false) String approverName) {
+        SessionUserVO current = currentUser(authentication);
+        approverUserId = approverUserId == null ? current.getId() : approverUserId;
+        approverName = approverName == null || approverName.isBlank() ? current.getDisplayName() : approverName;
         return ApiResponse.success(interviewService.hrJoinVideo(processId, approverUserId, approverName));
     }
 
     @PostMapping("/hr/video-complete/{processId}")
     public ApiResponse<InterviewVO> completeVideo(@PathVariable Long processId,
-                                                  @RequestParam(required = false) String recordingPath) {
+                                                   @RequestParam(required = false) String recordingPath) {
         return ApiResponse.success(interviewService.completeVideoSession(processId, recordingPath));
+    }
+
+    @PostMapping("/hr/video-recording/{processId}")
+    public ApiResponse<VideoSignalVO> uploadHrRecording(@PathVariable Long processId,
+                                                        @RequestParam String originalFileName,
+                                                        @RequestParam(required = false) String contentType,
+                                                        @RequestParam("file") MultipartFile file) {
+        return ApiResponse.success(interviewService.uploadRecording(processId, originalFileName, contentType, file));
     }
 
     @PostMapping("/hr/video-offer/{processId}")
@@ -167,10 +206,17 @@ public class InterviewController {
         return ApiResponse.success(interviewService.publishHrOffer(processId, request));
     }
 
+    @GetMapping("/hr/video-state/{processId}")
+    public ApiResponse<VideoSignalVO> getHrVideoState(@PathVariable Long processId) {
+        return ApiResponse.success(interviewService.getVideoSignalState(processId));
+    }
+
     @PostMapping("/interviewee/video-answer/{processId}")
-    public ApiResponse<VideoSignalVO> submitAnswer(@PathVariable Long processId,
+    public ApiResponse<VideoSignalVO> submitAnswer(Authentication authentication,
+                                                   @PathVariable Long processId,
                                                    @RequestBody VideoSignalRequest request) {
-        return ApiResponse.success(interviewService.submitIntervieweeAnswer(processId, request));
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.submitIntervieweeAnswer(processId, request, current.getId(), current.getDisplayName()));
     }
 
     @PostMapping("/hr/video-ice/{processId}")
@@ -180,45 +226,82 @@ public class InterviewController {
     }
 
     @PostMapping("/interviewee/video-ice/{processId}")
-    public ApiResponse<VideoSignalVO> addIntervieweeIce(@PathVariable Long processId,
+    public ApiResponse<VideoSignalVO> addIntervieweeIce(Authentication authentication,
+                                                        @PathVariable Long processId,
                                                         @RequestBody VideoSignalRequest request) {
-        return ApiResponse.success(interviewService.addIntervieweeIceCandidate(processId, request));
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.addIntervieweeIceCandidate(processId, request, current.getId(), current.getDisplayName()));
     }
 
     @GetMapping("/interviewee/video-state/{processId}")
-    public ApiResponse<VideoSignalVO> getVideoState(@PathVariable Long processId) {
+    public ApiResponse<VideoSignalVO> getVideoState(Authentication authentication,
+                                                    @PathVariable Long processId) {
+        SessionUserVO current = currentUser(authentication);
+        interviewService.getIntervieweeProcess(processId, current.getId());
         return ApiResponse.success(interviewService.getVideoSignalState(processId));
     }
 
     @PostMapping("/interviewee/video-recording/{processId}")
-    public ApiResponse<VideoSignalVO> uploadRecording(@PathVariable Long processId,
+    public ApiResponse<VideoSignalVO> uploadRecording(Authentication authentication,
+                                                      @PathVariable Long processId,
                                                       @RequestParam String originalFileName,
                                                       @RequestParam(required = false) String contentType,
                                                       @RequestParam("file") MultipartFile file) {
-        return ApiResponse.success(interviewService.uploadRecording(processId, originalFileName, contentType, file));
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.uploadIntervieweeRecording(processId, current.getId(), current.getDisplayName(), originalFileName, contentType, file));
+    }
+
+    @GetMapping("/hr/video-recording/{processId}")
+    public ResponseEntity<Resource> downloadRecording(@PathVariable Long processId) {
+        var session = interviewService.getVideoSession(processId);
+        Path path = Paths.get(session.getRecordingPath()).toAbsolutePath().normalize();
+        Resource resource = new FileSystemResource(path);
+        String fileName = URLEncoder.encode(session.getRecordingFileName(), StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("video/webm"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=UTF-8''" + fileName)
+                .body(resource);
     }
 
     @PostMapping("/hr/approve-ai/{processId}")
-    public ApiResponse<InterviewVO> approveAi(@PathVariable Long processId,
+    public ApiResponse<InterviewVO> approveAi(Authentication authentication,
+                                              @PathVariable Long processId,
                                               @Valid @RequestBody InterviewDecisionRequest request) {
+        fillApprover(authentication, request);
         return ApiResponse.success(interviewService.approveAiToVideo(processId, request));
     }
 
     @PostMapping("/hr/approve-video/{processId}")
-    public ApiResponse<InterviewVO> approveVideo(@PathVariable Long processId,
-                                                 @Valid @RequestBody InterviewDecisionRequest request) {
+    public ApiResponse<InterviewVO> approveVideo(Authentication authentication,
+                                                 @PathVariable Long processId,
+                                                  @Valid @RequestBody InterviewDecisionRequest request) {
+        fillApprover(authentication, request);
         return ApiResponse.success(interviewService.approveVideoToOnsite(processId, request));
     }
 
     @PostMapping("/hr/approve-onsite/{processId}")
-    public ApiResponse<InterviewVO> approveOnsite(@PathVariable Long processId,
-                                                  @Valid @RequestBody InterviewDecisionRequest request) {
+    public ApiResponse<InterviewVO> approveOnsite(Authentication authentication,
+                                                  @PathVariable Long processId,
+                                                   @Valid @RequestBody InterviewDecisionRequest request) {
+        fillApprover(authentication, request);
         return ApiResponse.success(interviewService.decideOnsite(processId, request));
     }
 
     @PostMapping("/hr/terminate/{processId}")
-    public ApiResponse<InterviewVO> terminate(@PathVariable Long processId,
+    public ApiResponse<InterviewVO> terminate(Authentication authentication,
+                                              @PathVariable Long processId,
                                               @Valid @RequestBody InterviewDecisionRequest request) {
+        fillApprover(authentication, request);
         return ApiResponse.success(interviewService.terminateProcess(processId, request));
+    }
+
+    private SessionUserVO currentUser(Authentication authentication) {
+        return authService.loadUserByUsername(authentication.getName());
+    }
+
+    private void fillApprover(Authentication authentication, InterviewDecisionRequest request) {
+        SessionUserVO current = currentUser(authentication);
+        request.setApproverUserId(current.getId());
+        request.setApproverName(current.getDisplayName());
     }
 }
