@@ -57,7 +57,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { interviewApi } from '../services/api'
 
 const route = useRoute()
@@ -68,7 +68,7 @@ const aiRecords = ref([])
 const processSummary = ref(null)
 const currentQuestion = ref(null)
 const refreshState = reactive({ loading: false, retryCount: 0, lastError: '' })
-const antiCheat = reactive({ fullscreen: false, switchCount: 0 })
+const antiCheat = reactive({ fullscreen: false, switchCount: 0, hasEnteredFullscreen: false, aiEndNotified: false })
 const localVideo = ref(null)
 const remoteVideo = ref(null)
 let localStream = null
@@ -103,6 +103,7 @@ async function loadProcessRecords(options = {}) {
     refreshState.retryCount = 0
     refreshState.lastError = ''
     cacheInterviewSession()
+    notifyAiFinishedIfNeeded()
     syncAiAutoRefresh()
   } catch (error) {
     refreshState.retryCount += 1
@@ -120,7 +121,7 @@ function cacheInterviewSession() {
 }
 
 function syncAiAutoRefresh() {
-  if (processSummary.value?.currentStage === 'AI' && !currentQuestion.value) {
+  if (processSummary.value?.currentStage === 'AI' && processSummary.value?.stageStatus === 'IN_PROGRESS' && !currentQuestion.value) {
     scheduleAiRefresh(3000)
   } else {
     clearAiRefresh()
@@ -143,10 +144,6 @@ function nextRefreshDelay() {
 async function submitAiAnswer() {
   try {
     if (!antiCheat.fullscreen) {
-      await reportAntiCheat('NOT_FULLSCREEN_SUBMIT', '提交AI回答时未处于全屏')
-      if (processSummary.value?.overallStatus !== 'IN_PROGRESS') {
-        return
-      }
       ElMessage.warning('请先进入全屏答题模式')
       await enterAiExamMode()
       return
@@ -166,10 +163,13 @@ async function enterAiExamMode() {
   if (document.fullscreenElement !== document.documentElement) {
     try {
       await document.documentElement.requestFullscreen()
+      antiCheat.hasEnteredFullscreen = true
     } catch (error) {
       await reportAntiCheat('FULLSCREEN_DENIED', error.message || '全屏授权失败')
       ElMessage.warning('浏览器未允许全屏，请允许后继续答题')
     }
+  } else {
+    antiCheat.hasEnteredFullscreen = true
   }
 }
 
@@ -180,10 +180,10 @@ async function reportAntiCheat(eventType, detail) {
     if (response.data) {
       processSummary.value = response.data
       antiCheat.switchCount = response.data.antiCheatSwitchCount || antiCheat.switchCount
-      if (response.data.overallStatus !== 'IN_PROGRESS') {
+      notifyAiFinishedIfNeeded()
+      if (response.data.stageStatus === 'WAITING_APPROVAL') {
         currentQuestion.value = null
         clearAiRefresh()
-        ElMessage.error(response.data.processStatusView || '面试流程已终止')
       }
     }
     return response.data
@@ -192,20 +192,37 @@ async function reportAntiCheat(eventType, detail) {
 
 function handleFullscreenChange() {
   antiCheat.fullscreen = document.fullscreenElement === document.documentElement
-  if (!antiCheat.fullscreen && processSummary.value?.currentStage === 'AI' && processSummary.value?.overallStatus === 'IN_PROGRESS') {
+  if (antiCheat.fullscreen) {
+    antiCheat.hasEnteredFullscreen = true
+    return
+  }
+  if (shouldReportSwitch()) {
     reportAntiCheat('FULLSCREEN_EXIT', `退出全屏，当前本地累计${antiCheat.switchCount + 1}次`)
   }
 }
 
 function handleVisibilityChange() {
-  if (document.hidden && processSummary.value?.currentStage === 'AI' && processSummary.value?.overallStatus === 'IN_PROGRESS') {
+  if (document.hidden && shouldReportSwitch()) {
     reportAntiCheat('TAB_HIDDEN', `页面隐藏/切屏，当前本地累计${antiCheat.switchCount + 1}次`)
   }
 }
 
 function handleWindowBlur() {
-  if (processSummary.value?.currentStage === 'AI' && processSummary.value?.overallStatus === 'IN_PROGRESS') {
+  if (shouldReportSwitch()) {
     reportAntiCheat('WINDOW_BLUR', `窗口失焦/切屏，当前本地累计${antiCheat.switchCount + 1}次`)
+  }
+}
+
+function shouldReportSwitch() {
+  return antiCheat.hasEnteredFullscreen && processSummary.value?.currentStage === 'AI' && processSummary.value?.stageStatus === 'IN_PROGRESS' && processSummary.value?.overallStatus === 'IN_PROGRESS'
+}
+
+function notifyAiFinishedIfNeeded() {
+  if (processSummary.value?.currentStage === 'AI' && processSummary.value?.stageStatus === 'WAITING_APPROVAL' && !antiCheat.aiEndNotified) {
+    antiCheat.aiEndNotified = true
+    currentQuestion.value = null
+    clearAiRefresh()
+    ElMessageBox.alert(processSummary.value.processStatusView || 'AI面试已结束，请等待HR人工审批。', '面试结束', { confirmButtonText: '知道了' })
   }
 }
 async function joinVideo() {

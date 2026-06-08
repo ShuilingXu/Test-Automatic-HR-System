@@ -650,11 +650,10 @@ public class InterviewServiceImpl implements InterviewService {
             int limit = Math.max(Objects.requireNonNullElse(process.getAntiCheatSwitchLimit(), 5), 1);
             process.setAntiCheatSwitchCount(count);
             if (count >= limit) {
-                process.setOverallStatus("TERMINATED");
-                process.setStageStatus("TERMINATED");
-                process.setProcessStatusView("切屏超限自动终止");
+                process.setStageStatus("WAITING_APPROVAL");
+                process.setProcessStatusView("切屏超限待人工审批");
                 updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
-                auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "ANTI_CHEAT_AUTO_TERMINATE", "INTERVIEW_PROCESS", String.valueOf(request.getProcessId()), "切屏" + count + "次达到阈值" + limit + "，流程自动终止");
+                auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "ANTI_CHEAT_MANUAL_REVIEW", "INTERVIEW_PROCESS", String.valueOf(request.getProcessId()), "切屏" + count + "次达到阈值" + limit + "，转HR人工审批");
             }
             processMapper.updateById(process);
         }
@@ -664,7 +663,7 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     private boolean isSwitchEvent(String eventType) {
-        return Set.of("FULLSCREEN_EXIT", "TAB_HIDDEN", "WINDOW_BLUR", "NOT_FULLSCREEN_SUBMIT").contains(StrUtil.blankToDefault(eventType, ""));
+        return Set.of("FULLSCREEN_EXIT", "TAB_HIDDEN", "WINDOW_BLUR").contains(StrUtil.blankToDefault(eventType, ""));
     }
 
     private void syncToPendingOnboarding(InterviewProcess process) {

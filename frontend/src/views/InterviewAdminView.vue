@@ -149,8 +149,8 @@
             <div class="video-box"><span>面试者远端视频</span><video ref="hrRemoteVideo" autoplay playsinline></video></div>
           </div>
           <div class="link-row">
-            <el-button v-if="canApproveAi" @click="approveAi(1)">AI通过并生成视频任务</el-button>
-            <el-button v-if="canApproveAi" @click="approveAi(0)">AI不通过</el-button>
+            <el-button v-if="canApproveAi" @click="approveAi(1)">AI/反作弊人工通过并生成视频任务</el-button>
+            <el-button v-if="canApproveAi" @click="approveAi(0)">AI/反作弊人工不通过</el-button>
             <el-button v-if="canStartVideo" @click="startHrVideoCall">开始视频面</el-button>
             <el-button v-if="canStopVideo" @click="stopHrRecording">结束并上传录制</el-button>
             <el-button v-if="canApproveVideo" @click="approveVideo(1)">视频面通过进线下面</el-button>
