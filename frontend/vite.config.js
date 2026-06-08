@@ -11,6 +11,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    allowedHosts: ['sbs.soyorin.love'],
     proxy: {
       '/api': {
         target: 'http://localhost:8080',
