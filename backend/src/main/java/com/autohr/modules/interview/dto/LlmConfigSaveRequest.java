@@ -13,7 +13,6 @@ public class LlmConfigSaveRequest {
     @NotBlank(message = "OpenAI接口地址必填")
     private String baseUrl;
     private String apiKey;
-    private String apiKeyMasked;
     @NotBlank(message = "模型名称必填")
     private String modelName;
     private String promptTemplate;

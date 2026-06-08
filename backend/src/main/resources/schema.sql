@@ -244,7 +244,6 @@ CREATE TABLE IF NOT EXISTS interview_llm_config (
     model_role VARCHAR(32) NOT NULL,
     base_url VARCHAR(255) NOT NULL,
     api_key VARCHAR(255),
-    api_key_masked VARCHAR(255),
     model_name VARCHAR(128) NOT NULL,
     prompt_template VARCHAR(5000),
     scoring_rule_prompt VARCHAR(5000),
@@ -282,6 +281,7 @@ CREATE TABLE IF NOT EXISTS interview_ai_record (
     interviewer_score INTEGER,
     scorer_score INTEGER,
     average_score INTEGER,
+    interviewer_comment VARCHAR(2000),
     sequence_no INTEGER NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

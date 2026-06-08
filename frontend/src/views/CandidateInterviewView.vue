@@ -33,12 +33,14 @@
             <p>{{ currentQuestion.questionContent }}</p>
             <small>知识域：{{ currentQuestion.knowledgePoint }}</small>
           </div>
+          <div v-else-if="processSummary?.currentStage === 'AI'" class="empty-box">AI 正在根据知识库生成题目，系统会自动刷新，请不要退出流程。</div>
           <div v-if="aiRecords.length === 0" class="empty-box">流程开始后系统会先发出 AI 问题</div>
           <div v-for="item in aiRecords" :key="item.id" class="question-card">
             <strong>Q{{ item.sequenceNo }} {{ item.knowledgePoint }}</strong>
             <p>{{ item.questionContent }}</p>
             <small>单题均分：{{ item.averageScore ?? '-' }}</small>
             <p>你的回答：{{ item.answerContent || '待回答' }}</p>
+            <p v-if="item.interviewerComment">面试官反馈：{{ item.interviewerComment }}</p>
           </div>
           <el-input v-model="aiAnswer.answerContent" type="textarea" :rows="4" placeholder="回答当前 AI 问题" />
           <div class="link-row"><el-button type="primary" @click="submitAiAnswer">提交 AI 回答</el-button></div>
@@ -55,16 +57,18 @@ import { ElMessage } from 'element-plus'
 import { interviewApi } from '../services/api'
 
 const route = useRoute()
-const sessionForm = reactive({ processId: route.query.processId ? Number(route.query.processId) : null })
+const cachedInterview = JSON.parse(localStorage.getItem('interview-session-cache') || '{}')
+const sessionForm = reactive({ processId: route.query.processId ? Number(route.query.processId) : (cachedInterview.processId || null) })
 const aiAnswer = reactive({ answerContent: '' })
-const aiRecords = ref([])
-const processSummary = ref(null)
-const currentQuestion = ref(null)
+const aiRecords = ref(cachedInterview.aiRecords || [])
+const processSummary = ref(cachedInterview.processSummary || null)
+const currentQuestion = ref(cachedInterview.currentQuestion || null)
 const localVideo = ref(null)
 const remoteVideo = ref(null)
 let localStream = null
 let peer = null
 let pollTimer = null
+let aiRefreshTimer = null
 let recorder = null
 let recordedChunks = []
 let addedHrIce = new Set()
@@ -79,7 +83,26 @@ async function loadProcessRecords() {
     processSummary.value = (await interviewApi.getIntervieweeProcess(sessionForm.processId)).data
     currentQuestion.value = (await interviewApi.getNextAiQuestion(sessionForm.processId)).data
     aiRecords.value = (await interviewApi.listIntervieweeAiRecords({ processId: sessionForm.processId })).data
+    cacheInterviewSession()
+    syncAiAutoRefresh()
   } catch (error) { fail(error) }
+}
+
+function cacheInterviewSession() {
+  localStorage.setItem('interview-session-cache', JSON.stringify({
+    processId: sessionForm.processId,
+    processSummary: processSummary.value,
+    currentQuestion: currentQuestion.value,
+    aiRecords: aiRecords.value,
+  }))
+}
+
+function syncAiAutoRefresh() {
+  clearInterval(aiRefreshTimer)
+  aiRefreshTimer = null
+  if (processSummary.value?.currentStage === 'AI' && !currentQuestion.value) {
+    aiRefreshTimer = setInterval(loadProcessRecords, 3000)
+  }
 }
 async function submitAiAnswer() {
   try {
@@ -154,12 +177,14 @@ function disconnectVideo() {
 }
 
 onBeforeUnmount(() => {
+  clearInterval(aiRefreshTimer)
   disconnectVideo()
 })
 
 onMounted(async () => {
   if (sessionForm.processId) {
     await loadProcessRecords()
+    syncAiAutoRefresh()
   }
 })
 </script>

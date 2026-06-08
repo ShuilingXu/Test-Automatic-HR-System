@@ -129,6 +129,7 @@
             <el-table-column prop="parentDepartmentName" label="上级部门" min-width="120" />
             <el-table-column prop="managerEmployeeName" label="部门负责人" min-width="120" />
             <el-table-column prop="description" label="部门职能简介" min-width="180" />
+            <el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteDepartment(scope.row.id)">删除</el-button></template></el-table-column>
           </el-table>
         </template>
       </section>
@@ -158,7 +159,7 @@
             <el-form-item label="关键词"><el-input v-model="employeeFilter.keyword" placeholder="姓名 / 工号 / 手机 / 岗位" /></el-form-item>
             <el-form-item label="操作"><div class="filter-actions"><el-button type="primary" @click="loadEmployees">查询</el-button><el-button @click="resetEmployeeFilter">重置</el-button></div></el-form-item>
           </el-form>
-          <el-table :data="employees" stripe class="data-table" @row-click="editEmployee"><el-table-column prop="employeeCode" label="工号" /><el-table-column prop="fullName" label="姓名" /><el-table-column prop="departmentName" label="部门" /><el-table-column prop="positionName" label="岗位" /><el-table-column prop="mobilePhone" label="电话" /><el-table-column prop="bankName" label="开户银行" /></el-table>
+          <el-table :data="employees" stripe class="data-table" @row-click="editEmployee"><el-table-column prop="employeeCode" label="工号" /><el-table-column prop="fullName" label="姓名" /><el-table-column prop="departmentName" label="部门" /><el-table-column prop="positionName" label="岗位" /><el-table-column prop="mobilePhone" label="电话" /><el-table-column prop="bankName" label="开户银行" /><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteEmployee(scope.row.id)">删除</el-button></template></el-table-column></el-table>
         </template>
       </section>
 
@@ -345,6 +346,8 @@ async function loadAll() { await Promise.all([loadSession(), loadDashboard(), lo
 async function saveDepartment() { try { await hrApi.saveDepartment({ ...departmentForm }); ElMessage.success('部门已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveEmployee() { try { await hrApi.saveEmployee({ ...employeeForm }); ElMessage.success('员工已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveBinding() { try { await hrApi.saveBinding({ ...bindingForm }); ElMessage.success('挂接已保存'); await loadAll() } catch (error) { fail(error) } }
+async function deleteDepartment(id) { try { await hrApi.deleteDepartment(id); ElMessage.success('部门已删除'); if (departmentForm.id === id) resetDepartmentForm(); await loadAll() } catch (error) { fail(error) } }
+async function deleteEmployee(id) { try { await hrApi.deleteEmployee(id); ElMessage.success('员工已删除'); if (employeeForm.id === id) resetEmployeeForm(); await loadAll() } catch (error) { fail(error) } }
 function resetJobForm() { Object.assign(jobForm, { id: null, jobTitle: '', jobCode: '', departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 }) }
 function showCreateJob() { resetJobForm(); recruitmentMode.value = 'jobCreate' }
 function editJob(row) { Object.assign(jobForm, row); recruitmentMode.value = 'jobEdit' }
@@ -391,7 +394,10 @@ async function saveUser() { try { await authApi.updateUser(userForm.id, { roleCo
 async function resetUserPassword() { try { if (!userForm.id) { ElMessage.warning('请先选择用户'); return } if (!userForm.newPassword || userForm.newPassword.length < 6) { ElMessage.warning('新密码长度不能少于6位'); return } await authApi.updateUser(userForm.id, { newPassword: userForm.newPassword }); userForm.newPassword = ''; ElMessage.success('密码已重置'); await loadUsers() } catch (error) { fail(error) } }
 async function logout() { try { await authApi.logout(); router.push('/login') } catch (error) { fail(error) } }
 function cleanParams(source) { return Object.fromEntries(Object.entries(source).filter(([, value]) => value !== '' && value !== null && value !== undefined)) }
-function resolveActionCode(value) { return Object.entries(actionLabels).find(([key, label]) => key === value || label.includes(value))?.[0] || value }
+function resolveActionCode(value) {
+  if (!value) return ''
+  return Object.entries(actionLabels).find(([key, label]) => key === value || label.includes(value))?.[0] || value
+}
 
 onMounted(loadAll)
 </script>

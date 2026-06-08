@@ -64,21 +64,35 @@
 
       <section v-if="activeTab === 'llm'" class="surface">
         <h3>LLM 模型连接配置</h3>
-        <el-form :model="llmForm" label-position="top" class="form-grid">
-          <el-form-item label="配置名称"><el-input v-model="llmForm.configName" /></el-form-item>
-          <el-form-item label="模型角色"><el-select v-model="llmForm.modelRole"><el-option label="面试官LLM A" value="INTERVIEWER" /><el-option label="评分LLM B" value="SCORER" /></el-select></el-form-item>
-          <el-form-item label="OpenAI接口地址"><el-input v-model="llmForm.baseUrl" /></el-form-item>
-          <el-form-item label="API Key"><el-input v-model="llmForm.apiKey" type="password" show-password /></el-form-item>
-          <el-form-item label="API Key掩码"><el-input v-model="llmForm.apiKeyMasked" /></el-form-item>
-          <el-form-item label="模型名称"><el-input v-model="llmForm.modelName" /></el-form-item>
-          <el-form-item label="提示词模板" class="wide"><el-input v-model="llmForm.promptTemplate" type="textarea" :rows="4" /></el-form-item>
-          <el-form-item label="系统级评分提示词" class="wide"><el-input v-model="llmForm.scoringRulePrompt" type="textarea" :rows="4" /></el-form-item>
-        </el-form>
-        <el-button type="primary" @click="saveLlmConfig">保存配置</el-button>
+        <div class="llm-config-grid">
+          <div class="surface inner-surface">
+            <h3>面试官 LLM A</h3>
+            <el-form :model="interviewerLlmForm" label-position="top" class="form-grid">
+              <el-form-item label="配置名称"><el-input v-model="interviewerLlmForm.configName" /></el-form-item>
+              <el-form-item label="OpenAI接口地址"><el-input v-model="interviewerLlmForm.baseUrl" /></el-form-item>
+              <el-form-item label="API Key"><el-input v-model="interviewerLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
+              <el-form-item label="模型名称"><el-input v-model="interviewerLlmForm.modelName" /></el-form-item>
+              <el-form-item label="提问提示词模板" class="wide"><el-input v-model="interviewerLlmForm.promptTemplate" type="textarea" :rows="4" /></el-form-item>
+            </el-form>
+            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(interviewerLlmForm, 'INTERVIEWER')">保存面试官模型</el-button><span class="serial-line">API Key：{{ interviewerKeyLabel }}</span></div>
+          </div>
+          <div class="surface inner-surface">
+            <h3>评分 LLM B</h3>
+            <el-form :model="scorerLlmForm" label-position="top" class="form-grid">
+              <el-form-item label="配置名称"><el-input v-model="scorerLlmForm.configName" /></el-form-item>
+              <el-form-item label="OpenAI接口地址"><el-input v-model="scorerLlmForm.baseUrl" /></el-form-item>
+              <el-form-item label="API Key"><el-input v-model="scorerLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
+              <el-form-item label="模型名称"><el-input v-model="scorerLlmForm.modelName" /></el-form-item>
+              <el-form-item label="系统级评分提示词" class="wide"><el-input v-model="scorerLlmForm.scoringRulePrompt" type="textarea" :rows="4" /></el-form-item>
+            </el-form>
+            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(scorerLlmForm, 'SCORER')">保存评分模型</el-button><span class="serial-line">API Key：{{ scorerKeyLabel }}</span></div>
+          </div>
+        </div>
         <el-table :data="llmConfigs" stripe class="data-table" @row-click="editLlmConfig">
           <el-table-column prop="configName" label="配置名称" />
           <el-table-column prop="modelRole" label="角色" />
           <el-table-column prop="baseUrl" label="接口地址" min-width="220" />
+          <el-table-column prop="apiKeyMasked" label="API Key" />
           <el-table-column prop="modelName" label="模型" />
           <el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteLlmConfig(scope.row.id)">删除</el-button></template></el-table-column>
         </el-table>
@@ -90,7 +104,7 @@
           <el-form-item label="招聘候选人"><el-select v-model="processForm.recruitmentCandidateId" @change="syncIntervieweeByCandidate"><el-option v-for="item in recruitmentCandidates" :key="item.id" :label="`${item.fullName} / ${item.mobilePhone}`" :value="item.id" /></el-select></el-form-item>
           <el-form-item label="面试者用户ID"><el-input v-model="processForm.intervieweeUserId" disabled /></el-form-item>
           <el-form-item label="岗位"><el-select v-model="processForm.jobId"><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
-          <el-form-item label="AI通过阈值"><el-input-number v-model="processForm.aiThresholdScore" :min="1" :max="10" /></el-form-item>
+          <el-form-item label="AI通过阈值"><el-input-number v-model="processForm.aiThresholdScore" :min="1" /></el-form-item>
         </el-form>
         <div class="link-row"><el-button type="primary" @click="startProcess">发起面试流程</el-button></div>
         <el-table :data="processes" stripe class="data-table" @row-click="selectProcess">
@@ -130,6 +144,7 @@
             <el-table-column prop="knowledgePoint" label="知识点" />
             <el-table-column prop="questionContent" label="提问" min-width="220" />
             <el-table-column prop="answerContent" label="回答" min-width="220" />
+            <el-table-column prop="interviewerComment" label="评价反馈" min-width="220" />
             <el-table-column prop="averageScore" label="均分" width="80" />
           </el-table>
         </div>
@@ -170,8 +185,12 @@ let addedIntervieweeIce = new Set()
 const kbForm = reactive({ id: null, knowledgeBaseName: '', techCategory: '', jobCategory: '', status: 1 })
 const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '', knowledgeContent: '', status: 1 })
 const weightForm = reactive({ id: null, jobId: null, knowledgeBaseId: null, weight: 1 })
-const llmForm = reactive({ id: null, configName: '', modelRole: 'INTERVIEWER', baseUrl: '', apiKey: '', apiKeyMasked: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 })
+const interviewerLlmForm = reactive(createLlmForm('INTERVIEWER'))
+const scorerLlmForm = reactive(createLlmForm('SCORER'))
 const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 7 })
+
+const interviewerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')?.apiKeyMasked || '未配置')
+const scorerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'SCORER')?.apiKeyMasked || '未配置')
 
 const canTerminate = computed(() => selectedProcess.value?.overallStatus === 'IN_PROGRESS')
 const canApproveAi = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'AI')
@@ -187,6 +206,7 @@ async function loadAll() {
     knowledgeBases.value = (await interviewApi.listKnowledgeBases()).data
     if (isItAdmin.value) {
       llmConfigs.value = (await interviewApi.listLlmConfigs()).data
+      syncLlmForms()
     } else {
       llmConfigs.value = []
       if (activeTab.value === 'llm') activeTab.value = 'kb'
@@ -206,9 +226,16 @@ async function saveKnowledgeItem() { try { await interviewApi.saveKnowledgeItem(
 async function deleteKnowledgeItem(id) { try { await interviewApi.deleteKnowledgeItem(id); ElMessage.success('知识点已删除'); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
 async function saveWeight() { try { await interviewApi.saveJobKnowledgeWeight({ ...weightForm }); ElMessage.success('权重已保存'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
 async function deleteWeight(id) { try { await interviewApi.deleteJobKnowledgeWeight(id); ElMessage.success('权重已删除'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
-async function saveLlmConfig() { try { await interviewApi.saveLlmConfig({ ...llmForm }); ElMessage.success('LLM配置已保存'); await loadAll() } catch (error) { fail(error) } }
+async function saveRoleLlmConfig(form, role) { try { await interviewApi.saveLlmConfig({ ...form, modelRole: role }); ElMessage.success('LLM配置已保存'); form.apiKey = ''; await loadAll() } catch (error) { fail(error) } }
 async function deleteLlmConfig(id) { try { await interviewApi.deleteLlmConfig(id); ElMessage.success('LLM配置已删除'); await loadAll() } catch (error) { fail(error) } }
-function editLlmConfig(row) { Object.assign(llmForm, row) }
+function editLlmConfig(row) { Object.assign(row.modelRole === 'SCORER' ? scorerLlmForm : interviewerLlmForm, { ...row, apiKey: '' }) }
+function createLlmForm(role) { return { id: null, configName: role === 'SCORER' ? '评分模型' : '面试官模型', modelRole: role, baseUrl: '', apiKey: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 } }
+function syncLlmForms() {
+  const interviewer = llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')
+  const scorer = llmConfigs.value.find((item) => item.modelRole === 'SCORER')
+  Object.assign(interviewerLlmForm, interviewer ? { ...interviewer, apiKey: '' } : createLlmForm('INTERVIEWER'))
+  Object.assign(scorerLlmForm, scorer ? { ...scorer, apiKey: '' } : createLlmForm('SCORER'))
+}
 async function syncIntervieweeByCandidate(candidateId) { const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId); processForm.intervieweeUserId = candidate?.intervieweeUserId ? String(candidate.intervieweeUserId) : '' }
 async function startProcess() { try { if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到面试者账号'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
 async function selectProcess(row) { selectedProcess.value = row; aiRecords.value = (await interviewApi.listAiRecords({ processId: row.id })).data }
@@ -303,6 +330,7 @@ onMounted(loadAll)
 .sub-tabs button { border: 1px solid rgba(16, 37, 50, 0.12); background: #f8f5ef; color: #102532; border-radius: 999px; padding: 10px 16px; cursor: pointer; }
 .sub-tabs button.active { background: #102532; color: #f4efe7; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.llm-config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .wide { grid-column: 1 / -1; }
 .inner-surface { background: rgba(255,255,255,0.82); }
 .detail-surface { margin-top: 18px; }
@@ -313,5 +341,5 @@ onMounted(loadAll)
 .video-box span { display: block; margin-bottom: 8px; color: #6d7a83; }
 .video-box video { width: 100%; min-height: 220px; background: #111; border-radius: 12px; }
 .data-table { margin-top: 18px; }
-@media (max-width: 900px) { .form-grid, .video-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .form-grid, .video-grid, .llm-config-grid { grid-template-columns: 1fr; } }
 </style>

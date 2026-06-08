@@ -38,19 +38,23 @@ import com.autohr.modules.recruitment.mapper.RecruitmentJobMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @RequiredArgsConstructor
@@ -67,6 +71,9 @@ public class InterviewServiceImpl implements InterviewService {
     private final RecruitmentJobMapper recruitmentJobMapper;
     private final EmployeeMapper employeeMapper;
     private final AuditLogService auditLogService;
+
+    @Value("${interview.llm.debug:false}")
+    private boolean llmDebug;
 
     @Override
     @Transactional
@@ -166,7 +173,11 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO saveLlmConfig(LlmConfigSaveRequest request) {
         InterviewLlmConfig entity = request.getId() == null ? new InterviewLlmConfig() : requireLlmConfig(request.getId());
+        String existingApiKey = entity.getApiKey();
         BeanUtils.copyProperties(request, entity);
+        if (request.getId() != null && StrUtil.isBlank(request.getApiKey())) {
+            entity.setApiKey(existingApiKey);
+        }
         entity.setStatus(Objects.requireNonNullElse(request.getStatus(), 1));
         if (request.getId() == null) {
             entity.setId(nextId(llmConfigMapper.selectList(null).stream().map(InterviewLlmConfig::getId).toList()));
@@ -222,7 +233,7 @@ public class InterviewServiceImpl implements InterviewService {
         candidate.setInterviewStageStatus("AI面");
         candidate.setApplicationStatus("INTERVIEWING");
         recruitmentCandidateMapper.updateById(candidate);
-        generateNextQuestion(process);
+        CompletableFuture.runAsync(() -> generateNextQuestion(requireProcess(process.getId())));
         return toProcessVO(process);
     }
 
@@ -279,12 +290,16 @@ public class InterviewServiceImpl implements InterviewService {
             throw new BusinessException("当前没有待回答的问题");
         }
         record.setAnswerContent(request.getAnswerContent());
-        int interviewerScore = callLlmScore(request.getAnswerContent(), record.getKnowledgePoint(), "INTERVIEWER");
-        int scorerScore = callLlmScore(request.getAnswerContent(), record.getKnowledgePoint(), "SCORER");
+        String materials = loadKnowledgeMaterials(record.getKnowledgeBaseId());
+        LlmEvaluation interviewerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, "INTERVIEWER", true);
+        LlmEvaluation scorerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, "SCORER", false);
+        int interviewerScore = interviewerEvaluation.score();
+        int scorerScore = scorerEvaluation.score();
         int averageScore = Math.round((interviewerScore + scorerScore) / 2.0f);
         record.setInterviewerScore(interviewerScore);
         record.setScorerScore(scorerScore);
         record.setAverageScore(averageScore);
+        record.setInterviewerComment(interviewerEvaluation.comment());
         aiRecordMapper.updateById(record);
 
         int total = aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>()
@@ -300,7 +315,7 @@ public class InterviewServiceImpl implements InterviewService {
             process.setStageStatus("WAITING_APPROVAL");
             process.setProcessStatusView("AI待审批");
         } else {
-            generateNextQuestion(process);
+            generateNextQuestion(process, interviewerEvaluation.nextQuestion());
         }
         processMapper.updateById(process);
         updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
@@ -712,7 +727,7 @@ public class InterviewServiceImpl implements InterviewService {
         record.setProcessId(process.getId());
         record.setKnowledgeBaseId(weight == null ? null : weight.getKnowledgeBaseId());
         record.setKnowledgePoint(weight == null ? "通用沟通" : loadKnowledgeBaseName(weight.getKnowledgeBaseId()));
-        record.setQuestionContent(callLlmQuestion(record.getKnowledgePoint()));
+        record.setQuestionContent(callLlmQuestion(record.getKnowledgePoint(), loadKnowledgeMaterials(weight == null ? null : weight.getKnowledgeBaseId())));
         record.setSequenceNo(nextSequence(process.getId()));
         aiRecordMapper.insert(record);
     }
@@ -725,42 +740,136 @@ public class InterviewServiceImpl implements InterviewService {
         return base == null ? "通用沟通" : base.getKnowledgeBaseName();
     }
 
-    private String callLlmQuestion(String topic) {
-        InterviewLlmConfig config = llmConfigMapper.selectOne(new LambdaQueryWrapper<InterviewLlmConfig>()
-                .eq(InterviewLlmConfig::getModelRole, "INTERVIEWER")
-                .eq(InterviewLlmConfig::getStatus, 1)
-                .last("LIMIT 1"));
-        if (config == null || StrUtil.isBlank(config.getApiKey())) {
-            return "请围绕“" + topic + "”结合实际项目经验进行回答。";
+    private String loadKnowledgeMaterials(Long knowledgeBaseId) {
+        if (knowledgeBaseId == null) {
+            return "";
         }
-        String prompt = StrUtil.blankToDefault(config.getPromptTemplate(), "你是一名AI面试官，请围绕以下主题生成一道中文面试题：{topic}")
+        List<InterviewKnowledgeItem> items = knowledgeItemMapper.selectList(new LambdaQueryWrapper<InterviewKnowledgeItem>()
+                .eq(InterviewKnowledgeItem::getKnowledgeBaseId, knowledgeBaseId)
+                .eq(InterviewKnowledgeItem::getStatus, 1)
+                .orderByAsc(InterviewKnowledgeItem::getId));
+        return items.stream()
+                .map(item -> "知识点：" + item.getKnowledgePoint() + "\n材料：" + item.getKnowledgeContent())
+                .reduce((a, b) -> a + "\n\n" + b)
+                .orElse("");
+    }
+
+    private String callLlmQuestion(String topic, String materials) {
+        InterviewLlmConfig config = requireActiveLlmConfig("INTERVIEWER");
+        String prompt = StrUtil.blankToDefault(config.getPromptTemplate(), "你是一名AI面试官，请围绕以下主题生成一道中文面试题：{topic}。只输出题目内容。")
                 .replace("{topic}", topic);
-        return callOpenAiChat(config, prompt, "请直接输出题目内容")
+        String userPrompt = "知识库主题：" + topic + "\n\n知识库材料：\n" + StrUtil.blankToDefault(materials, "无补充材料")
+                + "\n\n请只基于上述知识库材料生成一道面试题。题目必须能从材料中找到考察依据，可以对知识点原句做自然、清晰的语义改写，但不要引入材料外的知识点，不要输出解释。";
+        String question = callOpenAiChat(config, prompt + "\n你必须根据用户提供的知识库材料出题，允许自然表达和语义修饰，但考察依据必须来自材料。", userPrompt)
                 .replace("\n", " ")
                 .trim();
+        if (StrUtil.isBlank(question)) {
+            throw new BusinessException("LLM未返回面试题内容");
+        }
+        return question;
+    }
+
+    private void generateNextQuestion(InterviewProcess process, String nextQuestion) {
+        if (StrUtil.isBlank(nextQuestion)) {
+            generateNextQuestion(process);
+            return;
+        }
+        InterviewJobKnowledgeWeight weight = pickKnowledgeWeight(process.getJobId());
+        InterviewAiRecord record = new InterviewAiRecord();
+        record.setId(nextId(aiRecordMapper.selectList(null).stream().map(InterviewAiRecord::getId).toList()));
+        record.setProcessId(process.getId());
+        record.setKnowledgeBaseId(weight == null ? null : weight.getKnowledgeBaseId());
+        record.setKnowledgePoint(weight == null ? "通用沟通" : loadKnowledgeBaseName(weight.getKnowledgeBaseId()));
+        record.setQuestionContent(nextQuestion.replace("\n", " ").trim());
+        record.setSequenceNo(nextSequence(process.getId()));
+        aiRecordMapper.insert(record);
+    }
+
+    private LlmEvaluation callLlmEvaluation(String question, String answer, String topic, String materials, String role, boolean needNextQuestion) {
+        InterviewLlmConfig config = requireActiveLlmConfig(role);
+        String basePrompt = StrUtil.blankToDefault(config.getScoringRulePrompt(), config.getPromptTemplate())
+                .replace("{topic}", StrUtil.blankToDefault(topic, "通用沟通"));
+        if (StrUtil.isBlank(basePrompt)) {
+            basePrompt = "请作为面试评分模型，基于知识库材料评价面试者回答。";
+        }
+        String userPrompt = "知识库主题：" + StrUtil.blankToDefault(topic, "通用沟通")
+                + "\n\n知识库材料：\n" + StrUtil.blankToDefault(materials, "无补充材料")
+                + "\n\n当前问题：" + StrUtil.blankToDefault(question, "未提供")
+                + "\n\n面试者回答：\n" + StrUtil.blankToDefault(answer, "");
+
+        if (!needNextQuestion) {
+            String scorerPrompt = basePrompt + "\n请严格基于上述知识库材料、当前问题和面试者回答评分。只返回一个整数分数，不输出解释。";
+            String response = callOpenAiChat(config, scorerPrompt, userPrompt);
+            return new LlmEvaluation(parseScore(response), "", "");
+        }
+
+        String systemPrompt = basePrompt + "\n请严格基于上述知识库材料、当前问题和面试者回答完成评价。"
+                + "\n输出必须包含三部分：第一行只写整数分数；第二行写不少于20字的中文评价，评价要反馈回答是否完整、哪里正确或遗漏；第三行写下一道面试题。"
+                + "\n下一题必须基于知识库材料，可以自然改写和语义修饰，不必与知识点原句一模一样，但不能引入材料外知识点。"
+                + "\n本格式要求优先于旧配置中的'只返回整数'类要求，不能只输出分数，也不能只输出问题。";
+        String response = callOpenAiChat(config, systemPrompt, userPrompt);
+        return parseEvaluation(response);
+    }
+
+    private int parseScore(String response) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("-?\\d+").matcher(StrUtil.blankToDefault(response, ""));
+        if (!matcher.find()) {
+            throw new BusinessException("LLM未返回有效分数");
+        }
+        return Integer.parseInt(matcher.group());
+    }
+
+    private LlmEvaluation parseEvaluation(String response) {
+        int score = parseScore(response);
+        String normalized = StrUtil.blankToDefault(response, "").replace("\r", "").trim();
+        String comment = extractLabeledText(normalized, "评价", "下一题");
+        String nextQuestion = extractLabeledText(normalized, "下一题", null);
+        if (StrUtil.isBlank(comment)) {
+            String[] lines = normalized.split("\n");
+            comment = lines.length > 1 ? lines[1].replaceFirst("^\\s*评价[：:]\\s*", "").trim() : "本次回答已完成评分，但模型未返回详细评价。";
+        }
+        if (StrUtil.isBlank(nextQuestion)) {
+            String[] lines = normalized.split("\n");
+            nextQuestion = lines.length > 2 ? lines[2].replaceFirst("^\\s*下一题[：:]\\s*", "").trim() : "";
+        }
+        return new LlmEvaluation(score, comment, nextQuestion);
+    }
+
+    private String extractLabeledText(String text, String startLabel, String endLabel) {
+        String startRegex = java.util.regex.Pattern.quote(startLabel) + "[：:]";
+        java.util.regex.Pattern pattern = endLabel == null
+                ? java.util.regex.Pattern.compile(startRegex + "([\\s\\S]*)")
+                : java.util.regex.Pattern.compile(startRegex + "([\\s\\S]*?)(?:" + java.util.regex.Pattern.quote(endLabel) + "[：:]|$)");
+        java.util.regex.Matcher matcher = pattern.matcher(text);
+        return matcher.find() ? matcher.group(1).trim() : "";
     }
 
     private int callLlmScore(String answer, String topic, String role) {
+        InterviewLlmConfig config = requireActiveLlmConfig(role);
+        String prompt = StrUtil.blankToDefault(config.getScoringRulePrompt(), config.getPromptTemplate())
+                .replace("{topic}", topic);
+        if (StrUtil.isBlank(prompt)) {
+            prompt = "请作为评分模型，围绕主题" + topic + "对回答评分。只返回一个整数分数，不要输出解释。";
+        }
+        String response = callOpenAiChat(config, prompt + "\n只返回一个整数分数，不限制分数上限，由你的评分标准决定。", answer);
+        return parseScore(response);
+    }
+
+    private record LlmEvaluation(int score, String comment, String nextQuestion) {
+    }
+
+    private InterviewLlmConfig requireActiveLlmConfig(String role) {
         InterviewLlmConfig config = llmConfigMapper.selectOne(new LambdaQueryWrapper<InterviewLlmConfig>()
                 .eq(InterviewLlmConfig::getModelRole, role)
                 .eq(InterviewLlmConfig::getStatus, 1)
                 .last("LIMIT 1"));
-        if (config == null || StrUtil.isBlank(config.getApiKey())) {
-            int base = StrUtil.equals(role, "SCORER") ? 7 : 6;
-            int lengthScore = Math.min(StrUtil.length(answer) / 20, 3);
-            return Math.min(10, base + lengthScore);
+        if (config == null) {
+            throw new BusinessException("未配置启用的LLM模型: " + role);
         }
-        String prompt = StrUtil.blankToDefault(config.getScoringRulePrompt(), config.getPromptTemplate())
-                .replace("{topic}", topic);
-        if (StrUtil.isBlank(prompt)) {
-            prompt = "请作为评分模型，围绕主题" + topic + "对回答评分，返回1到10的整数。";
+        if (StrUtil.isBlank(config.getApiKey())) {
+            throw new BusinessException("LLM模型未配置API Key: " + role);
         }
-        String response = callOpenAiChat(config, prompt, answer).replaceAll("[^0-9]", "");
-        if (StrUtil.isBlank(response)) {
-            return 6;
-        }
-        int score = Integer.parseInt(response);
-        return Math.max(1, Math.min(10, score));
+        return config;
     }
 
     private String callOpenAiChat(InterviewLlmConfig config, String systemPrompt, String userPrompt) {
@@ -770,24 +879,76 @@ public class InterviewServiceImpl implements InterviewService {
                 new cn.hutool.json.JSONObject().set("role", "system").set("content", systemPrompt),
                 new cn.hutool.json.JSONObject().set("role", "user").set("content", userPrompt)
         )));
-        String responseText = cn.hutool.http.HttpRequest.post(config.getBaseUrl())
+        debugLlm("REQUEST", config, systemPrompt, userPrompt, null, null);
+        cn.hutool.http.HttpResponse httpResponse = cn.hutool.http.HttpRequest.post(resolveChatCompletionsUrl(config.getBaseUrl()))
                 .header("Authorization", "Bearer " + config.getApiKey())
                 .header("Content-Type", "application/json")
                 .body(payload.toString())
                 .timeout(15000)
-                .execute()
-                .body();
-        cn.hutool.json.JSONObject response = cn.hutool.json.JSONUtil.parseObj(responseText);
-        return response.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getStr("content", "");
+                .execute();
+        String responseText = httpResponse.body();
+        debugLlm("RESPONSE", config, systemPrompt, userPrompt, httpResponse.getStatus(), responseText);
+        if (!httpResponse.isOk()) {
+            throw new BusinessException("LLM接口调用失败，HTTP " + httpResponse.getStatus() + ": " + abbreviate(responseText));
+        }
+        cn.hutool.json.JSONObject response;
+        try {
+            response = cn.hutool.json.JSONUtil.parseObj(responseText);
+        } catch (Exception ex) {
+            throw new BusinessException("LLM接口返回不是有效JSON: " + abbreviate(responseText));
+        }
+        cn.hutool.json.JSONArray choices = response.getJSONArray("choices");
+        if (choices == null || choices.isEmpty()) {
+            String error = response.getByPath("error.message", String.class);
+            throw new BusinessException("LLM接口返回缺少choices，请检查接口地址、模型名和API Key: " + abbreviate(StrUtil.blankToDefault(error, responseText)));
+        }
+        cn.hutool.json.JSONObject message = choices.getJSONObject(0).getJSONObject("message");
+        if (message == null || StrUtil.isBlank(message.getStr("content"))) {
+            throw new BusinessException("LLM接口返回缺少message.content: " + abbreviate(responseText));
+        }
+        return message.getStr("content", "");
+    }
+
+    private void debugLlm(String phase, InterviewLlmConfig config, String systemPrompt, String userPrompt, Integer httpStatus, String output) {
+        if (!llmDebug) {
+            return;
+        }
+        String text = "\n================ LLM " + phase + " " + LocalDateTime.now() + " ================\n"
+                + "配置ID: " + config.getId() + "\n"
+                + "配置名称: " + config.getConfigName() + "\n"
+                + "模型角色: " + config.getModelRole() + "\n"
+                + "接口地址: " + resolveChatCompletionsUrl(config.getBaseUrl()) + "\n"
+                + "模型名称: " + config.getModelName() + "\n"
+                + (httpStatus == null ? "" : "HTTP状态: " + httpStatus + "\n")
+                + "--- SYSTEM 输入 ---\n" + StrUtil.blankToDefault(systemPrompt, "") + "\n"
+                + "--- USER 输入 ---\n" + StrUtil.blankToDefault(userPrompt, "") + "\n"
+                + "--- LLM 输出 ---\n" + StrUtil.blankToDefault(output, "") + "\n";
+        try {
+            Files.writeString(Paths.get(System.getProperty("user.dir"), "LLM.txt"), text, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException ignored) {
+        }
+    }
+
+    private String abbreviate(String text) {
+        if (StrUtil.isBlank(text)) {
+            return "空响应";
+        }
+        return text.length() > 500 ? text.substring(0, 500) + "..." : text;
+    }
+
+    private String resolveChatCompletionsUrl(String baseUrl) {
+        String url = StrUtil.trim(baseUrl);
+        if (StrUtil.endWithIgnoreCase(url, "/chat/completions")) {
+            return url;
+        }
+        if (StrUtil.endWithIgnoreCase(url, "/v1")) {
+            return url + "/chat/completions";
+        }
+        return StrUtil.removeSuffix(url, "/") + "/v1/chat/completions";
     }
 
     private int nextSequence(Long processId) {
         return aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>().eq(InterviewAiRecord::getProcessId, processId)).size() + 1;
-    }
-
-    private int mockScore(String answer, int base) {
-        int lengthScore = Math.min(StrUtil.length(answer) / 20, 3);
-        return Math.min(10, base + lengthScore);
     }
 
     private InterviewVO toKnowledgeBaseVO(InterviewKnowledgeBase entity) {
@@ -831,7 +992,7 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setConfigName(entity.getConfigName());
         vo.setModelRole(entity.getModelRole());
         vo.setBaseUrl(entity.getBaseUrl());
-        vo.setApiKeyMasked(entity.getApiKeyMasked());
+        vo.setApiKeyMasked(maskApiKey(entity.getApiKey()));
         vo.setModelName(entity.getModelName());
         vo.setPromptTemplate(entity.getPromptTemplate());
         vo.setScoringRulePrompt(entity.getScoringRulePrompt());
@@ -874,6 +1035,7 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setInterviewerScore(entity.getInterviewerScore());
         vo.setScorerScore(entity.getScorerScore());
         vo.setAverageScore(entity.getAverageScore());
+        vo.setInterviewerComment(entity.getInterviewerComment());
         vo.setSequenceNo(entity.getSequenceNo());
         vo.setCreatedAt(entity.getCreatedAt());
         if (process != null) {
@@ -943,6 +1105,16 @@ public class InterviewServiceImpl implements InterviewService {
 
     private String displayName(String name, String fallback) {
         return StrUtil.blankToDefault(name, fallback);
+    }
+
+    private String maskApiKey(String apiKey) {
+        if (StrUtil.isBlank(apiKey)) {
+            return "未配置";
+        }
+        if (apiKey.length() <= 8) {
+            return "****";
+        }
+        return apiKey.substring(0, 4) + "****" + apiKey.substring(apiKey.length() - 4);
     }
 
     private Long nextId(List<Long> ids) {

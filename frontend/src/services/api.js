@@ -31,9 +31,11 @@ export const hrApi = {
   getDepartmentTree() { return request.get('/hr/departments/tree') },
   getDepartmentDetail(id) { return request.get(`/hr/departments/${id}`) },
   saveDepartment(payload) { return request.post('/hr/departments', payload) },
+  deleteDepartment(id) { return request.delete(`/hr/departments/${id}`) },
   listEmployees(params) { return request.get('/hr/employees', { params }) },
   getEmployeeDetail(id) { return request.get(`/hr/employees/${id}`) },
   saveEmployee(payload) { return request.post('/hr/employees', payload) },
+  deleteEmployee(id) { return request.delete(`/hr/employees/${id}`) },
   listBindings(params) { return request.get('/hr/bindings', { params }) },
   saveBinding(payload) { return request.post('/hr/bindings', payload) },
 }

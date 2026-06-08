@@ -18,7 +18,6 @@ public class InterviewLlmConfig {
     private String modelRole;
     private String baseUrl;
     private String apiKey;
-    private String apiKeyMasked;
     private String modelName;
     private String promptTemplate;
     private String scoringRulePrompt;

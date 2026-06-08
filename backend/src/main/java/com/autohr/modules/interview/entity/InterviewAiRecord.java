@@ -22,6 +22,7 @@ public class InterviewAiRecord {
     private Integer interviewerScore;
     private Integer scorerScore;
     private Integer averageScore;
+    private String interviewerComment;
     private Integer sequenceNo;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
