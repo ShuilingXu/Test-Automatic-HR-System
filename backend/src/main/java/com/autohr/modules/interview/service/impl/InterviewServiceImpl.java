@@ -398,6 +398,9 @@ public class InterviewServiceImpl implements InterviewService {
     public InterviewVO intervieweeJoinVideo(Long processId, Long intervieweeUserId, String intervieweeName) {
         requireIntervieweeProcess(processId, intervieweeUserId);
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        if (session.getIntervieweeJoinTime() != null) {
+            return toVideoSessionVO(session);
+        }
         session.setIntervieweeJoinTime(LocalDateTime.now());
         if (session.getStartTime() == null) {
             session.setStartTime(LocalDateTime.now());
@@ -412,6 +415,9 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO hrJoinVideo(Long processId, Long approverUserId, String approverName) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        if (session.getHrJoinTime() != null) {
+            return toVideoSessionVO(session);
+        }
         session.setApproverUserId(approverUserId);
         session.setApproverName(approverName);
         session.setHrJoinTime(LocalDateTime.now());
@@ -426,9 +432,11 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO completeVideoSession(Long processId, String recordingPath) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
-        session.setEndTime(LocalDateTime.now());
-        session.setSessionStatus("WAITING_APPROVAL");
-        videoSessionMapper.updateById(session);
+        if (!isTerminalVideoSessionStatus(session.getSessionStatus())) {
+            session.setEndTime(session.getEndTime() == null ? LocalDateTime.now() : session.getEndTime());
+            session.setSessionStatus("WAITING_APPROVAL");
+            videoSessionMapper.updateById(session);
+        }
         InterviewProcess process = requireProcess(processId);
         if (StrUtil.equals(process.getCurrentStage(), "VIDEO") && StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
             process.setStageStatus("WAITING_APPROVAL");
@@ -544,6 +552,10 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public VideoSignalVO publishHrOffer(Long processId, VideoSignalRequest request) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        if (StrUtil.equals(session.getHrOfferSdp(), request.getOfferSdp())
+                && StrUtil.equals(session.getSessionStatus(), "OFFER_PUBLISHED")) {
+            return toVideoSignalVO(session);
+        }
         session.setHrOfferSdp(request.getOfferSdp());
         session.setIntervieweeAnswerSdp(null);
         session.setHrIceCandidates(null);
@@ -559,6 +571,10 @@ public class InterviewServiceImpl implements InterviewService {
     public VideoSignalVO submitIntervieweeAnswer(Long processId, VideoSignalRequest request, Long intervieweeUserId, String intervieweeName) {
         requireIntervieweeProcess(processId, intervieweeUserId);
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        if (StrUtil.equals(session.getIntervieweeAnswerSdp(), request.getAnswerSdp())
+                && StrUtil.equals(session.getSessionStatus(), "ANSWER_SUBMITTED")) {
+            return toVideoSignalVO(session);
+        }
         session.setIntervieweeAnswerSdp(request.getAnswerSdp());
         session.setIntervieweeIceCandidates(null);
         session.setSessionStatus("ANSWER_SUBMITTED");
@@ -571,6 +587,9 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public VideoSignalVO addHrIceCandidate(Long processId, VideoSignalRequest request) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        if (containsSignal(session.getHrIceCandidates(), request.getIceCandidate())) {
+            return toVideoSignalVO(session);
+        }
         session.setHrIceCandidates(appendSignal(session.getHrIceCandidates(), request.getIceCandidate()));
         videoSessionMapper.updateById(session);
         auditLogService.log(session.getApproverUserId(), session.getApproverName(), "HR_ADMIN", "INTERVIEW", "ADD_HR_ICE", "VIDEO_SESSION", String.valueOf(session.getId()), "ice");
@@ -582,6 +601,9 @@ public class InterviewServiceImpl implements InterviewService {
     public VideoSignalVO addIntervieweeIceCandidate(Long processId, VideoSignalRequest request, Long intervieweeUserId, String intervieweeName) {
         requireIntervieweeProcess(processId, intervieweeUserId);
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        if (containsSignal(session.getIntervieweeIceCandidates(), request.getIceCandidate())) {
+            return toVideoSignalVO(session);
+        }
         session.setIntervieweeIceCandidates(appendSignal(session.getIntervieweeIceCandidates(), request.getIceCandidate()));
         videoSessionMapper.updateById(session);
         auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "ADD_INTERVIEWEE_ICE", "VIDEO_SESSION", String.valueOf(session.getId()), "ice");
@@ -611,12 +633,16 @@ public class InterviewServiceImpl implements InterviewService {
             if (!storedFile.startsWith(UploadPaths.RECORDING_DIR)) {
                 throw new BusinessException("录制文件路径非法");
             }
+            String previousRecordingPath = session.getRecordingPath();
+            String previousRecordingFileName = session.getRecordingFileName();
             file.transferTo(storedFile.toFile());
             session.setRecordingPath(storedFile.toString());
             session.setRecordingFileName(storedName);
             session.setSessionStatus("RECORDED");
             videoSessionMapper.updateById(session);
-            auditLogService.log(session.getApproverUserId(), session.getApproverName(), "HR_ADMIN", "INTERVIEW", "UPLOAD_RECORDING", "VIDEO_SESSION", String.valueOf(session.getId()), storedName);
+            if (!StrUtil.equals(previousRecordingFileName, storedName) || !StrUtil.equals(previousRecordingPath, storedFile.toString())) {
+                auditLogService.log(session.getApproverUserId(), session.getApproverName(), "HR_ADMIN", "INTERVIEW", "UPLOAD_RECORDING", "VIDEO_SESSION", String.valueOf(session.getId()), storedName);
+            }
             return toVideoSignalVO(session);
         } catch (IOException ex) {
             throw new BusinessException("录制文件上传失败: " + ex.getMessage());
@@ -1252,6 +1278,18 @@ public class InterviewServiceImpl implements InterviewService {
             return value;
         }
         return existing + "\n" + value;
+    }
+
+    private boolean containsSignal(String existing, String value) {
+        if (StrUtil.isBlank(existing) || StrUtil.isBlank(value)) {
+            return false;
+        }
+        return java.util.Arrays.stream(existing.split("\\n"))
+                .anyMatch(item -> StrUtil.equals(item, value));
+    }
+
+    private boolean isTerminalVideoSessionStatus(String status) {
+        return StrUtil.equalsAny(status, "WAITING_APPROVAL", "RECORDED", "PASSED", "REJECTED");
     }
 
     private String displayName(String name, String fallback) {
