@@ -20,6 +20,7 @@
             <p>当前阶段：{{ processSummary.currentStage }}</p>
             <p>状态：{{ processSummary.processStatusView }}</p>
             <p>AI均分：{{ processSummary.aiAverageScore ?? '-' }}</p>
+            <p>AI最少轮数：{{ processSummary.aiMinQuestionRounds || '-' }}</p>
             <p>AI最多轮数：{{ processSummary.aiMaxQuestionRounds || '-' }}</p>
             <p>反作弊：{{ antiCheat.fullscreen ? '全屏中' : '未全屏' }} / 切屏 {{ antiCheat.switchCount }} / {{ processSummary.antiCheatSwitchLimit || 5 }} 次</p>
             <p v-if="refreshState.retryCount > 0">自动重试：第 {{ refreshState.retryCount }} 次，{{ refreshState.lastError }}</p>
@@ -59,6 +60,7 @@ import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { interviewApi } from '../services/api'
+import { buildMediaErrorMessage, requestCameraAndMicrophone } from '../utils/media'
 
 const route = useRoute()
 const router = useRouter()
@@ -228,7 +230,7 @@ function notifyAiFinishedIfNeeded() {
 async function joinVideo() {
   try {
     await interviewApi.intervieweeJoin(sessionForm.processId)
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    localStream = await requestCameraAndMicrophone()
     localVideo.value.srcObject = localStream
     peer = new RTCPeerConnection()
     addedHrIce = new Set()
@@ -262,7 +264,7 @@ async function joinVideo() {
       }
     }, 2000)
     ElMessage.success('已加入视频面并开始录制')
-  } catch (error) { fail(error) }
+  } catch (error) { ElMessage.error(buildMediaErrorMessage(error)) }
 }
 async function stopRecording() {
   try {

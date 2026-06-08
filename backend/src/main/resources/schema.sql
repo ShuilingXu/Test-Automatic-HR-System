@@ -262,6 +262,7 @@ CREATE TABLE IF NOT EXISTS interview_process (
     overall_status VARCHAR(32) NOT NULL,
     ai_threshold_score INTEGER NOT NULL DEFAULT 70,
     ai_average_score INTEGER,
+    ai_min_question_rounds INTEGER NOT NULL DEFAULT 1,
     ai_max_question_rounds INTEGER NOT NULL DEFAULT 10,
     anti_cheat_switch_limit INTEGER NOT NULL DEFAULT 5,
     anti_cheat_switch_count INTEGER NOT NULL DEFAULT 0,

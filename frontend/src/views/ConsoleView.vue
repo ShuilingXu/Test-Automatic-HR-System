@@ -374,7 +374,7 @@ async function startCandidateInterview(candidate) {
       ElMessage.warning('未找到对应面试者账号，请先注册并完善资料')
       return
     }
-    await interviewApi.startProcess({ recruitmentCandidateId: candidate.id, intervieweeUserId: interviewee.id, jobId: candidate.jobId, aiThresholdScore: 70, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })
+    await interviewApi.startProcess({ recruitmentCandidateId: candidate.id, intervieweeUserId: interviewee.id, jobId: candidate.jobId, aiThresholdScore: 70, aiMinQuestionRounds: 1, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })
     ElMessage.success('面试流程已发起')
     await loadRecruitment()
   } catch (error) { fail(error) }

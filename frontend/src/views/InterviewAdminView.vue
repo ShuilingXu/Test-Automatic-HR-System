@@ -107,6 +107,7 @@
           <el-form-item label="投递岗位"><el-select v-model="processForm.jobId" disabled><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
           <el-form-item label="投递编号"><el-input :model-value="processCandidatePreview?.id || '-'" disabled /></el-form-item>
           <el-form-item label="AI通过阈值"><el-input-number v-model="processForm.aiThresholdScore" :min="1" /></el-form-item>
+          <el-form-item label="AI最少问答轮数"><el-input-number v-model="processForm.aiMinQuestionRounds" :min="1" /></el-form-item>
           <el-form-item label="AI最多问答轮数"><el-input-number v-model="processForm.aiMaxQuestionRounds" :min="1" /></el-form-item>
           <el-form-item label="切屏终止阈值"><el-input-number v-model="processForm.antiCheatSwitchLimit" :min="1" /></el-form-item>
         </el-form>
@@ -137,6 +138,7 @@
         <div v-if="selectedProcess" class="surface inner-surface detail-surface">
           <h3>流程审批</h3>
           <p class="serial-line">流程流水号：{{ selectedProcess.id }}</p>
+          <p class="serial-line">AI最少轮数：{{ selectedProcess.aiMinQuestionRounds || '-' }}</p>
           <p class="serial-line">AI最多轮数：{{ selectedProcess.aiMaxQuestionRounds || '-' }}</p>
           <p class="serial-line">切屏次数：{{ selectedProcess.antiCheatSwitchCount || 0 }} / {{ selectedProcess.antiCheatSwitchLimit || 5 }}</p>
           <div v-if="selectedProcess.videoJoinLink || selectedProcess.videoSerialNo" class="serial-line">
@@ -178,6 +180,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi, interviewApi, recruitmentApi } from '../services/api'
+import { buildMediaErrorMessage, requestCameraAndMicrophone } from '../utils/media'
 
 const sessionUser = ref(JSON.parse(localStorage.getItem('session-user') || 'null'))
 const isItAdmin = computed(() => sessionUser.value?.roleCode === 'IT_ADMIN')
@@ -207,7 +210,7 @@ const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '',
 const weightForm = reactive({ id: null, jobId: null, knowledgeBaseId: null, weight: 1 })
 const interviewerLlmForm = reactive(createLlmForm('INTERVIEWER'))
 const scorerLlmForm = reactive(createLlmForm('SCORER'))
-const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 70, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })
+const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 70, aiMinQuestionRounds: 1, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })
 const processSearch = reactive({ keyword: '' })
 
 const interviewerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')?.apiKeyMasked || '未配置')
@@ -266,7 +269,7 @@ function syncLlmForms() {
   Object.assign(scorerLlmForm, scorer ? { ...scorer, apiKey: '' } : createLlmForm('SCORER'))
 }
 async function syncIntervieweeByCandidate(candidateId) { const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId); processForm.intervieweeUserId = candidate?.intervieweeUserId ? String(candidate.intervieweeUserId) : ''; processForm.jobId = candidate?.jobId || null }
-async function startProcess() { try { if (!processForm.recruitmentCandidateId) { ElMessage.warning('请先选择候选人投递记录'); return } if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到候选人账号'); return } if (!processForm.jobId) { ElMessage.warning('投递记录未绑定岗位'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
+async function startProcess() { try { if (!processForm.recruitmentCandidateId) { ElMessage.warning('请先选择候选人投递记录'); return } if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到候选人账号'); return } if (!processForm.jobId) { ElMessage.warning('投递记录未绑定岗位'); return } if (processForm.aiMaxQuestionRounds < processForm.aiMinQuestionRounds) { ElMessage.warning('AI最多问答轮数不能小于最少问答轮数'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
 async function selectProcess(row) { selectedProcess.value = row; aiRecords.value = (await interviewApi.listAiRecords({ processId: row.id })).data }
 async function approveAi(approved) { try { await interviewApi.approveAi(selectedProcess.value.id, { approved }); ElMessage.success('AI审批完成'); await loadAll() } catch (error) { fail(error) } }
 async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved }); ElMessage.success('视频面审批完成'); await loadAll() } catch (error) { fail(error) } }
@@ -276,7 +279,7 @@ async function terminateProcess() { try { await interviewApi.terminateProcess(se
 async function startHrVideoCall() {
   if (!selectedProcess.value) return
   try {
-    hrLocalStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    hrLocalStream = await requestCameraAndMicrophone()
     hrLocalVideo.value.srcObject = hrLocalStream
     hrPeer = new RTCPeerConnection()
     addedIntervieweeIce = new Set()
@@ -312,7 +315,7 @@ async function startHrVideoCall() {
       }
     }, 2000)
     ElMessage.success('HR视频通话已开始')
-  } catch (error) { fail(error) }
+  } catch (error) { ElMessage.error(buildMediaErrorMessage(error)) }
 }
 
 async function stopHrRecording() {

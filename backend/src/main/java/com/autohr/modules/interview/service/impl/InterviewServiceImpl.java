@@ -233,7 +233,10 @@ public class InterviewServiceImpl implements InterviewService {
         process.setStageStatus("IN_PROGRESS");
         process.setOverallStatus("IN_PROGRESS");
         process.setAiThresholdScore(Objects.requireNonNullElse(request.getAiThresholdScore(), 70));
-        process.setAiMaxQuestionRounds(Math.max(Objects.requireNonNullElse(request.getAiMaxQuestionRounds(), 10), 1));
+        int minQuestionRounds = Math.max(Objects.requireNonNullElse(request.getAiMinQuestionRounds(), 1), 1);
+        int maxQuestionRounds = Math.max(Objects.requireNonNullElse(request.getAiMaxQuestionRounds(), 10), minQuestionRounds);
+        process.setAiMinQuestionRounds(minQuestionRounds);
+        process.setAiMaxQuestionRounds(maxQuestionRounds);
         process.setAntiCheatSwitchLimit(Math.max(Objects.requireNonNullElse(request.getAntiCheatSwitchLimit(), 5), 1));
         process.setAntiCheatSwitchCount(0);
         process.setVideoApproved(0);
@@ -339,7 +342,8 @@ public class InterviewServiceImpl implements InterviewService {
         int currentAverage = Math.round(total / (float) count);
         process.setAiAverageScore(currentAverage);
         int answeredRounds = count;
-        if (currentAverage >= process.getAiThresholdScore()) {
+        int minQuestionRounds = Math.max(Objects.requireNonNullElse(process.getAiMinQuestionRounds(), 1), 1);
+        if (answeredRounds >= minQuestionRounds && currentAverage >= process.getAiThresholdScore()) {
             process.setStageStatus("WAITING_APPROVAL");
             process.setProcessStatusView("AI待审批");
         } else if (answeredRounds >= Math.max(Objects.requireNonNullElse(process.getAiMaxQuestionRounds(), 10), 1)) {
@@ -1152,6 +1156,7 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setOverallStatus(entity.getOverallStatus());
         vo.setAiThresholdScore(entity.getAiThresholdScore());
         vo.setAiAverageScore(entity.getAiAverageScore());
+        vo.setAiMinQuestionRounds(entity.getAiMinQuestionRounds());
         vo.setAiMaxQuestionRounds(entity.getAiMaxQuestionRounds());
         vo.setAntiCheatSwitchLimit(entity.getAntiCheatSwitchLimit());
         vo.setAntiCheatSwitchCount(entity.getAntiCheatSwitchCount());

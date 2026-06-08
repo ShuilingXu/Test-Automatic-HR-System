@@ -37,6 +37,7 @@ public class InterviewVO {
     private String overallStatus;
     private Integer aiThresholdScore;
     private Integer aiAverageScore;
+    private Integer aiMinQuestionRounds;
     private Integer aiMaxQuestionRounds;
     private Integer antiCheatSwitchLimit;
     private Integer antiCheatSwitchCount;

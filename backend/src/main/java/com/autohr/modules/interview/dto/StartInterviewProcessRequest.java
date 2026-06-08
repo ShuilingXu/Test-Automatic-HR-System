@@ -12,6 +12,7 @@ public class StartInterviewProcessRequest {
     @NotNull(message = "岗位必填")
     private Long jobId;
     private Integer aiThresholdScore;
+    private Integer aiMinQuestionRounds;
     private Integer aiMaxQuestionRounds;
     private Integer antiCheatSwitchLimit;
 }
