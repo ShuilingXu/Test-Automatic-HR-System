@@ -5,7 +5,6 @@
         <div>
           <p class="page-eyebrow">Interviewee Portal</p>
           <h1 class="page-title">面试者门户</h1>
-          <p class="page-subtitle">先完善个人信息，再填写报名信息并进入线上面试。</p>
         </div>
         <div class="link-row">
           <RouterLink class="link-chip" to="/candidate/register">去报名</RouterLink>
@@ -28,14 +27,12 @@
             <div><span>资料完成</span><strong>{{ session.profileCompleted === 1 ? '是' : '否' }}</strong></div>
             <div><span>邮箱</span><strong>{{ session.email || '-' }}</strong></div>
           </div>
-          <p class="page-subtitle" style="margin-top: 16px">资料完成后再去报名页面，符合当前系统流程约束。</p>
         </div>
       </div>
       <div class="surface application-panel">
         <div class="section-head">
           <div>
             <h3>我的报名记录</h3>
-            <p class="page-subtitle">这里会长期保留你的报名记录和对应的面试入口，不再需要输入流程流水号。</p>
           </div>
           <el-button @click="loadMyCandidates">刷新</el-button>
         </div>

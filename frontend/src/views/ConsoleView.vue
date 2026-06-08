@@ -3,7 +3,6 @@
     <aside class="console-side">
       <p class="page-eyebrow">Auto HR Console</p>
       <h1>管理后台</h1>
-      <p>用于直观测试 HR、招聘、面试与鉴权系统。用户管理中心仅 IT 管理员可见。</p>
       <nav>
         <button v-for="item in tabs" :key="item.key" :class="{ active: activeTab === item.key }" @click="activeTab = item.key">
           {{ item.label }}

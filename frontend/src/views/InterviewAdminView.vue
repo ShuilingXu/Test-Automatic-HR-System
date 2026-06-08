@@ -5,7 +5,6 @@
         <div>
           <p class="page-eyebrow">Interview HR</p>
           <h1 class="page-title">面试系统 HR 入口</h1>
-          <p class="page-subtitle">维护 AI 知识库、岗位权重、LLM 配置，并推进 AI 面、视频面、线下面流程。</p>
         </div>
         <RouterLink class="link-chip" to="/admin">返回管理后台</RouterLink>
       </div>

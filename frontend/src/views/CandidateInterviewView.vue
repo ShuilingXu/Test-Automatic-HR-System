@@ -3,12 +3,10 @@
     <section class="page-card">
       <p class="page-eyebrow">Interviewee</p>
       <h1 class="page-title">面试者面试系统</h1>
-      <p class="page-subtitle">当前流程包括 AI 面试、视频面试、线下面试。系统会根据当前阶段动态展示操作。</p>
       <div class="page-grid">
         <div class="surface">
           <h3>流程入口</h3>
           <div class="summary-box">
-            <p>当前面试由报名记录绑定进入，不再使用流程流水号手动鉴别。</p>
             <p>绑定状态：{{ sessionForm.processId ? '已绑定面试流程' : '未选择报名记录' }}</p>
           </div>
           <div class="link-row">
@@ -36,8 +34,8 @@
             <p>{{ currentQuestion.questionContent }}</p>
             <small>知识域：{{ currentQuestion.knowledgePoint }}</small>
           </div>
-          <div v-else-if="processSummary?.currentStage === 'AI'" class="empty-box">AI 正在根据知识库生成题目，系统会自动刷新，请不要退出流程。</div>
-          <div v-if="aiRecords.length === 0" class="empty-box">流程开始后系统会先发出 AI 问题</div>
+          <div v-else-if="processSummary?.currentStage === 'AI'" class="empty-box">题目生成中</div>
+          <div v-if="aiRecords.length === 0" class="empty-box">暂无题目</div>
           <div v-for="item in aiRecords" :key="item.id" class="question-card">
             <strong>Q{{ item.sequenceNo }} {{ item.knowledgePoint }}</strong>
             <p>{{ item.questionContent }}</p>

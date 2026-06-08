@@ -3,7 +3,6 @@
     <section class="page-card auth-card">
       <p class="page-eyebrow">Unified Login</p>
       <h1 class="page-title">统一登录</h1>
-      <p class="page-subtitle">系统角色包括 IT管理员、HR管理员、HR用户、面试者。面试者可在此注册并进入个人门户。</p>
       <div class="page-grid">
         <el-form :model="loginForm" label-position="top" class="surface login-form">
           <h3>登录</h3>

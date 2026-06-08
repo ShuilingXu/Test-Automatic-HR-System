@@ -3,7 +3,6 @@
     <section class="page-card">
       <p class="page-eyebrow">Candidate</p>
       <h1 class="page-title">测试者报名</h1>
-      <p class="page-subtitle">登录并完成个人信息后，选择开放岗位，填写报名表并上传简历。</p>
       <div class="page-grid">
         <el-form :model="form" label-position="top" class="surface">
           <h3>报名信息</h3>
@@ -24,7 +23,6 @@
           <el-form-item label="自我介绍"><el-input v-model="form.selfIntroduction" type="textarea" :rows="4" /></el-form-item>
           <el-upload :auto-upload="false" :limit="1" :on-change="pickResume" :on-remove="removeResume">
             <el-button>选择简历文件</el-button>
-            <template #tip><div class="upload-tip">支持 PDF、Word、图片等常见简历文件，后端当前限制 20MB。</div></template>
           </el-upload>
           <div class="link-row">
             <el-button type="primary" @click="submit">提交报名并上传简历</el-button>
