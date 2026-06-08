@@ -36,6 +36,11 @@ jwt:
 interview:
   llm:
     debug: false
+  webrtc:
+    stun-urls: ${INTERVIEW_STUN_URLS:stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478}
+    turn-urls: ${INTERVIEW_TURN_URLS:}
+    turn-username: ${INTERVIEW_TURN_USERNAME:}
+    turn-credential: ${INTERVIEW_TURN_CREDENTIAL:}
 
 app:
   database:

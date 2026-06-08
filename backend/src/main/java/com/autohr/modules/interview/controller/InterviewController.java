@@ -8,6 +8,7 @@ import com.autohr.modules.auth.service.AuthService;
 import com.autohr.modules.interview.dto.AiAnswerRequest;
 import com.autohr.modules.interview.dto.AntiCheatEventRequest;
 import com.autohr.modules.interview.dto.InterviewDecisionRequest;
+import com.autohr.modules.interview.dto.IceServerVO;
 import com.autohr.modules.interview.dto.InterviewVO;
 import com.autohr.modules.interview.dto.JobKnowledgeWeightSaveRequest;
 import com.autohr.modules.interview.dto.KnowledgeBaseSaveRequest;
@@ -19,6 +20,7 @@ import com.autohr.modules.interview.dto.VideoSignalVO;
 import com.autohr.modules.interview.service.InterviewService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -40,6 +42,32 @@ public class InterviewController {
 
     private final InterviewService interviewService;
     private final AuthService authService;
+
+    @Value("${interview.webrtc.stun-urls:stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478}")
+    private String stunUrls;
+
+    @Value("${interview.webrtc.turn-urls:}")
+    private String turnUrls;
+
+    @Value("${interview.webrtc.turn-username:}")
+    private String turnUsername;
+
+    @Value("${interview.webrtc.turn-credential:}")
+    private String turnCredential;
+
+    @GetMapping("/ice-servers")
+    public ApiResponse<List<IceServerVO>> getIceServers() {
+        List<IceServerVO> servers = new java.util.ArrayList<>();
+        List<String> stun = splitUrls(stunUrls);
+        if (!stun.isEmpty()) {
+            servers.add(new IceServerVO(stun, null, null));
+        }
+        List<String> turn = splitUrls(turnUrls);
+        if (!turn.isEmpty()) {
+            servers.add(new IceServerVO(turn, blankToNull(turnUsername), blankToNull(turnCredential)));
+        }
+        return ApiResponse.success(servers);
+    }
 
     @PostMapping("/hr/knowledge-bases")
     public ApiResponse<InterviewVO> saveKnowledgeBase(@Valid @RequestBody KnowledgeBaseSaveRequest request) {
@@ -294,6 +322,20 @@ public class InterviewController {
 
     private SessionUserVO currentUser(Authentication authentication) {
         return authService.loadUserByUsername(authentication.getName());
+    }
+
+    private List<String> splitUrls(String urls) {
+        if (urls == null || urls.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(urls.split(","))
+                .map(String::trim)
+                .filter(item -> !item.isEmpty())
+                .toList();
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
     private void fillApprover(Authentication authentication, InterviewDecisionRequest request) {

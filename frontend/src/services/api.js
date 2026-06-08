@@ -77,6 +77,7 @@ export const authApi = {
 }
 
 export const interviewApi = {
+  getIceServers() { return request.get('/interview/ice-servers') },
   saveKnowledgeBase(payload) { return request.post('/interview/hr/knowledge-bases', payload) },
   listKnowledgeBases(params) { return request.get('/interview/hr/knowledge-bases', { params }) },
   deleteKnowledgeBase(id) { return request.post(`/interview/hr/knowledge-bases/${id}/delete`) },

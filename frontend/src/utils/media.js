@@ -12,6 +12,36 @@ export async function requestCameraAndMicrophone() {
   throw new Error(buildMediaUnsupportedMessage())
 }
 
+export function createPeerConnection(iceServers = defaultIceServers()) {
+  return new RTCPeerConnection({ iceServers })
+}
+
+export function defaultIceServers() {
+  return [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+  ]
+}
+
+export function attachRemoteTrack(videoElement, event, existingStream) {
+  const stream = existingStream || event.streams?.[0] || new MediaStream()
+  if (!event.streams?.[0] && event.track && !stream.getTracks().some((track) => track.id === event.track.id)) {
+    stream.addTrack(event.track)
+  }
+  if (videoElement && videoElement.srcObject !== stream) {
+    videoElement.srcObject = stream
+  }
+  playVideo(videoElement)
+  return stream
+}
+
+export function playVideo(videoElement) {
+  const playPromise = videoElement?.play?.()
+  if (playPromise?.catch) {
+    playPromise.catch(() => {})
+  }
+}
+
 export function buildMediaErrorMessage(error) {
   if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
     return '摄像头/麦克风权限被拒绝，请在浏览器地址栏权限设置中允许后重试'

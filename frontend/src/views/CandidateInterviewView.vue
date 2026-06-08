@@ -60,7 +60,7 @@ import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { interviewApi } from '../services/api'
-import { buildMediaErrorMessage, requestCameraAndMicrophone } from '../utils/media'
+import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, playVideo, requestCameraAndMicrophone } from '../utils/media'
 
 const route = useRoute()
 const router = useRouter()
@@ -80,6 +80,7 @@ let aiRefreshTimer = null
 let recorder = null
 let recordedChunks = []
 let addedHrIce = new Set()
+let remoteStream = null
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
 async function loadProcessRecords(options = {}) {
@@ -229,13 +230,21 @@ function notifyAiFinishedIfNeeded() {
 }
 async function joinVideo() {
   try {
+    disconnectVideo()
     await interviewApi.intervieweeJoin(sessionForm.processId)
     localStream = await requestCameraAndMicrophone()
     localVideo.value.srcObject = localStream
-    peer = new RTCPeerConnection()
+    playVideo(localVideo.value)
+    peer = createPeerConnection(await loadIceServers())
     addedHrIce = new Set()
     localStream.getTracks().forEach((track) => peer.addTrack(track, localStream))
-    peer.ontrack = (event) => { remoteVideo.value.srcObject = event.streams[0] }
+    remoteStream = null
+    peer.ontrack = (event) => { remoteStream = attachRemoteTrack(remoteVideo.value, event, remoteStream) }
+    peer.onconnectionstatechange = () => {
+      if (['failed', 'disconnected'].includes(peer.connectionState)) {
+        ElMessage.warning('远端视频连接不稳定，请双方保持页面打开，必要时重新加入视频面')
+      }
+    }
     peer.onicecandidate = async (event) => {
       if (event.candidate) {
         await interviewApi.addIntervieweeIce(sessionForm.processId, { iceCandidate: JSON.stringify(event.candidate) })
@@ -287,8 +296,18 @@ function disconnectVideo() {
   peer = null
   localStream?.getTracks().forEach((track) => track.stop())
   localStream = null
+  remoteStream = null
   if (localVideo.value) localVideo.value.srcObject = null
   if (remoteVideo.value) remoteVideo.value.srcObject = null
+}
+
+async function loadIceServers() {
+  try {
+    const response = await interviewApi.getIceServers()
+    return response.data?.length ? response.data : defaultIceServers()
+  } catch {
+    return defaultIceServers()
+  }
 }
 
 onBeforeUnmount(() => {

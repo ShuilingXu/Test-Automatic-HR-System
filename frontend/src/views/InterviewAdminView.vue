@@ -180,7 +180,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi, interviewApi, recruitmentApi } from '../services/api'
-import { buildMediaErrorMessage, requestCameraAndMicrophone } from '../utils/media'
+import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, playVideo, requestCameraAndMicrophone } from '../utils/media'
 
 const sessionUser = ref(JSON.parse(localStorage.getItem('session-user') || 'null'))
 const isItAdmin = computed(() => sessionUser.value?.roleCode === 'IT_ADMIN')
@@ -204,6 +204,7 @@ let hrPollTimer = null
 let hrRecorder = null
 let hrRecordedChunks = []
 let addedIntervieweeIce = new Set()
+let hrRemoteStream = null
 
 const kbForm = reactive({ id: null, knowledgeBaseName: '', techCategory: '', jobCategory: '', status: 1 })
 const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '', knowledgeContent: '', status: 1 })
@@ -279,12 +280,20 @@ async function terminateProcess() { try { await interviewApi.terminateProcess(se
 async function startHrVideoCall() {
   if (!selectedProcess.value) return
   try {
+    disconnectHrVideo()
     hrLocalStream = await requestCameraAndMicrophone()
     hrLocalVideo.value.srcObject = hrLocalStream
-    hrPeer = new RTCPeerConnection()
+    playVideo(hrLocalVideo.value)
+    hrPeer = createPeerConnection(await loadIceServers())
     addedIntervieweeIce = new Set()
     hrLocalStream.getTracks().forEach((track) => hrPeer.addTrack(track, hrLocalStream))
-    hrPeer.ontrack = (event) => { hrRemoteVideo.value.srcObject = event.streams[0] }
+    hrRemoteStream = null
+    hrPeer.ontrack = (event) => { hrRemoteStream = attachRemoteTrack(hrRemoteVideo.value, event, hrRemoteStream) }
+    hrPeer.onconnectionstatechange = () => {
+      if (['failed', 'disconnected'].includes(hrPeer.connectionState)) {
+        ElMessage.warning('远端视频连接不稳定，请双方保持页面打开，必要时重新开始视频面')
+      }
+    }
     hrPeer.onicecandidate = async (event) => {
       if (event.candidate) {
         await interviewApi.addHrIce(selectedProcess.value.id, { iceCandidate: JSON.stringify(event.candidate) })
@@ -344,9 +353,19 @@ function disconnectHrVideo() {
   hrPeer = null
   hrLocalStream?.getTracks().forEach((track) => track.stop())
   hrLocalStream = null
+  hrRemoteStream = null
   if (hrLocalVideo.value) hrLocalVideo.value.srcObject = null
   if (hrRemoteVideo.value) hrRemoteVideo.value.srcObject = null
   videoActive.value = false
+}
+
+async function loadIceServers() {
+  try {
+    const response = await interviewApi.getIceServers()
+    return response.data?.length ? response.data : defaultIceServers()
+  } catch {
+    return defaultIceServers()
+  }
 }
 
 onBeforeUnmount(() => {
