@@ -81,6 +81,7 @@ let recorder = null
 let recordedChunks = []
 let addedHrIce = new Set()
 let remoteStream = null
+let pendingHrIce = []
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
 async function loadProcessRecords(options = {}) {
@@ -237,6 +238,7 @@ async function joinVideo() {
     playVideo(localVideo.value)
     peer = createPeerConnection(await loadIceServers())
     addedHrIce = new Set()
+    pendingHrIce = []
     localStream.getTracks().forEach((track) => peer.addTrack(track, localStream))
     remoteStream = null
     peer.ontrack = (event) => { remoteStream = attachRemoteTrack(remoteVideo.value, event, remoteStream) }
@@ -258,6 +260,7 @@ async function joinVideo() {
       const state = (await interviewApi.getVideoState(sessionForm.processId)).data
       if (state.offerSdp && !peer.currentRemoteDescription) {
         await peer.setRemoteDescription(JSON.parse(state.offerSdp))
+        await flushPendingHrIce()
         const answer = await peer.createAnswer()
         await peer.setLocalDescription(answer)
         await interviewApi.submitVideoAnswer(sessionForm.processId, { answerSdp: JSON.stringify(answer) })
@@ -267,11 +270,11 @@ async function joinVideo() {
         for (const item of candidates) {
           if (!addedHrIce.has(item)) {
             addedHrIce.add(item)
-            try { await peer.addIceCandidate(JSON.parse(item)) } catch {}
+            await addHrIceCandidate(item)
           }
         }
       }
-    }, 2000)
+    }, 1000)
     ElMessage.success('已加入视频面并开始录制')
   } catch (error) { ElMessage.error(buildMediaErrorMessage(error)) }
 }
@@ -297,8 +300,29 @@ function disconnectVideo() {
   localStream?.getTracks().forEach((track) => track.stop())
   localStream = null
   remoteStream = null
+  pendingHrIce = []
   if (localVideo.value) localVideo.value.srcObject = null
   if (remoteVideo.value) remoteVideo.value.srcObject = null
+}
+
+async function addHrIceCandidate(item) {
+  if (!peer?.remoteDescription) {
+    pendingHrIce.push(item)
+    return
+  }
+  try {
+    await peer.addIceCandidate(JSON.parse(item))
+  } catch (error) {
+    console.warn('添加HR ICE失败', error)
+  }
+}
+
+async function flushPendingHrIce() {
+  const items = pendingHrIce
+  pendingHrIce = []
+  for (const item of items) {
+    await addHrIceCandidate(item)
+  }
 }
 
 async function loadIceServers() {

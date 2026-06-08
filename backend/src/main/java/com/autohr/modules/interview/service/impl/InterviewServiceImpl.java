@@ -545,6 +545,9 @@ public class InterviewServiceImpl implements InterviewService {
     public VideoSignalVO publishHrOffer(Long processId, VideoSignalRequest request) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
         session.setHrOfferSdp(request.getOfferSdp());
+        session.setIntervieweeAnswerSdp(null);
+        session.setHrIceCandidates(null);
+        session.setIntervieweeIceCandidates(null);
         session.setSessionStatus("OFFER_PUBLISHED");
         videoSessionMapper.updateById(session);
         auditLogService.log(session.getApproverUserId(), session.getApproverName(), "HR_ADMIN", "INTERVIEW", "PUBLISH_VIDEO_OFFER", "VIDEO_SESSION", String.valueOf(session.getId()), session.getVideoSerialNo());
@@ -557,6 +560,7 @@ public class InterviewServiceImpl implements InterviewService {
         requireIntervieweeProcess(processId, intervieweeUserId);
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
         session.setIntervieweeAnswerSdp(request.getAnswerSdp());
+        session.setIntervieweeIceCandidates(null);
         session.setSessionStatus("ANSWER_SUBMITTED");
         videoSessionMapper.updateById(session);
         auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "SUBMIT_VIDEO_ANSWER", "VIDEO_SESSION", String.valueOf(session.getId()), session.getVideoSerialNo());

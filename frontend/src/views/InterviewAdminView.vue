@@ -205,6 +205,7 @@ let hrRecorder = null
 let hrRecordedChunks = []
 let addedIntervieweeIce = new Set()
 let hrRemoteStream = null
+let pendingIntervieweeIce = []
 
 const kbForm = reactive({ id: null, knowledgeBaseName: '', techCategory: '', jobCategory: '', status: 1 })
 const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '', knowledgeContent: '', status: 1 })
@@ -286,6 +287,7 @@ async function startHrVideoCall() {
     playVideo(hrLocalVideo.value)
     hrPeer = createPeerConnection(await loadIceServers())
     addedIntervieweeIce = new Set()
+    pendingIntervieweeIce = []
     hrLocalStream.getTracks().forEach((track) => hrPeer.addTrack(track, hrLocalStream))
     hrRemoteStream = null
     hrPeer.ontrack = (event) => { hrRemoteStream = attachRemoteTrack(hrRemoteVideo.value, event, hrRemoteStream) }
@@ -312,17 +314,18 @@ async function startHrVideoCall() {
       const state = (await interviewApi.getHrVideoState(selectedProcess.value.id)).data
       if (state.answerSdp && !hrPeer.currentRemoteDescription) {
         await hrPeer.setRemoteDescription(JSON.parse(state.answerSdp))
+        await flushPendingIntervieweeIce()
       }
       if (state.intervieweeIceCandidates) {
         const candidates = state.intervieweeIceCandidates.split('\n').filter(Boolean)
         for (const item of candidates) {
           if (!addedIntervieweeIce.has(item)) {
             addedIntervieweeIce.add(item)
-            try { await hrPeer.addIceCandidate(JSON.parse(item)) } catch {}
+            await addIntervieweeIceCandidate(item)
           }
         }
       }
-    }, 2000)
+    }, 1000)
     ElMessage.success('HR视频通话已开始')
   } catch (error) { ElMessage.error(buildMediaErrorMessage(error)) }
 }
@@ -354,9 +357,30 @@ function disconnectHrVideo() {
   hrLocalStream?.getTracks().forEach((track) => track.stop())
   hrLocalStream = null
   hrRemoteStream = null
+  pendingIntervieweeIce = []
   if (hrLocalVideo.value) hrLocalVideo.value.srcObject = null
   if (hrRemoteVideo.value) hrRemoteVideo.value.srcObject = null
   videoActive.value = false
+}
+
+async function addIntervieweeIceCandidate(item) {
+  if (!hrPeer?.remoteDescription) {
+    pendingIntervieweeIce.push(item)
+    return
+  }
+  try {
+    await hrPeer.addIceCandidate(JSON.parse(item))
+  } catch (error) {
+    console.warn('添加面试者 ICE失败', error)
+  }
+}
+
+async function flushPendingIntervieweeIce() {
+  const items = pendingIntervieweeIce
+  pendingIntervieweeIce = []
+  for (const item of items) {
+    await addIntervieweeIceCandidate(item)
+  }
 }
 
 async function loadIceServers() {
