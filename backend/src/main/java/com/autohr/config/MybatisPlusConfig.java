@@ -1,6 +1,6 @@
 package com.autohr.config;
 
-import com.baomidou.mybatisplus.annotation.DbType;
+import com.autohr.config.database.ActiveDatabase;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
 import org.mybatis.spring.annotation.MapperScan;
@@ -12,9 +12,9 @@ import org.springframework.context.annotation.Configuration;
 public class MybatisPlusConfig {
 
     @Bean
-    public MybatisPlusInterceptor mybatisPlusInterceptor() {
+    public MybatisPlusInterceptor mybatisPlusInterceptor(ActiveDatabase activeDatabase) {
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
-        interceptor.addInnerInterceptor(new PaginationInnerInterceptor(DbType.SQLITE));
+        interceptor.addInnerInterceptor(new PaginationInnerInterceptor(activeDatabase.type().mybatisDbType()));
         return interceptor;
     }
 }

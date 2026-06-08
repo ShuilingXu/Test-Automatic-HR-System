@@ -1,7 +1,6 @@
-spring:
-  datasource:
-    url: jdbc:sqlite:autohr-dev.db
-    driver-class-name: org.sqlite.JDBC
+app:
+  database:
+    sqlite-fallback-url: ${SQLITE_FALLBACK_URL:jdbc:sqlite:autohr-dev.db}
 
 logging:
   level:

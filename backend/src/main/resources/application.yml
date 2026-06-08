@@ -2,19 +2,17 @@ server:
   port: 8080
 
 spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
   application:
     name: auto-hr-system
   profiles:
     active: dev
-  datasource:
-    driver-class-name: org.sqlite.JDBC
-    url: jdbc:sqlite:autohr.db
-    username:
-    password:
   sql:
     init:
-      mode: always
-      schema-locations: classpath:schema.sql
+      mode: never
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
@@ -38,3 +36,13 @@ jwt:
 interview:
   llm:
     debug: false
+
+app:
+  database:
+    type: ${DB_TYPE:sqlite}
+    url: ${DB_URL:}
+    username: ${DB_USERNAME:}
+    password: ${DB_PASSWORD:}
+    sqlite-fallback-url: ${SQLITE_FALLBACK_URL:jdbc:sqlite:autohr.db}
+  migration:
+    enabled: ${MIGRATION_ENABLED:true}
