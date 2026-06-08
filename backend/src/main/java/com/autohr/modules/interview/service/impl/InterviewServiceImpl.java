@@ -8,6 +8,7 @@ import com.autohr.modules.hr.entity.Employee;
 import com.autohr.modules.hr.enums.EmploymentStatus;
 import com.autohr.modules.hr.mapper.EmployeeMapper;
 import com.autohr.modules.interview.dto.AiAnswerRequest;
+import com.autohr.modules.interview.dto.AntiCheatEventRequest;
 import com.autohr.modules.interview.dto.InterviewDecisionRequest;
 import com.autohr.modules.interview.dto.InterviewVO;
 import com.autohr.modules.interview.dto.JobKnowledgeWeightSaveRequest;
@@ -232,6 +233,7 @@ public class InterviewServiceImpl implements InterviewService {
         process.setStageStatus("IN_PROGRESS");
         process.setOverallStatus("IN_PROGRESS");
         process.setAiThresholdScore(Objects.requireNonNullElse(request.getAiThresholdScore(), 7));
+        process.setAiMaxQuestionRounds(Math.max(Objects.requireNonNullElse(request.getAiMaxQuestionRounds(), 5), 1));
         process.setVideoApproved(0);
         process.setOnsiteApproved(0);
         process.setProcessStatusView("AI面");
@@ -330,9 +332,15 @@ public class InterviewServiceImpl implements InterviewService {
                 .isNotNull(InterviewAiRecord::getAverageScore)).intValue(), 1);
         int currentAverage = Math.round(total / (float) count);
         process.setAiAverageScore(currentAverage);
+        int answeredRounds = count;
         if (currentAverage >= process.getAiThresholdScore()) {
             process.setStageStatus("WAITING_APPROVAL");
             process.setProcessStatusView("AI待审批");
+        } else if (answeredRounds >= Math.max(Objects.requireNonNullElse(process.getAiMaxQuestionRounds(), 5), 1)) {
+            process.setOverallStatus("REJECTED");
+            process.setStageStatus("REJECTED");
+            process.setProcessStatusView("AI未达标自动结束");
+            auditLogService.log(process.getIntervieweeUserId(), "面试者", "INTERVIEWEE", "INTERVIEW", "AI_MAX_ROUNDS_REJECT", "INTERVIEW_PROCESS", String.valueOf(process.getId()), "AI均分" + currentAverage + "未达到阈值" + process.getAiThresholdScore() + "，已答" + answeredRounds + "轮达到最大轮数" + process.getAiMaxQuestionRounds());
         } else {
             generateNextQuestion(process);
         }
@@ -624,6 +632,36 @@ public class InterviewServiceImpl implements InterviewService {
         VideoSignalVO vo = uploadRecording(processId, originalFileName, contentType, file);
         auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "UPLOAD_RECORDING", "VIDEO_SESSION", String.valueOf(vo.getSessionId()), vo.getRecordingFileName());
         return vo;
+    }
+
+    @Override
+    @Transactional
+    public InterviewVO uploadAiRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file) {
+        InterviewProcess process = requireIntervieweeProcess(processId, intervieweeUserId);
+        validateRecordingFile(originalFileName, contentType, file);
+        try {
+            Files.createDirectories(UploadPaths.RECORDING_DIR);
+            String storedName = "ai-" + processId + "-" + UUID.randomUUID() + ".webm";
+            Path storedFile = UploadPaths.RECORDING_DIR.resolve(storedName).normalize().toAbsolutePath();
+            if (!storedFile.startsWith(UploadPaths.RECORDING_DIR)) {
+                throw new BusinessException("AI答题录制文件路径非法");
+            }
+            file.transferTo(storedFile.toFile());
+            process.setAiRecordingPath(storedFile.toString());
+            process.setAiRecordingFileName(storedName);
+            processMapper.updateById(process);
+            auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "UPLOAD_AI_RECORDING", "INTERVIEW_PROCESS", String.valueOf(processId), storedName);
+            return toProcessVO(process);
+        } catch (IOException ex) {
+            throw new BusinessException("AI答题录制文件上传失败: " + ex.getMessage());
+        }
+    }
+
+    @Override
+    public void reportAntiCheatEvent(AntiCheatEventRequest request, Long intervieweeUserId, String intervieweeName) {
+        requireIntervieweeProcess(request.getProcessId(), intervieweeUserId);
+        String detail = StrUtil.blankToDefault(request.getDetail(), "") + " eventType=" + request.getEventType();
+        auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "ANTI_CHEAT_" + request.getEventType(), "INTERVIEW_PROCESS", String.valueOf(request.getProcessId()), abbreviate(detail));
     }
 
     private void syncToPendingOnboarding(InterviewProcess process) {
@@ -1112,6 +1150,9 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setOverallStatus(entity.getOverallStatus());
         vo.setAiThresholdScore(entity.getAiThresholdScore());
         vo.setAiAverageScore(entity.getAiAverageScore());
+        vo.setAiMaxQuestionRounds(entity.getAiMaxQuestionRounds());
+        vo.setAiRecordingPath(entity.getAiRecordingPath());
+        vo.setAiRecordingFileName(entity.getAiRecordingFileName());
         vo.setVideoApproved(entity.getVideoApproved());
         vo.setOnsiteApproved(entity.getOnsiteApproved());
         vo.setApprovedHrUserId(entity.getApprovedHrUserId());

@@ -1,6 +1,7 @@
 package com.autohr.modules.interview.service;
 
 import com.autohr.modules.interview.dto.AiAnswerRequest;
+import com.autohr.modules.interview.dto.AntiCheatEventRequest;
 import com.autohr.modules.interview.dto.InterviewDecisionRequest;
 import com.autohr.modules.interview.dto.InterviewVO;
 import com.autohr.modules.interview.dto.JobKnowledgeWeightSaveRequest;
@@ -49,6 +50,8 @@ public interface InterviewService {
     VideoSignalVO getVideoSignalState(Long processId);
     VideoSignalVO uploadRecording(Long processId, String originalFileName, String contentType, MultipartFile file);
     VideoSignalVO uploadIntervieweeRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file);
+    InterviewVO uploadAiRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file);
+    void reportAntiCheatEvent(AntiCheatEventRequest request, Long intervieweeUserId, String intervieweeName);
     InterviewVideoSession getVideoSession(Long processId);
     InterviewVO approveAiToVideo(Long processId, InterviewDecisionRequest request);
     InterviewVO approveVideoToOnsite(Long processId, InterviewDecisionRequest request);

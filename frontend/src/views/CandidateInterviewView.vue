@@ -12,6 +12,8 @@
           <div class="link-row">
             <el-button type="primary" @click="loadProcessRecords">加载流程</el-button>
             <RouterLink class="link-chip" to="/user">返回我的报名</RouterLink>
+            <el-button type="primary" @click="enterAiExamMode">进入AI答题全屏</el-button>
+            <el-button @click="finishAiExam">结束AI答题并上传录像</el-button>
             <el-button @click="joinVideo">加入视频面</el-button>
             <el-button @click="stopRecording">结束并上传录制</el-button>
           </div>
@@ -19,6 +21,8 @@
             <p>当前阶段：{{ processSummary.currentStage }}</p>
             <p>状态：{{ processSummary.processStatusView }}</p>
             <p>AI均分：{{ processSummary.aiAverageScore ?? '-' }}</p>
+            <p>AI最多轮数：{{ processSummary.aiMaxQuestionRounds || '-' }}</p>
+            <p>反作弊：{{ antiCheat.fullscreen ? '全屏中' : '未全屏' }} / 切屏 {{ antiCheat.switchCount }} 次 / 录像 {{ aiRecorder?.state === 'recording' ? '录制中' : '未录制' }}</p>
             <p v-if="refreshState.retryCount > 0">自动重试：第 {{ refreshState.retryCount }} 次，{{ refreshState.lastError }}</p>
           </div>
           <div class="video-grid">
@@ -65,6 +69,7 @@ const aiRecords = ref([])
 const processSummary = ref(null)
 const currentQuestion = ref(null)
 const refreshState = reactive({ loading: false, retryCount: 0, lastError: '' })
+const antiCheat = reactive({ fullscreen: false, switchCount: 0 })
 const localVideo = ref(null)
 const remoteVideo = ref(null)
 let localStream = null
@@ -73,6 +78,10 @@ let pollTimer = null
 let aiRefreshTimer = null
 let recorder = null
 let recordedChunks = []
+let aiStream = null
+let aiRecorder = null
+let aiRecordedChunks = []
+let finishingAiExam = false
 let addedHrIce = new Set()
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
@@ -99,6 +108,9 @@ async function loadProcessRecords(options = {}) {
     refreshState.lastError = ''
     cacheInterviewSession()
     syncAiAutoRefresh()
+    if (processSummary.value?.currentStage === 'AI' && processSummary.value?.overallStatus === 'IN_PROGRESS') {
+      await ensureAiExamRecording()
+    }
   } catch (error) {
     refreshState.retryCount += 1
     refreshState.lastError = error.message || '刷新失败'
@@ -137,14 +149,109 @@ function nextRefreshDelay() {
 }
 async function submitAiAnswer() {
   try {
+    if (!antiCheat.fullscreen) {
+      await reportAntiCheat('NOT_FULLSCREEN_SUBMIT', '提交AI回答时未处于全屏')
+      ElMessage.warning('请先进入全屏答题模式')
+      await enterAiExamMode()
+      return
+    }
+    await ensureAiExamRecording()
     clearAiRefresh()
     await interviewApi.submitAiAnswer({ processId: sessionForm.processId, answerContent: aiAnswer.answerContent })
     aiAnswer.answerContent = ''
     ElMessage.success('AI 回答已提交')
     await loadProcessRecords()
+    if (processSummary.value?.currentStage !== 'AI' || processSummary.value?.overallStatus !== 'IN_PROGRESS') {
+      await finishAiExam()
+    }
   } catch (error) {
     fail(error)
     scheduleAiRefresh(nextRefreshDelay())
+  }
+}
+
+async function enterAiExamMode() {
+  if (document.fullscreenElement !== document.documentElement) {
+    try {
+      await document.documentElement.requestFullscreen()
+    } catch (error) {
+      await reportAntiCheat('FULLSCREEN_DENIED', error.message || '全屏授权失败')
+      ElMessage.warning('浏览器未允许全屏，请允许后继续答题')
+    }
+  }
+  await ensureAiExamRecording()
+}
+
+async function ensureAiExamRecording() {
+  if (aiRecorder?.state === 'recording') {
+    return
+  }
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    await reportAntiCheat('RECORDING_UNAVAILABLE', '浏览器不支持摄像头录制')
+    throw new Error('当前浏览器不支持强制录制')
+  }
+  aiStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+  aiRecordedChunks = []
+  aiRecorder = new MediaRecorder(aiStream)
+  aiRecorder.ondataavailable = (event) => { if (event.data.size > 0) aiRecordedChunks.push(event.data) }
+  aiRecorder.start(1000)
+  await reportAntiCheat('AI_RECORDING_STARTED', 'AI答题录像已开始')
+}
+
+async function finishAiExam() {
+  if (finishingAiExam) return
+  finishingAiExam = true
+  try {
+    if (aiRecorder && aiRecorder.state !== 'inactive') {
+      await new Promise((resolve) => { aiRecorder.onstop = resolve; aiRecorder.stop() })
+    }
+    if (aiRecordedChunks.length > 0) {
+      const blob = new Blob(aiRecordedChunks, { type: 'video/webm' })
+      const file = new File([blob], `ai-${sessionForm.processId}.webm`, { type: 'video/webm' })
+      await interviewApi.uploadAiRecording(sessionForm.processId, file)
+      ElMessage.success('AI答题录像已上传')
+    }
+    stopAiStream()
+  } catch (error) {
+    fail(error)
+  } finally {
+    finishingAiExam = false
+  }
+}
+
+function stopAiStream() {
+  aiStream?.getTracks().forEach((track) => track.stop())
+  aiStream = null
+  aiRecorder = null
+  aiRecordedChunks = []
+}
+
+async function reportAntiCheat(eventType, detail) {
+  if (!sessionForm.processId) return
+  try {
+    await interviewApi.reportAntiCheatEvent({ processId: sessionForm.processId, eventType, detail })
+  } catch {}
+}
+
+function handleFullscreenChange() {
+  antiCheat.fullscreen = document.fullscreenElement === document.documentElement
+  if (!antiCheat.fullscreen && processSummary.value?.currentStage === 'AI' && processSummary.value?.overallStatus === 'IN_PROGRESS') {
+    antiCheat.switchCount += 1
+    reportAntiCheat('FULLSCREEN_EXIT', `退出全屏，累计${antiCheat.switchCount}次`)
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.hidden && processSummary.value?.currentStage === 'AI' && processSummary.value?.overallStatus === 'IN_PROGRESS') {
+    antiCheat.switchCount += 1
+    reportAntiCheat('TAB_HIDDEN', `页面隐藏/切屏，累计${antiCheat.switchCount}次`)
+  }
+}
+
+function handleWindowBlur() {
+  if (processSummary.value?.currentStage === 'AI' && processSummary.value?.overallStatus === 'IN_PROGRESS') {
+    antiCheat.switchCount += 1
+    reportAntiCheat('WINDOW_BLUR', `窗口失焦/切屏，累计${antiCheat.switchCount}次`)
   }
 }
 async function joinVideo() {
@@ -213,10 +320,17 @@ function disconnectVideo() {
 
 onBeforeUnmount(() => {
   clearAiRefresh()
+  finishAiExam()
+  document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  window.removeEventListener('blur', handleWindowBlur)
   disconnectVideo()
 })
 
 onMounted(async () => {
+  document.addEventListener('fullscreenchange', handleFullscreenChange)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  window.addEventListener('blur', handleWindowBlur)
   if (!sessionForm.processId) {
     ElMessage.warning('请从面试者首页选择报名记录进入面试')
     router.push('/user')
@@ -224,6 +338,9 @@ onMounted(async () => {
   }
   await loadProcessRecords()
   syncAiAutoRefresh()
+  if (processSummary.value?.currentStage === 'AI' && processSummary.value?.overallStatus === 'IN_PROGRESS') {
+    ElMessage.info('AI面试需要全屏和摄像头录制，请点击进入AI答题全屏')
+  }
 })
 </script>
 

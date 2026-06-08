@@ -13,6 +13,8 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
@@ -46,6 +48,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
             for (String sql : statements) {
                 execute(statement, sql);
             }
+            migrateInterviewProcessColumns(connection, statement);
         }
         log.info("Database migration completed for {}", activeDatabase.type());
     }
@@ -96,6 +99,36 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
                     || messageContains(ex, "Duplicate key name");
         }
         return false;
+    }
+
+    private void migrateInterviewProcessColumns(Connection connection, Statement statement) throws SQLException {
+        addColumnIfMissing(connection, statement, "interview_process", "ai_max_question_rounds", "INTEGER NOT NULL DEFAULT 5");
+        addColumnIfMissing(connection, statement, "interview_process", "ai_recording_path", varchar(500));
+        addColumnIfMissing(connection, statement, "interview_process", "ai_recording_file_name", varchar(255));
+    }
+
+    private void addColumnIfMissing(Connection connection, Statement statement, String table, String column, String definition) throws SQLException {
+        if (columnExists(connection, table, column)) {
+            return;
+        }
+        execute(statement, "ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+        log.info("Added migration column {}.{}", table, column);
+    }
+
+    private boolean columnExists(Connection connection, String table, String column) throws SQLException {
+        DatabaseMetaData metaData = connection.getMetaData();
+        try (ResultSet columns = metaData.getColumns(null, null, table, column)) {
+            if (columns.next()) {
+                return true;
+            }
+        }
+        try (ResultSet columns = metaData.getColumns(null, null, table.toUpperCase(), column.toUpperCase())) {
+            return columns.next();
+        }
+    }
+
+    private String varchar(int length) {
+        return "VARCHAR(" + length + ")";
     }
 
     private boolean messageContains(SQLException ex, String value) {

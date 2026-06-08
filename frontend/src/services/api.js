@@ -111,6 +111,16 @@ export const interviewApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  uploadAiRecording(processId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('originalFileName', file.name)
+    formData.append('contentType', file.type || 'video/webm')
+    return request.post(`/interview/interviewee/ai-recording/${processId}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  reportAntiCheatEvent(payload) { return request.post('/interview/interviewee/anti-cheat-event', payload) },
   uploadHrVideoRecording(processId, file) {
     const formData = new FormData()
     formData.append('file', file)
@@ -121,6 +131,7 @@ export const interviewApi = {
     })
   },
   getRecordingUrl(processId) { return `/api/interview/hr/video-recording/${processId}` },
+  getAiRecordingUrl(processId) { return `/api/interview/hr/ai-recording/${processId}` },
 
   intervieweeJoin(processId) { return request.post(`/interview/interviewee/video-join/${processId}`) },
   hrJoin(processId, params) { return request.post(`/interview/hr/video-join/${processId}`, null, { params }) },

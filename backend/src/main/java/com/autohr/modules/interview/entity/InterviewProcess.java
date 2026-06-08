@@ -22,6 +22,9 @@ public class InterviewProcess {
     private String overallStatus;
     private Integer aiThresholdScore;
     private Integer aiAverageScore;
+    private Integer aiMaxQuestionRounds;
+    private String aiRecordingPath;
+    private String aiRecordingFileName;
     private Integer videoApproved;
     private Integer onsiteApproved;
     private Long approvedHrUserId;

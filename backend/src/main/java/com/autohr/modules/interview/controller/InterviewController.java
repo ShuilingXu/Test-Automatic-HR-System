@@ -6,6 +6,7 @@ import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.service.AuthService;
 import com.autohr.modules.interview.dto.AiAnswerRequest;
+import com.autohr.modules.interview.dto.AntiCheatEventRequest;
 import com.autohr.modules.interview.dto.InterviewDecisionRequest;
 import com.autohr.modules.interview.dto.InterviewVO;
 import com.autohr.modules.interview.dto.JobKnowledgeWeightSaveRequest;
@@ -135,9 +136,27 @@ public class InterviewController {
 
     @PostMapping("/interviewee/ai-answer")
     public ApiResponse<InterviewVO> submitAiAnswer(Authentication authentication,
-                                                   @Valid @RequestBody AiAnswerRequest request) {
+                                                    @Valid @RequestBody AiAnswerRequest request) {
         SessionUserVO current = currentUser(authentication);
         return ApiResponse.success(interviewService.submitIntervieweeAiAnswer(request, current.getId()));
+    }
+
+    @PostMapping("/interviewee/anti-cheat-event")
+    public ApiResponse<Void> reportAntiCheatEvent(Authentication authentication,
+                                                  @Valid @RequestBody AntiCheatEventRequest request) {
+        SessionUserVO current = currentUser(authentication);
+        interviewService.reportAntiCheatEvent(request, current.getId(), current.getDisplayName());
+        return ApiResponse.success("reported", null);
+    }
+
+    @PostMapping("/interviewee/ai-recording/{processId}")
+    public ApiResponse<InterviewVO> uploadAiRecording(Authentication authentication,
+                                                      @PathVariable Long processId,
+                                                      @RequestParam String originalFileName,
+                                                      @RequestParam(required = false) String contentType,
+                                                      @RequestParam("file") MultipartFile file) {
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.uploadAiRecording(processId, current.getId(), current.getDisplayName(), originalFileName, contentType, file));
     }
 
     @GetMapping("/hr/ai-records")
@@ -250,6 +269,12 @@ public class InterviewController {
     public ResponseEntity<Resource> downloadRecording(@PathVariable Long processId) {
         var session = interviewService.getVideoSession(processId);
         return FileDownloadSupport.buildInlineResponse(session.getRecordingPath(), UploadPaths.RECORDING_DIR, session.getRecordingFileName(), "video/webm", "录制文件不可访问");
+    }
+
+    @GetMapping("/hr/ai-recording/{processId}")
+    public ResponseEntity<Resource> downloadAiRecording(@PathVariable Long processId) {
+        var process = interviewService.getProcess(processId);
+        return FileDownloadSupport.buildInlineResponse(process.getAiRecordingPath(), UploadPaths.RECORDING_DIR, process.getAiRecordingFileName(), "video/webm", "AI答题录制文件不可访问");
     }
 
     @PostMapping("/hr/approve-ai/{processId}")
