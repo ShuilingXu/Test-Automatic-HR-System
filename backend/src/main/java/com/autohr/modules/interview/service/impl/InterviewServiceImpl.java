@@ -232,8 +232,10 @@ public class InterviewServiceImpl implements InterviewService {
         process.setCurrentStage("AI");
         process.setStageStatus("IN_PROGRESS");
         process.setOverallStatus("IN_PROGRESS");
-        process.setAiThresholdScore(Objects.requireNonNullElse(request.getAiThresholdScore(), 7));
-        process.setAiMaxQuestionRounds(Math.max(Objects.requireNonNullElse(request.getAiMaxQuestionRounds(), 5), 1));
+        process.setAiThresholdScore(Objects.requireNonNullElse(request.getAiThresholdScore(), 70));
+        process.setAiMaxQuestionRounds(Math.max(Objects.requireNonNullElse(request.getAiMaxQuestionRounds(), 10), 1));
+        process.setAntiCheatSwitchLimit(Math.max(Objects.requireNonNullElse(request.getAntiCheatSwitchLimit(), 5), 1));
+        process.setAntiCheatSwitchCount(0);
         process.setVideoApproved(0);
         process.setOnsiteApproved(0);
         process.setProcessStatusView("AI面");
@@ -269,6 +271,9 @@ public class InterviewServiceImpl implements InterviewService {
     @Override
     public InterviewVO getNextAiQuestion(Long processId) {
         InterviewProcess process = requireProcess(processId);
+        if (!StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
+            return null;
+        }
         InterviewAiRecord unanswered = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
                 .eq(InterviewAiRecord::getProcessId, processId)
                 .isNull(InterviewAiRecord::getAnswerContent)
@@ -299,6 +304,7 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO submitAiAnswer(AiAnswerRequest request) {
         InterviewProcess process = requireProcess(request.getProcessId());
+        ensureInProgress(process);
         if (!StrUtil.equals(process.getCurrentStage(), "AI")) {
             throw new BusinessException("当前流程不在AI面试阶段");
         }
@@ -336,7 +342,7 @@ public class InterviewServiceImpl implements InterviewService {
         if (currentAverage >= process.getAiThresholdScore()) {
             process.setStageStatus("WAITING_APPROVAL");
             process.setProcessStatusView("AI待审批");
-        } else if (answeredRounds >= Math.max(Objects.requireNonNullElse(process.getAiMaxQuestionRounds(), 5), 1)) {
+        } else if (answeredRounds >= Math.max(Objects.requireNonNullElse(process.getAiMaxQuestionRounds(), 10), 1)) {
             process.setOverallStatus("REJECTED");
             process.setStageStatus("REJECTED");
             process.setProcessStatusView("AI未达标自动结束");
@@ -636,32 +642,29 @@ public class InterviewServiceImpl implements InterviewService {
 
     @Override
     @Transactional
-    public InterviewVO uploadAiRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file) {
-        InterviewProcess process = requireIntervieweeProcess(processId, intervieweeUserId);
-        validateRecordingFile(originalFileName, contentType, file);
-        try {
-            Files.createDirectories(UploadPaths.RECORDING_DIR);
-            String storedName = "ai-" + processId + "-" + UUID.randomUUID() + ".webm";
-            Path storedFile = UploadPaths.RECORDING_DIR.resolve(storedName).normalize().toAbsolutePath();
-            if (!storedFile.startsWith(UploadPaths.RECORDING_DIR)) {
-                throw new BusinessException("AI答题录制文件路径非法");
+    public InterviewVO reportAntiCheatEvent(AntiCheatEventRequest request, Long intervieweeUserId, String intervieweeName) {
+        InterviewProcess process = requireIntervieweeProcess(request.getProcessId(), intervieweeUserId);
+        boolean switchEvent = isSwitchEvent(request.getEventType());
+        if (switchEvent && StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
+            int count = Objects.requireNonNullElse(process.getAntiCheatSwitchCount(), 0) + 1;
+            int limit = Math.max(Objects.requireNonNullElse(process.getAntiCheatSwitchLimit(), 5), 1);
+            process.setAntiCheatSwitchCount(count);
+            if (count >= limit) {
+                process.setOverallStatus("TERMINATED");
+                process.setStageStatus("TERMINATED");
+                process.setProcessStatusView("切屏超限自动终止");
+                updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+                auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "ANTI_CHEAT_AUTO_TERMINATE", "INTERVIEW_PROCESS", String.valueOf(request.getProcessId()), "切屏" + count + "次达到阈值" + limit + "，流程自动终止");
             }
-            file.transferTo(storedFile.toFile());
-            process.setAiRecordingPath(storedFile.toString());
-            process.setAiRecordingFileName(storedName);
             processMapper.updateById(process);
-            auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "UPLOAD_AI_RECORDING", "INTERVIEW_PROCESS", String.valueOf(processId), storedName);
-            return toProcessVO(process);
-        } catch (IOException ex) {
-            throw new BusinessException("AI答题录制文件上传失败: " + ex.getMessage());
         }
-    }
-
-    @Override
-    public void reportAntiCheatEvent(AntiCheatEventRequest request, Long intervieweeUserId, String intervieweeName) {
-        requireIntervieweeProcess(request.getProcessId(), intervieweeUserId);
         String detail = StrUtil.blankToDefault(request.getDetail(), "") + " eventType=" + request.getEventType();
         auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "ANTI_CHEAT_" + request.getEventType(), "INTERVIEW_PROCESS", String.valueOf(request.getProcessId()), abbreviate(detail));
+        return toProcessVO(process);
+    }
+
+    private boolean isSwitchEvent(String eventType) {
+        return Set.of("FULLSCREEN_EXIT", "TAB_HIDDEN", "WINDOW_BLUR", "NOT_FULLSCREEN_SUBMIT").contains(StrUtil.blankToDefault(eventType, ""));
     }
 
     private void syncToPendingOnboarding(InterviewProcess process) {
@@ -1151,8 +1154,8 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setAiThresholdScore(entity.getAiThresholdScore());
         vo.setAiAverageScore(entity.getAiAverageScore());
         vo.setAiMaxQuestionRounds(entity.getAiMaxQuestionRounds());
-        vo.setAiRecordingPath(entity.getAiRecordingPath());
-        vo.setAiRecordingFileName(entity.getAiRecordingFileName());
+        vo.setAntiCheatSwitchLimit(entity.getAntiCheatSwitchLimit());
+        vo.setAntiCheatSwitchCount(entity.getAntiCheatSwitchCount());
         vo.setVideoApproved(entity.getVideoApproved());
         vo.setOnsiteApproved(entity.getOnsiteApproved());
         vo.setApprovedHrUserId(entity.getApprovedHrUserId());

@@ -102,9 +102,9 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
     }
 
     private void migrateInterviewProcessColumns(Connection connection, Statement statement) throws SQLException {
-        addColumnIfMissing(connection, statement, "interview_process", "ai_max_question_rounds", "INTEGER NOT NULL DEFAULT 5");
-        addColumnIfMissing(connection, statement, "interview_process", "ai_recording_path", varchar(500));
-        addColumnIfMissing(connection, statement, "interview_process", "ai_recording_file_name", varchar(255));
+        addColumnIfMissing(connection, statement, "interview_process", "ai_max_question_rounds", "INTEGER NOT NULL DEFAULT 10");
+        addColumnIfMissing(connection, statement, "interview_process", "anti_cheat_switch_limit", "INTEGER NOT NULL DEFAULT 5");
+        addColumnIfMissing(connection, statement, "interview_process", "anti_cheat_switch_count", "INTEGER NOT NULL DEFAULT 0");
     }
 
     private void addColumnIfMissing(Connection connection, Statement statement, String table, String column, String definition) throws SQLException {
@@ -125,10 +125,6 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         try (ResultSet columns = metaData.getColumns(null, null, table.toUpperCase(), column.toUpperCase())) {
             return columns.next();
         }
-    }
-
-    private String varchar(int length) {
-        return "VARCHAR(" + length + ")";
     }
 
     private boolean messageContains(SQLException ex, String value) {

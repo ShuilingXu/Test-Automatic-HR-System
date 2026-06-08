@@ -108,6 +108,7 @@
           <el-form-item label="投递编号"><el-input :model-value="processCandidatePreview?.id || '-'" disabled /></el-form-item>
           <el-form-item label="AI通过阈值"><el-input-number v-model="processForm.aiThresholdScore" :min="1" /></el-form-item>
           <el-form-item label="AI最多问答轮数"><el-input-number v-model="processForm.aiMaxQuestionRounds" :min="1" /></el-form-item>
+          <el-form-item label="切屏终止阈值"><el-input-number v-model="processForm.antiCheatSwitchLimit" :min="1" /></el-form-item>
         </el-form>
         <div v-if="processCandidatePreview" class="candidate-preview">
           <h4>候选人投递预览</h4>
@@ -137,7 +138,7 @@
           <h3>流程审批</h3>
           <p class="serial-line">流程流水号：{{ selectedProcess.id }}</p>
           <p class="serial-line">AI最多轮数：{{ selectedProcess.aiMaxQuestionRounds || '-' }}</p>
-          <a v-if="selectedProcess.aiRecordingPath || selectedProcess.aiRecordingFileName" :href="interviewApi.getAiRecordingUrl(selectedProcess.id)" target="_blank" class="video-link">查看AI答题录像</a>
+          <p class="serial-line">切屏次数：{{ selectedProcess.antiCheatSwitchCount || 0 }} / {{ selectedProcess.antiCheatSwitchLimit || 5 }}</p>
           <div v-if="selectedProcess.videoJoinLink || selectedProcess.videoSerialNo" class="serial-line">
             <span v-if="selectedProcess.videoSerialNo">视频流水号：{{ selectedProcess.videoSerialNo }}</span>
             <a v-if="selectedProcess.videoJoinLink" :href="selectedProcess.videoJoinLink" target="_blank" class="video-link">打开面试链接</a>
@@ -206,7 +207,7 @@ const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '',
 const weightForm = reactive({ id: null, jobId: null, knowledgeBaseId: null, weight: 1 })
 const interviewerLlmForm = reactive(createLlmForm('INTERVIEWER'))
 const scorerLlmForm = reactive(createLlmForm('SCORER'))
-const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 7, aiMaxQuestionRounds: 5 })
+const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 70, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })
 const processSearch = reactive({ keyword: '' })
 
 const interviewerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')?.apiKeyMasked || '未配置')

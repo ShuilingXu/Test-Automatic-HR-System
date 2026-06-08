@@ -13,4 +13,5 @@ public class StartInterviewProcessRequest {
     private Long jobId;
     private Integer aiThresholdScore;
     private Integer aiMaxQuestionRounds;
+    private Integer antiCheatSwitchLimit;
 }
