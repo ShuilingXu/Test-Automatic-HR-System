@@ -9,6 +9,8 @@ import com.autohr.modules.interview.dto.KnowledgeBaseSaveRequest;
 import com.autohr.modules.interview.dto.KnowledgeItemSaveRequest;
 import com.autohr.modules.interview.dto.LlmConfigSaveRequest;
 import com.autohr.modules.interview.dto.StartInterviewProcessRequest;
+import com.autohr.modules.interview.dto.VideoSignalRequest;
+import com.autohr.modules.interview.dto.VideoSignalVO;
 import com.autohr.modules.interview.service.InterviewService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -40,6 +43,12 @@ public class InterviewController {
         return ApiResponse.success(interviewService.listKnowledgeBases(status, keyword));
     }
 
+    @PostMapping("/hr/knowledge-bases/{id}/delete")
+    public ApiResponse<Void> deleteKnowledgeBase(@PathVariable Long id) {
+        interviewService.deleteKnowledgeBase(id);
+        return ApiResponse.success("deleted", null);
+    }
+
     @PostMapping("/hr/knowledge-items")
     public ApiResponse<InterviewVO> saveKnowledgeItem(@Valid @RequestBody KnowledgeItemSaveRequest request) {
         return ApiResponse.success(interviewService.saveKnowledgeItem(request));
@@ -49,6 +58,12 @@ public class InterviewController {
     public ApiResponse<List<InterviewVO>> listKnowledgeItems(@RequestParam(required = false) Long knowledgeBaseId,
                                                              @RequestParam(required = false) String keyword) {
         return ApiResponse.success(interviewService.listKnowledgeItems(knowledgeBaseId, keyword));
+    }
+
+    @PostMapping("/hr/knowledge-items/{id}/delete")
+    public ApiResponse<Void> deleteKnowledgeItem(@PathVariable Long id) {
+        interviewService.deleteKnowledgeItem(id);
+        return ApiResponse.success("deleted", null);
     }
 
     @PostMapping("/hr/job-knowledge-weights")
@@ -61,6 +76,12 @@ public class InterviewController {
         return ApiResponse.success(interviewService.listJobKnowledgeWeights(jobId));
     }
 
+    @PostMapping("/hr/job-knowledge-weights/{id}/delete")
+    public ApiResponse<Void> deleteJobKnowledgeWeight(@PathVariable Long id) {
+        interviewService.deleteJobKnowledgeWeight(id);
+        return ApiResponse.success("deleted", null);
+    }
+
     @PostMapping("/it/llm-configs")
     public ApiResponse<InterviewVO> saveLlmConfig(@Valid @RequestBody LlmConfigSaveRequest request) {
         return ApiResponse.success(interviewService.saveLlmConfig(request));
@@ -70,6 +91,12 @@ public class InterviewController {
     public ApiResponse<List<InterviewVO>> listLlmConfigs(@RequestParam(required = false) String modelRole,
                                                          @RequestParam(required = false) Integer status) {
         return ApiResponse.success(interviewService.listLlmConfigs(modelRole, status));
+    }
+
+    @PostMapping("/it/llm-configs/{id}/delete")
+    public ApiResponse<Void> deleteLlmConfig(@PathVariable Long id) {
+        interviewService.deleteLlmConfig(id);
+        return ApiResponse.success("deleted", null);
     }
 
     @PostMapping("/hr/processes")
@@ -87,6 +114,11 @@ public class InterviewController {
     @GetMapping("/interviewee/process/{processId}")
     public ApiResponse<InterviewVO> getIntervieweeProcess(@PathVariable Long processId) {
         return ApiResponse.success(interviewService.getProcess(processId));
+    }
+
+    @GetMapping("/interviewee/next-question/{processId}")
+    public ApiResponse<InterviewVO> getNextQuestion(@PathVariable Long processId) {
+        return ApiResponse.success(interviewService.getNextAiQuestion(processId));
     }
 
     @PostMapping("/interviewee/ai-answer")
@@ -127,6 +159,43 @@ public class InterviewController {
     public ApiResponse<InterviewVO> completeVideo(@PathVariable Long processId,
                                                   @RequestParam(required = false) String recordingPath) {
         return ApiResponse.success(interviewService.completeVideoSession(processId, recordingPath));
+    }
+
+    @PostMapping("/hr/video-offer/{processId}")
+    public ApiResponse<VideoSignalVO> publishOffer(@PathVariable Long processId,
+                                                   @RequestBody VideoSignalRequest request) {
+        return ApiResponse.success(interviewService.publishHrOffer(processId, request));
+    }
+
+    @PostMapping("/interviewee/video-answer/{processId}")
+    public ApiResponse<VideoSignalVO> submitAnswer(@PathVariable Long processId,
+                                                   @RequestBody VideoSignalRequest request) {
+        return ApiResponse.success(interviewService.submitIntervieweeAnswer(processId, request));
+    }
+
+    @PostMapping("/hr/video-ice/{processId}")
+    public ApiResponse<VideoSignalVO> addHrIce(@PathVariable Long processId,
+                                               @RequestBody VideoSignalRequest request) {
+        return ApiResponse.success(interviewService.addHrIceCandidate(processId, request));
+    }
+
+    @PostMapping("/interviewee/video-ice/{processId}")
+    public ApiResponse<VideoSignalVO> addIntervieweeIce(@PathVariable Long processId,
+                                                        @RequestBody VideoSignalRequest request) {
+        return ApiResponse.success(interviewService.addIntervieweeIceCandidate(processId, request));
+    }
+
+    @GetMapping("/interviewee/video-state/{processId}")
+    public ApiResponse<VideoSignalVO> getVideoState(@PathVariable Long processId) {
+        return ApiResponse.success(interviewService.getVideoSignalState(processId));
+    }
+
+    @PostMapping("/interviewee/video-recording/{processId}")
+    public ApiResponse<VideoSignalVO> uploadRecording(@PathVariable Long processId,
+                                                      @RequestParam String originalFileName,
+                                                      @RequestParam(required = false) String contentType,
+                                                      @RequestParam("file") MultipartFile file) {
+        return ApiResponse.success(interviewService.uploadRecording(processId, originalFileName, contentType, file));
     }
 
     @PostMapping("/hr/approve-ai/{processId}")

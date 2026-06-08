@@ -17,9 +17,11 @@ public class InterviewLlmConfig {
     private String configName;
     private String modelRole;
     private String baseUrl;
+    private String apiKey;
     private String apiKeyMasked;
     private String modelName;
     private String promptTemplate;
+    private String scoringRulePrompt;
     private Integer status;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

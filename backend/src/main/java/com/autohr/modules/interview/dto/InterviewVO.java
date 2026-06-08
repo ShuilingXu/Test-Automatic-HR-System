@@ -29,6 +29,7 @@ public class InterviewVO {
     private String apiKeyMasked;
     private String modelName;
     private String promptTemplate;
+    private String scoringRulePrompt;
 
     private Long processId;
     private String currentStage;

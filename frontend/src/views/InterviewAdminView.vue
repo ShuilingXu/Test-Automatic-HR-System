@@ -5,7 +5,7 @@
         <div>
           <p class="page-eyebrow">Interview HR</p>
           <h1 class="page-title">面试系统 HR 入口</h1>
-          <p class="page-subtitle">维护 AI 知识库、岗位知识权重、LLM 配置，并推进 AI 面、视频面、线下面流程。</p>
+          <p class="page-subtitle">维护 AI 知识库、岗位权重、LLM 配置，并推进 AI 面、视频面、线下面流程。</p>
         </div>
         <RouterLink class="link-chip" to="/admin">返回管理后台</RouterLink>
       </div>
@@ -37,10 +37,12 @@
           <el-table-column prop="knowledgeBaseName" label="知识库" />
           <el-table-column prop="techCategory" label="技术方向" />
           <el-table-column prop="jobCategory" label="岗位方向" />
+          <el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteKnowledgeBase(scope.row.id)">删除</el-button></template></el-table-column>
         </el-table>
         <el-table :data="knowledgeItems" stripe class="data-table">
           <el-table-column prop="knowledgePoint" label="知识点" />
           <el-table-column prop="knowledgeContent" label="知识内容" min-width="280" />
+          <el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteKnowledgeItem(scope.row.id)">删除</el-button></template></el-table-column>
         </el-table>
       </section>
 
@@ -49,14 +51,14 @@
         <el-form :model="weightForm" label-position="top" class="form-grid">
           <el-form-item label="招聘岗位"><el-select v-model="weightForm.jobId"><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
           <el-form-item label="知识库"><el-select v-model="weightForm.knowledgeBaseId"><el-option v-for="item in knowledgeBases" :key="item.id" :label="item.knowledgeBaseName" :value="item.id" /></el-select></el-form-item>
-          <el-form-item label="知识点"><el-input v-model="weightForm.knowledgePoint" /></el-form-item>
           <el-form-item label="权重"><el-input-number v-model="weightForm.weight" :min="1" /></el-form-item>
         </el-form>
         <el-button type="primary" @click="saveWeight">保存权重</el-button>
         <el-table :data="weights" stripe class="data-table">
           <el-table-column prop="jobId" label="岗位ID" />
-          <el-table-column prop="knowledgePoint" label="知识点" />
+          <el-table-column prop="knowledgeBaseId" label="知识库ID" />
           <el-table-column prop="weight" label="权重" />
+          <el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteWeight(scope.row.id)">删除</el-button></template></el-table-column>
         </el-table>
       </section>
 
@@ -66,16 +68,19 @@
           <el-form-item label="配置名称"><el-input v-model="llmForm.configName" /></el-form-item>
           <el-form-item label="模型角色"><el-select v-model="llmForm.modelRole"><el-option label="面试官LLM A" value="INTERVIEWER" /><el-option label="评分LLM B" value="SCORER" /></el-select></el-form-item>
           <el-form-item label="OpenAI接口地址"><el-input v-model="llmForm.baseUrl" /></el-form-item>
+          <el-form-item label="API Key"><el-input v-model="llmForm.apiKey" type="password" show-password /></el-form-item>
           <el-form-item label="API Key掩码"><el-input v-model="llmForm.apiKeyMasked" /></el-form-item>
           <el-form-item label="模型名称"><el-input v-model="llmForm.modelName" /></el-form-item>
           <el-form-item label="提示词模板" class="wide"><el-input v-model="llmForm.promptTemplate" type="textarea" :rows="4" /></el-form-item>
+          <el-form-item label="系统级评分提示词" class="wide"><el-input v-model="llmForm.scoringRulePrompt" type="textarea" :rows="4" /></el-form-item>
         </el-form>
         <el-button type="primary" @click="saveLlmConfig">保存配置</el-button>
-        <el-table :data="llmConfigs" stripe class="data-table">
+        <el-table :data="llmConfigs" stripe class="data-table" @row-click="editLlmConfig">
           <el-table-column prop="configName" label="配置名称" />
           <el-table-column prop="modelRole" label="角色" />
           <el-table-column prop="baseUrl" label="接口地址" min-width="220" />
           <el-table-column prop="modelName" label="模型" />
+          <el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteLlmConfig(scope.row.id)">删除</el-button></template></el-table-column>
         </el-table>
       </section>
 
@@ -104,7 +109,13 @@
             <span v-if="selectedProcess.videoSerialNo">视频流水号：{{ selectedProcess.videoSerialNo }}</span>
             <a v-if="selectedProcess.videoJoinLink" :href="selectedProcess.videoJoinLink" target="_blank" class="video-link">打开面试链接</a>
           </div>
+          <div class="video-grid">
+            <div class="video-box"><span>HR本地视频</span><video ref="hrLocalVideo" autoplay muted playsinline></video></div>
+            <div class="video-box"><span>面试者远端视频</span><video ref="hrRemoteVideo" autoplay playsinline></video></div>
+          </div>
           <div class="link-row">
+            <el-button @click="startHrVideoCall">开始视频面</el-button>
+            <el-button @click="stopHrRecording">结束并上传录制</el-button>
             <el-button @click="approveAi(1)">AI通过进视频面</el-button>
             <el-button @click="approveAi(0)">AI拒绝</el-button>
             <el-button @click="createVideo">生成视频面链接</el-button>
@@ -128,7 +139,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi, interviewApi, recruitmentApi } from '../services/api'
@@ -146,10 +157,18 @@ const processes = ref([])
 const aiRecords = ref([])
 const selectedProcess = ref(null)
 
+const hrLocalVideo = ref(null)
+const hrRemoteVideo = ref(null)
+let hrLocalStream = null
+let hrPeer = null
+let hrPollTimer = null
+let hrRecorder = null
+let hrRecordedChunks = []
+
 const kbForm = reactive({ id: null, knowledgeBaseName: '', techCategory: '', jobCategory: '', status: 1 })
 const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '', knowledgeContent: '', status: 1 })
-const weightForm = reactive({ id: null, jobId: null, knowledgeBaseId: null, knowledgePoint: '', weight: 1 })
-const llmForm = reactive({ id: null, configName: '', modelRole: 'INTERVIEWER', baseUrl: '', apiKeyMasked: '', modelName: '', promptTemplate: '', status: 1 })
+const weightForm = reactive({ id: null, jobId: null, knowledgeBaseId: null, weight: 1 })
+const llmForm = reactive({ id: null, configName: '', modelRole: 'INTERVIEWER', baseUrl: '', apiKey: '', apiKeyMasked: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 })
 const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 7 })
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
@@ -161,56 +180,91 @@ async function loadAll() {
       llmConfigs.value = (await interviewApi.listLlmConfigs()).data
     } else {
       llmConfigs.value = []
-      if (activeTab.value === 'llm') {
-        activeTab.value = 'kb'
-      }
+      if (activeTab.value === 'llm') activeTab.value = 'kb'
     }
     jobs.value = (await recruitmentApi.listAdminJobs()).data
     recruitmentCandidates.value = (await recruitmentApi.listCandidates()).data
     processes.value = (await interviewApi.listProcesses()).data
   } catch (error) { fail(error) }
 }
-async function selectKnowledgeBase(row) {
-  itemForm.knowledgeBaseId = row.id
-  knowledgeItems.value = (await interviewApi.listKnowledgeItems({ knowledgeBaseId: row.id })).data
-}
+async function selectKnowledgeBase(row) { itemForm.knowledgeBaseId = row.id; knowledgeItems.value = (await interviewApi.listKnowledgeItems({ knowledgeBaseId: row.id })).data }
 async function saveKnowledgeBase() { try { await interviewApi.saveKnowledgeBase({ ...kbForm }); ElMessage.success('知识库已保存'); await loadAll() } catch (error) { fail(error) } }
+async function deleteKnowledgeBase(id) { try { await interviewApi.deleteKnowledgeBase(id); ElMessage.success('知识库已删除'); await loadAll() } catch (error) { fail(error) } }
 async function saveKnowledgeItem() { try { await interviewApi.saveKnowledgeItem({ ...itemForm }); ElMessage.success('知识点已保存'); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
+async function deleteKnowledgeItem(id) { try { await interviewApi.deleteKnowledgeItem(id); ElMessage.success('知识点已删除'); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
 async function saveWeight() { try { await interviewApi.saveJobKnowledgeWeight({ ...weightForm }); ElMessage.success('权重已保存'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
+async function deleteWeight(id) { try { await interviewApi.deleteJobKnowledgeWeight(id); ElMessage.success('权重已删除'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
 async function saveLlmConfig() { try { await interviewApi.saveLlmConfig({ ...llmForm }); ElMessage.success('LLM配置已保存'); await loadAll() } catch (error) { fail(error) } }
-async function syncIntervieweeByCandidate(candidateId) {
-  const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId)
-  if (!candidate) {
-    processForm.intervieweeUserId = ''
-    return
-  }
-  processForm.intervieweeUserId = candidate.intervieweeUserId ? String(candidate.intervieweeUserId) : ''
-}
-async function startProcess() {
-  try {
-    if (!processForm.intervieweeUserId) {
-      ElMessage.warning('未匹配到面试者账号，请先注册面试者并确保手机号一致')
-      return
-    }
-    const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) })
-    selectedProcess.value = response.data
-    ElMessage.success('面试流程已发起')
-    await loadAll()
-  } catch (error) { fail(error) }
-}
+async function deleteLlmConfig(id) { try { await interviewApi.deleteLlmConfig(id); ElMessage.success('LLM配置已删除'); await loadAll() } catch (error) { fail(error) } }
+function editLlmConfig(row) { Object.assign(llmForm, row) }
+async function syncIntervieweeByCandidate(candidateId) { const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId); processForm.intervieweeUserId = candidate?.intervieweeUserId ? String(candidate.intervieweeUserId) : '' }
+async function startProcess() { try { if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到面试者账号'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
 async function selectProcess(row) { selectedProcess.value = row; aiRecords.value = (await interviewApi.listAiRecords({ processId: row.id })).data }
 async function approveAi(approved) { try { await interviewApi.approveAi(selectedProcess.value.id, { approved, approverName: 'HR审批人' }); ElMessage.success('AI审批完成'); await loadAll() } catch (error) { fail(error) } }
-async function createVideo() {
-  try {
-    const response = await interviewApi.createVideoSession(selectedProcess.value.id, { approverName: 'HR审批人' })
-    selectedProcess.value = { ...selectedProcess.value, videoSerialNo: response.data.videoSerialNo, videoJoinLink: response.data.videoJoinLink }
-    ElMessage.success('视频面试链接已生成')
-    await loadAll()
-  } catch (error) { fail(error) }
-}
+async function createVideo() { try { const response = await interviewApi.createVideoSession(selectedProcess.value.id, { approverName: 'HR审批人' }); selectedProcess.value = { ...selectedProcess.value, videoSerialNo: response.data.videoSerialNo, videoJoinLink: response.data.videoJoinLink }; ElMessage.success('视频面试链接已生成'); await loadAll() } catch (error) { fail(error) } }
 async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved, approverName: 'HR审批人' }); ElMessage.success('视频面审批完成'); await loadAll() } catch (error) { fail(error) } }
 async function approveOnsite(approved) { try { await interviewApi.approveOnsite(selectedProcess.value.id, { approved, approverName: 'HR审批人' }); ElMessage.success('线下面审批完成'); await loadAll() } catch (error) { fail(error) } }
 async function terminateProcess() { try { await interviewApi.terminateProcess(selectedProcess.value.id, { approved: 0, approverName: 'HR审批人' }); ElMessage.success('流程已终止'); await loadAll() } catch (error) { fail(error) } }
+
+async function startHrVideoCall() {
+  if (!selectedProcess.value) return
+  try {
+    hrLocalStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    hrLocalVideo.value.srcObject = hrLocalStream
+    hrPeer = new RTCPeerConnection()
+    hrLocalStream.getTracks().forEach((track) => hrPeer.addTrack(track, hrLocalStream))
+    hrPeer.ontrack = (event) => { hrRemoteVideo.value.srcObject = event.streams[0] }
+    hrPeer.onicecandidate = async (event) => {
+      if (event.candidate) {
+        await interviewApi.addHrIce(selectedProcess.value.id, { iceCandidate: JSON.stringify(event.candidate) })
+      }
+    }
+    const offer = await hrPeer.createOffer()
+    await hrPeer.setLocalDescription(offer)
+    await interviewApi.publishVideoOffer(selectedProcess.value.id, { offerSdp: JSON.stringify(offer) })
+    await interviewApi.hrJoin(selectedProcess.value.id, { approverName: 'HR审批人' })
+    hrRecorder = new MediaRecorder(hrLocalStream)
+    hrRecordedChunks = []
+    hrRecorder.ondataavailable = (event) => { if (event.data.size > 0) hrRecordedChunks.push(event.data) }
+    hrRecorder.start(1000)
+    hrPollTimer = setInterval(async () => {
+      const state = (await interviewApi.getVideoState(selectedProcess.value.id)).data
+      if (state.answerSdp && !hrPeer.currentRemoteDescription) {
+        await hrPeer.setRemoteDescription(JSON.parse(state.answerSdp))
+      }
+      if (state.intervieweeIceCandidates) {
+        const candidates = state.intervieweeIceCandidates.split('\n').filter(Boolean)
+        for (const item of candidates) {
+          try { await hrPeer.addIceCandidate(JSON.parse(item)) } catch {}
+        }
+      }
+    }, 2000)
+    ElMessage.success('HR视频通话已开始')
+  } catch (error) { fail(error) }
+}
+
+async function stopHrRecording() {
+  try {
+    if (hrRecorder && hrRecorder.state !== 'inactive') {
+      await new Promise((resolve) => {
+        hrRecorder.onstop = resolve
+        hrRecorder.stop()
+      })
+      const blob = new Blob(hrRecordedChunks, { type: 'video/webm' })
+      const file = new File([blob], `hr-${selectedProcess.value.id}.webm`, { type: 'video/webm' })
+      await interviewApi.uploadVideoRecording(selectedProcess.value.id, file)
+      await interviewApi.completeVideo(selectedProcess.value.id, { recordingPath: 'uploaded-by-hr' })
+      ElMessage.success('录制已上传')
+    }
+    clearInterval(hrPollTimer)
+  } catch (error) { fail(error) }
+}
+
+onBeforeUnmount(() => {
+  clearInterval(hrPollTimer)
+  hrPeer?.close()
+  hrLocalStream?.getTracks().forEach((track) => track.stop())
+})
 
 onMounted(loadAll)
 </script>
@@ -226,6 +280,10 @@ onMounted(loadAll)
 .detail-surface { margin-top: 18px; }
 .serial-line { margin: 8px 0 14px; color: #42515b; }
 .video-link { margin-left: 12px; color: #0f6c8f; font-weight: 700; text-decoration: none; }
+.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin: 12px 0 18px; }
+.video-box { background: rgba(255,255,255,0.82); padding: 12px; border-radius: 16px; }
+.video-box span { display: block; margin-bottom: 8px; color: #6d7a83; }
+.video-box video { width: 100%; min-height: 220px; background: #111; border-radius: 12px; }
 .data-table { margin-top: 18px; }
-@media (max-width: 900px) { .form-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .form-grid, .video-grid { grid-template-columns: 1fr; } }
 </style>

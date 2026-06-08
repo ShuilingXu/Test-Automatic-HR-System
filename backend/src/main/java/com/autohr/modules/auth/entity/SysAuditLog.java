@@ -1,4 +1,4 @@
-package com.autohr.modules.interview.entity;
+package com.autohr.modules.auth.entity;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
@@ -10,13 +10,18 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("interview_job_knowledge_weight")
-public class InterviewJobKnowledgeWeight {
+@TableName("sys_audit_log")
+public class SysAuditLog {
     @TableId(type = IdType.INPUT)
     private Long id;
-    private Long jobId;
-    private Long knowledgeBaseId;
-    private Integer weight;
+    private Long operatorUserId;
+    private String operatorUsername;
+    private String operatorRoleCode;
+    private String moduleCode;
+    private String actionCode;
+    private String targetType;
+    private String targetId;
+    private String detail;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE)

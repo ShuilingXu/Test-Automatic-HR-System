@@ -192,6 +192,22 @@ CREATE TABLE IF NOT EXISTS sys_user (
 
 CREATE INDEX IF NOT EXISTS idx_sys_user_username ON sys_user(username);
 
+CREATE TABLE IF NOT EXISTS sys_audit_log (
+    id INTEGER PRIMARY KEY,
+    operator_user_id INTEGER,
+    operator_username VARCHAR(64),
+    operator_role_code VARCHAR(32),
+    module_code VARCHAR(64) NOT NULL,
+    action_code VARCHAR(64) NOT NULL,
+    target_type VARCHAR(64),
+    target_id VARCHAR(128),
+    detail VARCHAR(4000),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sys_audit_log_module_code ON sys_audit_log(module_code);
+
 CREATE TABLE IF NOT EXISTS interview_knowledge_base (
     id INTEGER PRIMARY KEY,
     knowledge_base_name VARCHAR(128) NOT NULL,
@@ -217,7 +233,6 @@ CREATE TABLE IF NOT EXISTS interview_job_knowledge_weight (
     id INTEGER PRIMARY KEY,
     job_id INTEGER NOT NULL,
     knowledge_base_id INTEGER NOT NULL,
-    knowledge_point VARCHAR(255) NOT NULL,
     weight INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -228,9 +243,11 @@ CREATE TABLE IF NOT EXISTS interview_llm_config (
     config_name VARCHAR(128) NOT NULL,
     model_role VARCHAR(32) NOT NULL,
     base_url VARCHAR(255) NOT NULL,
+    api_key VARCHAR(255),
     api_key_masked VARCHAR(255),
     model_name VARCHAR(128) NOT NULL,
     prompt_template VARCHAR(5000),
+    scoring_rule_prompt VARCHAR(5000),
     status INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -282,6 +299,11 @@ CREATE TABLE IF NOT EXISTS interview_video_session (
     start_time DATETIME,
     end_time DATETIME,
     recording_path VARCHAR(500),
+    hr_offer_sdp TEXT,
+    interviewee_answer_sdp TEXT,
+    hr_ice_candidates TEXT,
+    interviewee_ice_candidates TEXT,
+    recording_file_name VARCHAR(255),
     session_status VARCHAR(32) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

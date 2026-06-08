@@ -74,18 +74,38 @@ export const authApi = {
 export const interviewApi = {
   saveKnowledgeBase(payload) { return request.post('/interview/hr/knowledge-bases', payload) },
   listKnowledgeBases(params) { return request.get('/interview/hr/knowledge-bases', { params }) },
+  deleteKnowledgeBase(id) { return request.post(`/interview/hr/knowledge-bases/${id}/delete`) },
   saveKnowledgeItem(payload) { return request.post('/interview/hr/knowledge-items', payload) },
   listKnowledgeItems(params) { return request.get('/interview/hr/knowledge-items', { params }) },
+  deleteKnowledgeItem(id) { return request.post(`/interview/hr/knowledge-items/${id}/delete`) },
   saveJobKnowledgeWeight(payload) { return request.post('/interview/hr/job-knowledge-weights', payload) },
   listJobKnowledgeWeights(params) { return request.get('/interview/hr/job-knowledge-weights', { params }) },
+  deleteJobKnowledgeWeight(id) { return request.post(`/interview/hr/job-knowledge-weights/${id}/delete`) },
   saveLlmConfig(payload) { return request.post('/interview/it/llm-configs', payload) },
   listLlmConfigs(params) { return request.get('/interview/it/llm-configs', { params }) },
+  deleteLlmConfig(id) { return request.post(`/interview/it/llm-configs/${id}/delete`) },
   startProcess(payload) { return request.post('/interview/hr/processes', payload) },
   listProcesses(params) { return request.get('/interview/hr/processes', { params }) },
   getIntervieweeProcess(processId) { return request.get(`/interview/interviewee/process/${processId}`) },
+  getNextAiQuestion(processId) { return request.get(`/interview/interviewee/next-question/${processId}`) },
   listAiRecords(params) { return request.get('/interview/hr/ai-records', { params }) },
   listIntervieweeAiRecords(params) { return request.get('/interview/interviewee/ai-records', { params }) },
   createVideoSession(processId, params) { return request.post(`/interview/hr/video-session/${processId}`, null, { params }) },
+  publishVideoOffer(processId, payload) { return request.post(`/interview/hr/video-offer/${processId}`, payload) },
+  getVideoState(processId) { return request.get(`/interview/interviewee/video-state/${processId}`) },
+  submitVideoAnswer(processId, payload) { return request.post(`/interview/interviewee/video-answer/${processId}`, payload) },
+  addHrIce(processId, payload) { return request.post(`/interview/hr/video-ice/${processId}`, payload) },
+  addIntervieweeIce(processId, payload) { return request.post(`/interview/interviewee/video-ice/${processId}`, payload) },
+  uploadVideoRecording(processId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('originalFileName', file.name)
+    formData.append('contentType', file.type || 'video/webm')
+    return request.post(`/interview/interviewee/video-recording/${processId}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
   intervieweeJoin(processId) { return request.post(`/interview/interviewee/video-join/${processId}`) },
   hrJoin(processId, params) { return request.post(`/interview/hr/video-join/${processId}`, null, { params }) },
   completeVideo(processId, params) { return request.post(`/interview/hr/video-complete/${processId}`, null, { params }) },

@@ -2,6 +2,7 @@ package com.autohr.modules.interview.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.autohr.common.exception.BusinessException;
+import com.autohr.modules.auth.service.AuditLogService;
 import com.autohr.modules.hr.entity.Employee;
 import com.autohr.modules.hr.enums.EmploymentStatus;
 import com.autohr.modules.hr.mapper.EmployeeMapper;
@@ -13,6 +14,10 @@ import com.autohr.modules.interview.dto.KnowledgeBaseSaveRequest;
 import com.autohr.modules.interview.dto.KnowledgeItemSaveRequest;
 import com.autohr.modules.interview.dto.LlmConfigSaveRequest;
 import com.autohr.modules.interview.dto.StartInterviewProcessRequest;
+import com.autohr.modules.interview.dto.VideoSignalRequest;
+import com.autohr.modules.interview.dto.VideoSignalVO;
+import com.autohr.modules.interview.dto.VideoSignalRequest;
+import com.autohr.modules.interview.dto.VideoSignalVO;
 import com.autohr.modules.interview.entity.InterviewAiRecord;
 import com.autohr.modules.interview.entity.InterviewJobKnowledgeWeight;
 import com.autohr.modules.interview.entity.InterviewKnowledgeBase;
@@ -37,7 +42,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -58,6 +68,7 @@ public class InterviewServiceImpl implements InterviewService {
     private final RecruitmentCandidateMapper recruitmentCandidateMapper;
     private final RecruitmentJobMapper recruitmentJobMapper;
     private final EmployeeMapper employeeMapper;
+    private final AuditLogService auditLogService;
 
     @Override
     @Transactional
@@ -82,6 +93,14 @@ public class InterviewServiceImpl implements InterviewService {
                         .or().like(InterviewKnowledgeBase::getTechCategory, keyword)
                         .or().like(InterviewKnowledgeBase::getJobCategory, keyword))
                 .orderByDesc(InterviewKnowledgeBase::getId)).stream().map(this::toKnowledgeBaseVO).toList();
+    }
+
+    @Override
+    @Transactional
+    public void deleteKnowledgeBase(Long id) {
+        knowledgeItemMapper.delete(new LambdaQueryWrapper<InterviewKnowledgeItem>().eq(InterviewKnowledgeItem::getKnowledgeBaseId, id));
+        jobKnowledgeWeightMapper.delete(new LambdaQueryWrapper<InterviewJobKnowledgeWeight>().eq(InterviewJobKnowledgeWeight::getKnowledgeBaseId, id));
+        knowledgeBaseMapper.deleteById(id);
     }
 
     @Override
@@ -111,6 +130,12 @@ public class InterviewServiceImpl implements InterviewService {
 
     @Override
     @Transactional
+    public void deleteKnowledgeItem(Long id) {
+        knowledgeItemMapper.deleteById(id);
+    }
+
+    @Override
+    @Transactional
     public InterviewVO saveJobKnowledgeWeight(JobKnowledgeWeightSaveRequest request) {
         requireRecruitmentJob(request.getJobId());
         requireKnowledgeBase(request.getKnowledgeBaseId());
@@ -131,6 +156,12 @@ public class InterviewServiceImpl implements InterviewService {
                 .eq(jobId != null, InterviewJobKnowledgeWeight::getJobId, jobId)
                 .orderByDesc(InterviewJobKnowledgeWeight::getWeight)
                 .orderByAsc(InterviewJobKnowledgeWeight::getId)).stream().map(this::toJobKnowledgeWeightVO).toList();
+    }
+
+    @Override
+    @Transactional
+    public void deleteJobKnowledgeWeight(Long id) {
+        jobKnowledgeWeightMapper.deleteById(id);
     }
 
     @Override
@@ -158,6 +189,12 @@ public class InterviewServiceImpl implements InterviewService {
 
     @Override
     @Transactional
+    public void deleteLlmConfig(Long id) {
+        llmConfigMapper.deleteById(id);
+    }
+
+    @Override
+    @Transactional
     public InterviewVO startInterviewProcess(StartInterviewProcessRequest request) {
         RecruitmentCandidate candidate = requireRecruitmentCandidate(request.getRecruitmentCandidateId());
         requireRecruitmentJob(request.getJobId());
@@ -178,6 +215,7 @@ public class InterviewServiceImpl implements InterviewService {
         candidate.setInterviewStageStatus("AI面");
         candidate.setApplicationStatus("INTERVIEWING");
         recruitmentCandidateMapper.updateById(candidate);
+        generateNextQuestion(process);
         return toProcessVO(process);
     }
 
@@ -197,38 +235,55 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     @Override
+    public InterviewVO getNextAiQuestion(Long processId) {
+        InterviewProcess process = requireProcess(processId);
+        InterviewAiRecord unanswered = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
+                .eq(InterviewAiRecord::getProcessId, processId)
+                .isNull(InterviewAiRecord::getAnswerContent)
+                .orderByAsc(InterviewAiRecord::getSequenceNo)
+                .last("LIMIT 1"));
+        return unanswered == null ? null : toAiRecordVO(unanswered, process);
+    }
+
+    @Override
     @Transactional
     public InterviewVO submitAiAnswer(AiAnswerRequest request) {
         InterviewProcess process = requireProcess(request.getProcessId());
         if (!StrUtil.equals(process.getCurrentStage(), "AI")) {
             throw new BusinessException("当前流程不在AI面试阶段");
         }
-        InterviewJobKnowledgeWeight weight = pickKnowledgeWeight(process.getJobId());
-        InterviewAiRecord record = new InterviewAiRecord();
-        record.setId(nextId(aiRecordMapper.selectList(null).stream().map(InterviewAiRecord::getId).toList()));
-        record.setProcessId(process.getId());
-        record.setKnowledgeBaseId(weight == null ? null : weight.getKnowledgeBaseId());
-        record.setKnowledgePoint(weight == null ? "通用沟通" : weight.getKnowledgePoint());
-        record.setQuestionContent("请结合“" + record.getKnowledgePoint() + "”介绍你的理解与实际应用。");
+        InterviewAiRecord record = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
+                .eq(InterviewAiRecord::getProcessId, process.getId())
+                .isNull(InterviewAiRecord::getAnswerContent)
+                .orderByAsc(InterviewAiRecord::getSequenceNo)
+                .last("LIMIT 1"));
+        if (record == null) {
+            throw new BusinessException("当前没有待回答的问题");
+        }
         record.setAnswerContent(request.getAnswerContent());
-        int interviewerScore = mockScore(request.getAnswerContent(), 6);
-        int scorerScore = mockScore(request.getAnswerContent(), 7);
+        int interviewerScore = callLlmScore(request.getAnswerContent(), record.getKnowledgePoint(), "INTERVIEWER");
+        int scorerScore = callLlmScore(request.getAnswerContent(), record.getKnowledgePoint(), "SCORER");
         int averageScore = Math.round((interviewerScore + scorerScore) / 2.0f);
         record.setInterviewerScore(interviewerScore);
         record.setScorerScore(scorerScore);
         record.setAverageScore(averageScore);
-        record.setSequenceNo(nextSequence(process.getId()));
-        aiRecordMapper.insert(record);
+        aiRecordMapper.updateById(record);
 
-        int average = aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>().eq(InterviewAiRecord::getProcessId, process.getId()))
-                .stream().map(InterviewAiRecord::getAverageScore).filter(Objects::nonNull).mapToInt(Integer::intValue).sum();
-        int count = Math.max(aiRecordMapper.selectCount(new LambdaQueryWrapper<InterviewAiRecord>().eq(InterviewAiRecord::getProcessId, process.getId())).intValue(), 1);
-        int currentAverage = Math.round(average / (float) count);
+        int total = aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>()
+                .eq(InterviewAiRecord::getProcessId, process.getId())
+                .isNotNull(InterviewAiRecord::getAverageScore))
+                .stream().mapToInt(InterviewAiRecord::getAverageScore).sum();
+        int count = Math.max(aiRecordMapper.selectCount(new LambdaQueryWrapper<InterviewAiRecord>()
+                .eq(InterviewAiRecord::getProcessId, process.getId())
+                .isNotNull(InterviewAiRecord::getAverageScore)).intValue(), 1);
+        int currentAverage = Math.round(total / (float) count);
         process.setAiAverageScore(currentAverage);
         if (currentAverage >= process.getAiThresholdScore()) {
             process.setStageStatus("PASSED");
             process.setCurrentStage("VIDEO");
             process.setProcessStatusView("视频面");
+        } else {
+            generateNextQuestion(process);
         }
         processMapper.updateById(process);
         updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
@@ -371,7 +426,73 @@ public class InterviewServiceImpl implements InterviewService {
         process.setApprovedHrName(request.getApproverName());
         processMapper.updateById(process);
         updateCandidateStage(process.getRecruitmentCandidateId(), "已终止");
+        auditLogService.log(request.getApproverUserId(), request.getApproverName(), "HR_ADMIN", "INTERVIEW", "TERMINATE_PROCESS", "INTERVIEW_PROCESS", String.valueOf(processId), "终止面试流程");
         return toProcessVO(process);
+    }
+
+    @Override
+    @Transactional
+    public VideoSignalVO publishHrOffer(Long processId, VideoSignalRequest request) {
+        InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        session.setHrOfferSdp(request.getOfferSdp());
+        session.setSessionStatus("OFFER_PUBLISHED");
+        videoSessionMapper.updateById(session);
+        return toVideoSignalVO(session);
+    }
+
+    @Override
+    @Transactional
+    public VideoSignalVO submitIntervieweeAnswer(Long processId, VideoSignalRequest request) {
+        InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        session.setIntervieweeAnswerSdp(request.getAnswerSdp());
+        session.setSessionStatus("ANSWER_SUBMITTED");
+        videoSessionMapper.updateById(session);
+        return toVideoSignalVO(session);
+    }
+
+    @Override
+    @Transactional
+    public VideoSignalVO addHrIceCandidate(Long processId, VideoSignalRequest request) {
+        InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        session.setHrIceCandidates(appendSignal(session.getHrIceCandidates(), request.getIceCandidate()));
+        videoSessionMapper.updateById(session);
+        return toVideoSignalVO(session);
+    }
+
+    @Override
+    @Transactional
+    public VideoSignalVO addIntervieweeIceCandidate(Long processId, VideoSignalRequest request) {
+        InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        session.setIntervieweeIceCandidates(appendSignal(session.getIntervieweeIceCandidates(), request.getIceCandidate()));
+        videoSessionMapper.updateById(session);
+        return toVideoSignalVO(session);
+    }
+
+    @Override
+    public VideoSignalVO getVideoSignalState(Long processId) {
+        return toVideoSignalVO(requireVideoSessionByProcess(processId));
+    }
+
+    @Override
+    @Transactional
+    public VideoSignalVO uploadRecording(Long processId, String originalFileName, String contentType, MultipartFile file) {
+        InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        try {
+            Path dir = Paths.get(System.getProperty("user.dir"), "uploads", "interview-recordings");
+            Files.createDirectories(dir);
+            String ext = originalFileName != null && originalFileName.contains(".") ? originalFileName.substring(originalFileName.lastIndexOf('.')) : ".webm";
+            String storedName = session.getVideoSerialNo() + ext;
+            Path storedFile = dir.resolve(storedName).normalize().toAbsolutePath();
+            file.transferTo(storedFile.toFile());
+            session.setRecordingPath(storedFile.toString());
+            session.setRecordingFileName(storedName);
+            session.setSessionStatus("RECORDED");
+            videoSessionMapper.updateById(session);
+            auditLogService.log(session.getApproverUserId(), session.getApproverName(), "HR_ADMIN", "INTERVIEW", "UPLOAD_RECORDING", "VIDEO_SESSION", String.valueOf(session.getId()), storedName);
+            return toVideoSignalVO(session);
+        } catch (IOException ex) {
+            throw new BusinessException("录制文件上传失败: " + ex.getMessage());
+        }
     }
 
     private void syncToPendingOnboarding(InterviewProcess process) {
@@ -470,6 +591,82 @@ public class InterviewServiceImpl implements InterviewService {
                 .last("LIMIT 1"));
     }
 
+    private void generateNextQuestion(InterviewProcess process) {
+        InterviewJobKnowledgeWeight weight = pickKnowledgeWeight(process.getJobId());
+        InterviewAiRecord record = new InterviewAiRecord();
+        record.setId(nextId(aiRecordMapper.selectList(null).stream().map(InterviewAiRecord::getId).toList()));
+        record.setProcessId(process.getId());
+        record.setKnowledgeBaseId(weight == null ? null : weight.getKnowledgeBaseId());
+        record.setKnowledgePoint(weight == null ? "通用沟通" : loadKnowledgeBaseName(weight.getKnowledgeBaseId()));
+        record.setQuestionContent(callLlmQuestion(record.getKnowledgePoint()));
+        record.setSequenceNo(nextSequence(process.getId()));
+        aiRecordMapper.insert(record);
+    }
+
+    private String loadKnowledgeBaseName(Long knowledgeBaseId) {
+        if (knowledgeBaseId == null) {
+            return "通用沟通";
+        }
+        InterviewKnowledgeBase base = knowledgeBaseMapper.selectById(knowledgeBaseId);
+        return base == null ? "通用沟通" : base.getKnowledgeBaseName();
+    }
+
+    private String callLlmQuestion(String topic) {
+        InterviewLlmConfig config = llmConfigMapper.selectOne(new LambdaQueryWrapper<InterviewLlmConfig>()
+                .eq(InterviewLlmConfig::getModelRole, "INTERVIEWER")
+                .eq(InterviewLlmConfig::getStatus, 1)
+                .last("LIMIT 1"));
+        if (config == null || StrUtil.isBlank(config.getApiKey())) {
+            return "请围绕“" + topic + "”结合实际项目经验进行回答。";
+        }
+        String prompt = StrUtil.blankToDefault(config.getPromptTemplate(), "你是一名AI面试官，请围绕以下主题生成一道中文面试题：{topic}")
+                .replace("{topic}", topic);
+        return callOpenAiChat(config, prompt, "请直接输出题目内容")
+                .replace("\n", " ")
+                .trim();
+    }
+
+    private int callLlmScore(String answer, String topic, String role) {
+        InterviewLlmConfig config = llmConfigMapper.selectOne(new LambdaQueryWrapper<InterviewLlmConfig>()
+                .eq(InterviewLlmConfig::getModelRole, role)
+                .eq(InterviewLlmConfig::getStatus, 1)
+                .last("LIMIT 1"));
+        if (config == null || StrUtil.isBlank(config.getApiKey())) {
+            int base = StrUtil.equals(role, "SCORER") ? 7 : 6;
+            int lengthScore = Math.min(StrUtil.length(answer) / 20, 3);
+            return Math.min(10, base + lengthScore);
+        }
+        String prompt = StrUtil.blankToDefault(config.getScoringRulePrompt(), config.getPromptTemplate())
+                .replace("{topic}", topic);
+        if (StrUtil.isBlank(prompt)) {
+            prompt = "请作为评分模型，围绕主题" + topic + "对回答评分，返回1到10的整数。";
+        }
+        String response = callOpenAiChat(config, prompt, answer).replaceAll("[^0-9]", "");
+        if (StrUtil.isBlank(response)) {
+            return 6;
+        }
+        int score = Integer.parseInt(response);
+        return Math.max(1, Math.min(10, score));
+    }
+
+    private String callOpenAiChat(InterviewLlmConfig config, String systemPrompt, String userPrompt) {
+        cn.hutool.json.JSONObject payload = new cn.hutool.json.JSONObject();
+        payload.set("model", config.getModelName());
+        payload.set("messages", cn.hutool.json.JSONUtil.parseArray(List.of(
+                new cn.hutool.json.JSONObject().set("role", "system").set("content", systemPrompt),
+                new cn.hutool.json.JSONObject().set("role", "user").set("content", userPrompt)
+        )));
+        String responseText = cn.hutool.http.HttpRequest.post(config.getBaseUrl())
+                .header("Authorization", "Bearer " + config.getApiKey())
+                .header("Content-Type", "application/json")
+                .body(payload.toString())
+                .timeout(15000)
+                .execute()
+                .body();
+        cn.hutool.json.JSONObject response = cn.hutool.json.JSONUtil.parseObj(responseText);
+        return response.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getStr("content", "");
+    }
+
     private int nextSequence(Long processId) {
         return aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>().eq(InterviewAiRecord::getProcessId, processId)).size() + 1;
     }
@@ -508,7 +705,6 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setId(entity.getId());
         vo.setJobId(entity.getJobId());
         vo.setKnowledgeBaseId(entity.getKnowledgeBaseId());
-        vo.setKnowledgePoint(entity.getKnowledgePoint());
         vo.setWeight(entity.getWeight());
         vo.setCreatedAt(entity.getCreatedAt());
         vo.setUpdatedAt(entity.getUpdatedAt());
@@ -524,6 +720,7 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setApiKeyMasked(entity.getApiKeyMasked());
         vo.setModelName(entity.getModelName());
         vo.setPromptTemplate(entity.getPromptTemplate());
+        vo.setScoringRulePrompt(entity.getScoringRulePrompt());
         vo.setStatus(entity.getStatus());
         vo.setCreatedAt(entity.getCreatedAt());
         vo.setUpdatedAt(entity.getUpdatedAt());
@@ -587,6 +784,29 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setRecordingPath(entity.getRecordingPath());
         vo.setSessionStatus(entity.getSessionStatus());
         return vo;
+    }
+
+    private VideoSignalVO toVideoSignalVO(InterviewVideoSession entity) {
+        VideoSignalVO vo = new VideoSignalVO();
+        vo.setSessionId(entity.getId());
+        vo.setProcessId(entity.getProcessId());
+        vo.setVideoSerialNo(entity.getVideoSerialNo());
+        vo.setVideoJoinLink(entity.getVideoJoinLink());
+        vo.setOfferSdp(entity.getHrOfferSdp());
+        vo.setAnswerSdp(entity.getIntervieweeAnswerSdp());
+        vo.setHrIceCandidates(entity.getHrIceCandidates());
+        vo.setIntervieweeIceCandidates(entity.getIntervieweeIceCandidates());
+        vo.setRecordingPath(entity.getRecordingPath());
+        vo.setRecordingFileName(entity.getRecordingFileName());
+        vo.setSessionStatus(entity.getSessionStatus());
+        return vo;
+    }
+
+    private String appendSignal(String existing, String value) {
+        if (StrUtil.isBlank(existing)) {
+            return value;
+        }
+        return existing + "\n" + value;
     }
 
     private Long nextId(List<Long> ids) {

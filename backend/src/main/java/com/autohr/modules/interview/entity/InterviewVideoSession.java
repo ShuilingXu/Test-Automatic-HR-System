@@ -24,6 +24,11 @@ public class InterviewVideoSession {
     private LocalDateTime startTime;
     private LocalDateTime endTime;
     private String recordingPath;
+    private String hrOfferSdp;
+    private String intervieweeAnswerSdp;
+    private String hrIceCandidates;
+    private String intervieweeIceCandidates;
+    private String recordingFileName;
     private String sessionStatus;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
