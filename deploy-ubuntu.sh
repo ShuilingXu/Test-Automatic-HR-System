@@ -9,6 +9,12 @@ ENV_FILE="$ROOT_DIR/.env"
 
 BACKEND_PORT="${BACKEND_PORT:-8080}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+TURN_HOST="${TURN_HOST:-}"
+TURN_USERNAME="${TURN_USERNAME:-}"
+TURN_CREDENTIAL="${TURN_CREDENTIAL:-}"
+TURN_REALM="${TURN_REALM:-}"
+TURN_MIN_PORT="${TURN_MIN_PORT:-}"
+TURN_MAX_PORT="${TURN_MAX_PORT:-}"
 
 install_package() {
   local package_name="$1"
@@ -26,6 +32,7 @@ ensure_dependencies() {
   sudo apt-get update
   install_package openjdk-17-jdk
   install_package maven
+  install_package coturn
 
   local node_major=0
   if command -v node >/dev/null 2>&1; then
@@ -39,6 +46,26 @@ ensure_dependencies() {
   fi
 }
 
+random_secret() {
+  openssl rand -hex 18 2>/dev/null || date +%s%N
+}
+
+set_env_value() {
+  local key="$1"
+  local value="$2"
+
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+  else
+    echo "${key}=${value}" >> "$ENV_FILE"
+  fi
+}
+
+get_env_value() {
+  local key="$1"
+  grep -m 1 "^${key}=" "$ENV_FILE" | cut -d= -f2-
+}
+
 prepare_env() {
   if [ ! -f "$ENV_FILE" ]; then
     cp "$ROOT_DIR/.env.example" "$ENV_FILE"
@@ -47,6 +74,68 @@ prepare_env() {
   if ! grep -q '^JWT_SECRET=' "$ENV_FILE"; then
     echo "JWT_SECRET=$(openssl rand -hex 32 2>/dev/null || date +%s%N)" >> "$ENV_FILE"
   fi
+
+  TURN_HOST="${TURN_HOST:-$(get_env_value TURN_HOST)}"
+  TURN_HOST="${TURN_HOST:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+  TURN_USERNAME="${TURN_USERNAME:-$(get_env_value TURN_USERNAME)}"
+  TURN_USERNAME="${TURN_USERNAME:-autohr}"
+  TURN_CREDENTIAL="${TURN_CREDENTIAL:-$(get_env_value TURN_CREDENTIAL)}"
+  TURN_REALM="${TURN_REALM:-$(get_env_value TURN_REALM)}"
+  TURN_REALM="${TURN_REALM:-autohr.local}"
+  TURN_MIN_PORT="${TURN_MIN_PORT:-$(get_env_value TURN_MIN_PORT)}"
+  TURN_MIN_PORT="${TURN_MIN_PORT:-49160}"
+  TURN_MAX_PORT="${TURN_MAX_PORT:-$(get_env_value TURN_MAX_PORT)}"
+  TURN_MAX_PORT="${TURN_MAX_PORT:-49200}"
+
+  if [ -z "$TURN_HOST" ]; then
+    echo "TURN_HOST is empty. Set TURN_HOST to this server's public IP or domain."
+    exit 1
+  fi
+
+  if [ -z "$TURN_CREDENTIAL" ]; then
+    TURN_CREDENTIAL="$(random_secret)"
+  fi
+
+  set_env_value INTERVIEW_STUN_URLS "stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478"
+  set_env_value INTERVIEW_TURN_URLS "turn:${TURN_HOST}:3478?transport=udp,turn:${TURN_HOST}:3478?transport=tcp"
+  set_env_value INTERVIEW_TURN_USERNAME "$TURN_USERNAME"
+  set_env_value INTERVIEW_TURN_CREDENTIAL "$TURN_CREDENTIAL"
+  set_env_value TURN_HOST "$TURN_HOST"
+  set_env_value TURN_USERNAME "$TURN_USERNAME"
+  set_env_value TURN_CREDENTIAL "$TURN_CREDENTIAL"
+  set_env_value TURN_REALM "$TURN_REALM"
+  set_env_value TURN_MIN_PORT "$TURN_MIN_PORT"
+  set_env_value TURN_MAX_PORT "$TURN_MAX_PORT"
+}
+
+configure_coturn() {
+  echo "Configuring coturn on ${TURN_HOST}:3478 ..."
+  sudo install -m 0755 -d /var/log/turnserver
+  sudo tee /etc/turnserver.conf >/dev/null <<EOF
+listening-port=3478
+fingerprint
+lt-cred-mech
+realm=${TURN_REALM}
+server-name=${TURN_REALM}
+user=${TURN_USERNAME}:${TURN_CREDENTIAL}
+no-multicast-peers
+no-cli
+min-port=${TURN_MIN_PORT}
+max-port=${TURN_MAX_PORT}
+log-file=/var/log/turnserver/turnserver.log
+simple-log
+EOF
+
+  if [ -f /etc/default/coturn ]; then
+    if grep -q '^TURNSERVER_ENABLED=' /etc/default/coturn; then
+      sudo sed -i 's/^TURNSERVER_ENABLED=.*/TURNSERVER_ENABLED=1/' /etc/default/coturn
+    else
+      echo 'TURNSERVER_ENABLED=1' | sudo tee -a /etc/default/coturn >/dev/null
+    fi
+  fi
+
+  sudo systemctl enable coturn
+  sudo systemctl restart coturn
 }
 
 stop_existing_processes() {
@@ -85,6 +174,7 @@ main() {
   mkdir -p "$LOG_DIR"
   ensure_dependencies
   prepare_env
+  configure_coturn
   stop_existing_processes
   start_backend
   start_frontend
@@ -92,6 +182,8 @@ main() {
   echo "Auto HR System is starting."
   echo "Backend:  http://localhost:$BACKEND_PORT"
   echo "Frontend: http://localhost:$FRONTEND_PORT"
+  echo "TURN:     turn:$TURN_HOST:3478 udp/tcp"
+  echo "Firewall: allow tcp/udp 3478 and udp $TURN_MIN_PORT:$TURN_MAX_PORT"
   echo "Logs:     $LOG_DIR"
   echo "Stop:     kill \$(cat logs/backend.pid) \$(cat logs/frontend.pid)"
 }
