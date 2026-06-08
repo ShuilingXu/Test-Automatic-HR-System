@@ -41,6 +41,8 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -233,7 +235,7 @@ public class InterviewServiceImpl implements InterviewService {
         candidate.setInterviewStageStatus("AI面");
         candidate.setApplicationStatus("INTERVIEWING");
         recruitmentCandidateMapper.updateById(candidate);
-        CompletableFuture.runAsync(() -> generateNextQuestion(requireProcess(process.getId())));
+        runAfterCommit(() -> CompletableFuture.runAsync(() -> generateInitialQuestionSafely(process.getId())));
         return toProcessVO(process);
     }
 
@@ -265,6 +267,18 @@ public class InterviewServiceImpl implements InterviewService {
                 .isNull(InterviewAiRecord::getAnswerContent)
                 .orderByAsc(InterviewAiRecord::getSequenceNo)
                 .last("LIMIT 1"));
+        if (unanswered == null && StrUtil.equals(process.getCurrentStage(), "AI")) {
+            int recordCount = aiRecordMapper.selectCount(new LambdaQueryWrapper<InterviewAiRecord>()
+                    .eq(InterviewAiRecord::getProcessId, processId)).intValue();
+            if (recordCount == 0) {
+                generateInitialQuestionSafely(processId);
+                unanswered = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
+                        .eq(InterviewAiRecord::getProcessId, processId)
+                        .isNull(InterviewAiRecord::getAnswerContent)
+                        .orderByAsc(InterviewAiRecord::getSequenceNo)
+                        .last("LIMIT 1"));
+            }
+        }
         return unanswered == null ? null : toAiRecordVO(unanswered, process);
     }
 
@@ -315,7 +329,7 @@ public class InterviewServiceImpl implements InterviewService {
             process.setStageStatus("WAITING_APPROVAL");
             process.setProcessStatusView("AI待审批");
         } else {
-            generateNextQuestion(process, interviewerEvaluation.nextQuestion());
+            generateNextQuestion(process);
         }
         processMapper.updateById(process);
         updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
@@ -713,15 +727,72 @@ public class InterviewServiceImpl implements InterviewService {
         return entity;
     }
 
-    private InterviewJobKnowledgeWeight pickKnowledgeWeight(Long jobId) {
-        return jobKnowledgeWeightMapper.selectOne(new LambdaQueryWrapper<InterviewJobKnowledgeWeight>()
-                .eq(InterviewJobKnowledgeWeight::getJobId, jobId)
+    private InterviewJobKnowledgeWeight pickKnowledgeWeight(InterviewProcess process) {
+        List<InterviewJobKnowledgeWeight> weights = jobKnowledgeWeightMapper.selectList(new LambdaQueryWrapper<InterviewJobKnowledgeWeight>()
+                .eq(InterviewJobKnowledgeWeight::getJobId, process.getJobId())
                 .orderByDesc(InterviewJobKnowledgeWeight::getWeight)
-                .last("LIMIT 1"));
+                .orderByAsc(InterviewJobKnowledgeWeight::getId));
+        if (weights.isEmpty()) {
+            return null;
+        }
+        List<InterviewJobKnowledgeWeight> validWeights = weights.stream()
+                .filter(item -> Objects.requireNonNullElse(item.getWeight(), 0) > 0)
+                .toList();
+        if (validWeights.isEmpty()) {
+            return weights.get(0);
+        }
+        List<InterviewAiRecord> existingRecords = aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>()
+                .eq(InterviewAiRecord::getProcessId, process.getId()));
+        InterviewJobKnowledgeWeight selected = null;
+        double selectedRatio = Double.MAX_VALUE;
+        int selectedCount = Integer.MAX_VALUE;
+        for (InterviewJobKnowledgeWeight item : validWeights) {
+            int usedCount = (int) existingRecords.stream()
+                    .filter(record -> Objects.equals(record.getKnowledgeBaseId(), item.getKnowledgeBaseId()))
+                    .count();
+            double ratio = usedCount / (double) item.getWeight();
+            if (selected == null || ratio < selectedRatio || (ratio == selectedRatio && usedCount < selectedCount)) {
+                selected = item;
+                selectedRatio = ratio;
+                selectedCount = usedCount;
+            }
+        }
+        return selected;
+    }
+
+    private void runAfterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
+        });
+    }
+
+    private void generateInitialQuestionSafely(Long processId) {
+        try {
+            generateNextQuestion(requireProcess(processId));
+        } catch (Exception ex) {
+            saveQuestionGenerationFailure(processId, ex);
+        }
+    }
+
+    private void saveQuestionGenerationFailure(Long processId, Exception ex) {
+        InterviewAiRecord record = new InterviewAiRecord();
+        record.setId(nextId(aiRecordMapper.selectList(null).stream().map(InterviewAiRecord::getId).toList()));
+        record.setProcessId(processId);
+        record.setKnowledgePoint("题目生成异常");
+        record.setQuestionContent("AI题目生成失败，请联系管理员检查知识库权重、LLM配置或接口状态。错误：" + abbreviate(ex.getMessage()));
+        record.setSequenceNo(nextSequence(processId));
+        aiRecordMapper.insert(record);
     }
 
     private void generateNextQuestion(InterviewProcess process) {
-        InterviewJobKnowledgeWeight weight = pickKnowledgeWeight(process.getJobId());
+        InterviewJobKnowledgeWeight weight = pickKnowledgeWeight(process);
         InterviewAiRecord record = new InterviewAiRecord();
         record.setId(nextId(aiRecordMapper.selectList(null).stream().map(InterviewAiRecord::getId).toList()));
         record.setProcessId(process.getId());
@@ -756,11 +827,10 @@ public class InterviewServiceImpl implements InterviewService {
 
     private String callLlmQuestion(String topic, String materials) {
         InterviewLlmConfig config = requireActiveLlmConfig("INTERVIEWER");
-        String prompt = StrUtil.blankToDefault(config.getPromptTemplate(), "你是一名AI面试官，请围绕以下主题生成一道中文面试题：{topic}。只输出题目内容。")
-                .replace("{topic}", topic);
+        String prompt = "你是一名AI面试官，请根据用户提供的材料生成一道中文面试题。只输出题目内容，不要评分，不要评价，不要输出答案。";
         String userPrompt = "知识库主题：" + topic + "\n\n知识库材料：\n" + StrUtil.blankToDefault(materials, "无补充材料")
                 + "\n\n请只基于上述知识库材料生成一道面试题。题目必须能从材料中找到考察依据，可以对知识点原句做自然、清晰的语义改写，但不要引入材料外的知识点，不要输出解释。";
-        String question = callOpenAiChat(config, prompt + "\n你必须根据用户提供的知识库材料出题，允许自然表达和语义修饰，但考察依据必须来自材料。", userPrompt)
+        String question = callOpenAiChat(config, prompt + "\n你必须根据用户提供的知识库材料出题，允许自然表达和语义修饰，但考察依据必须来自材料。本指令优先于模型配置中的打分、评价或只返回分数类要求。", userPrompt)
                 .replace("\n", " ")
                 .trim();
         if (StrUtil.isBlank(question)) {
@@ -774,7 +844,7 @@ public class InterviewServiceImpl implements InterviewService {
             generateNextQuestion(process);
             return;
         }
-        InterviewJobKnowledgeWeight weight = pickKnowledgeWeight(process.getJobId());
+        InterviewJobKnowledgeWeight weight = pickKnowledgeWeight(process);
         InterviewAiRecord record = new InterviewAiRecord();
         record.setId(nextId(aiRecordMapper.selectList(null).stream().map(InterviewAiRecord::getId).toList()));
         record.setProcessId(process.getId());
@@ -1008,6 +1078,14 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setRecruitmentCandidateId(entity.getRecruitmentCandidateId());
         vo.setIntervieweeUserId(entity.getIntervieweeUserId());
         vo.setJobId(entity.getJobId());
+        RecruitmentCandidate candidate = recruitmentCandidateMapper.selectById(entity.getRecruitmentCandidateId());
+        if (candidate != null) {
+            vo.setCandidateName(candidate.getFullName());
+        }
+        RecruitmentJob job = recruitmentJobMapper.selectById(entity.getJobId());
+        if (job != null) {
+            vo.setQuestionTitle(job.getJobTitle());
+        }
         vo.setCurrentStage(entity.getCurrentStage());
         vo.setStageStatus(entity.getStageStatus());
         vo.setOverallStatus(entity.getOverallStatus());

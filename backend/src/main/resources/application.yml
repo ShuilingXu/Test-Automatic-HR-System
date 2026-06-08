@@ -37,4 +37,4 @@ jwt:
 
 interview:
   llm:
-    debug: true
+    debug: false

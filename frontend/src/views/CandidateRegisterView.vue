@@ -28,7 +28,7 @@
           </el-upload>
           <div class="link-row">
             <el-button type="primary" @click="submit">提交报名并上传简历</el-button>
-            <RouterLink class="link-chip" to="/candidate/interview">进入线上面试</RouterLink>
+            <RouterLink class="link-chip" to="/user">查看我的报名</RouterLink>
           </div>
         </el-form>
         <div class="surface">
@@ -45,6 +45,7 @@
             <p>报名编号：{{ submittedCandidate.id }}</p>
             <p>应聘岗位：{{ submittedCandidate.jobTitle }}</p>
             <p>简历：{{ submittedCandidate.resumeFileName || '未上传' }}</p>
+            <RouterLink class="link-chip" to="/user">回到首页查看流程入口</RouterLink>
           </div>
         </div>
       </div>

@@ -6,12 +6,14 @@
       <p class="page-subtitle">当前流程包括 AI 面试、视频面试、线下面试。系统会根据当前阶段动态展示操作。</p>
       <div class="page-grid">
         <div class="surface">
-          <h3>流程绑定</h3>
-          <el-form :model="sessionForm" label-position="top">
-            <el-form-item label="面试流程ID"><el-input-number v-model="sessionForm.processId" :min="1" /></el-form-item>
-          </el-form>
+          <h3>流程入口</h3>
+          <div class="summary-box">
+            <p>当前面试由报名记录绑定进入，不再使用流程流水号手动鉴别。</p>
+            <p>绑定状态：{{ sessionForm.processId ? '已绑定面试流程' : '未选择报名记录' }}</p>
+          </div>
           <div class="link-row">
             <el-button type="primary" @click="loadProcessRecords">加载流程</el-button>
+            <RouterLink class="link-chip" to="/user">返回我的报名</RouterLink>
             <el-button @click="joinVideo">加入视频面</el-button>
             <el-button @click="stopRecording">结束并上传录制</el-button>
           </div>
@@ -19,6 +21,7 @@
             <p>当前阶段：{{ processSummary.currentStage }}</p>
             <p>状态：{{ processSummary.processStatusView }}</p>
             <p>AI均分：{{ processSummary.aiAverageScore ?? '-' }}</p>
+            <p v-if="refreshState.retryCount > 0">自动重试：第 {{ refreshState.retryCount }} 次，{{ refreshState.lastError }}</p>
           </div>
           <div class="video-grid">
             <div class="video-box"><span>本地视频</span><video ref="localVideo" autoplay muted playsinline></video></div>
@@ -52,17 +55,18 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { interviewApi } from '../services/api'
 
 const route = useRoute()
-const cachedInterview = JSON.parse(localStorage.getItem('interview-session-cache') || '{}')
-const sessionForm = reactive({ processId: route.query.processId ? Number(route.query.processId) : (cachedInterview.processId || null) })
+const router = useRouter()
+const sessionForm = reactive({ processId: route.query.processId ? Number(route.query.processId) : null })
 const aiAnswer = reactive({ answerContent: '' })
-const aiRecords = ref(cachedInterview.aiRecords || [])
-const processSummary = ref(cachedInterview.processSummary || null)
-const currentQuestion = ref(cachedInterview.currentQuestion || null)
+const aiRecords = ref([])
+const processSummary = ref(null)
+const currentQuestion = ref(null)
+const refreshState = reactive({ loading: false, retryCount: 0, lastError: '' })
 const localVideo = ref(null)
 const remoteVideo = ref(null)
 let localStream = null
@@ -74,43 +78,76 @@ let recordedChunks = []
 let addedHrIce = new Set()
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
-async function loadProcessRecords() {
+async function loadProcessRecords(options = {}) {
+  if (refreshState.loading) {
+    return
+  }
+  refreshState.loading = true
   try {
     if (!sessionForm.processId) {
-      ElMessage.warning('请输入面试流程ID')
+      ElMessage.warning('请从面试者首页的报名记录进入面试')
+      router.push('/user')
       return
     }
-    processSummary.value = (await interviewApi.getIntervieweeProcess(sessionForm.processId)).data
-    currentQuestion.value = (await interviewApi.getNextAiQuestion(sessionForm.processId)).data
-    aiRecords.value = (await interviewApi.listIntervieweeAiRecords({ processId: sessionForm.processId })).data
+    const [processResponse, questionResponse, recordsResponse] = await Promise.all([
+      interviewApi.getIntervieweeProcess(sessionForm.processId),
+      interviewApi.getNextAiQuestion(sessionForm.processId),
+      interviewApi.listIntervieweeAiRecords({ processId: sessionForm.processId }),
+    ])
+    processSummary.value = processResponse.data
+    currentQuestion.value = questionResponse.data
+    aiRecords.value = recordsResponse.data
+    refreshState.retryCount = 0
+    refreshState.lastError = ''
     cacheInterviewSession()
     syncAiAutoRefresh()
-  } catch (error) { fail(error) }
+  } catch (error) {
+    refreshState.retryCount += 1
+    refreshState.lastError = error.message || '刷新失败'
+    if (!options.silent) {
+      fail(error)
+    }
+    scheduleAiRefresh(nextRefreshDelay())
+  } finally {
+    refreshState.loading = false
+  }
 }
 
 function cacheInterviewSession() {
-  localStorage.setItem('interview-session-cache', JSON.stringify({
-    processId: sessionForm.processId,
-    processSummary: processSummary.value,
-    currentQuestion: currentQuestion.value,
-    aiRecords: aiRecords.value,
-  }))
 }
 
 function syncAiAutoRefresh() {
-  clearInterval(aiRefreshTimer)
-  aiRefreshTimer = null
   if (processSummary.value?.currentStage === 'AI' && !currentQuestion.value) {
-    aiRefreshTimer = setInterval(loadProcessRecords, 3000)
+    scheduleAiRefresh(3000)
+  } else {
+    clearAiRefresh()
   }
+}
+
+function scheduleAiRefresh(delay) {
+  clearAiRefresh()
+  aiRefreshTimer = setTimeout(() => loadProcessRecords({ silent: true }), delay)
+}
+
+function clearAiRefresh() {
+  clearTimeout(aiRefreshTimer)
+  aiRefreshTimer = null
+}
+
+function nextRefreshDelay() {
+  return Math.min(3000 + refreshState.retryCount * 1000, 10000)
 }
 async function submitAiAnswer() {
   try {
+    clearAiRefresh()
     await interviewApi.submitAiAnswer({ processId: sessionForm.processId, answerContent: aiAnswer.answerContent })
     aiAnswer.answerContent = ''
     ElMessage.success('AI 回答已提交')
     await loadProcessRecords()
-  } catch (error) { fail(error) }
+  } catch (error) {
+    fail(error)
+    scheduleAiRefresh(nextRefreshDelay())
+  }
 }
 async function joinVideo() {
   try {
@@ -177,15 +214,18 @@ function disconnectVideo() {
 }
 
 onBeforeUnmount(() => {
-  clearInterval(aiRefreshTimer)
+  clearAiRefresh()
   disconnectVideo()
 })
 
 onMounted(async () => {
-  if (sessionForm.processId) {
-    await loadProcessRecords()
-    syncAiAutoRefresh()
+  if (!sessionForm.processId) {
+    ElMessage.warning('请从面试者首页选择报名记录进入面试')
+    router.push('/user')
+    return
   }
+  await loadProcessRecords()
+  syncAiAutoRefresh()
 })
 </script>
 

@@ -46,9 +46,11 @@ export const recruitmentApi = {
   getAdminJob(id) { return request.get(`/recruitment/admin/jobs/${id}`) },
   deleteJob(id) { return request.delete(`/recruitment/admin/jobs/${id}`) },
   listCandidates(params) { return request.get('/recruitment/admin/candidates', { params }) },
+  rejectCandidateResume(id) { return request.post(`/recruitment/admin/candidates/${id}/reject-resume`) },
   deleteCandidate(id) { return request.delete(`/recruitment/admin/candidates/${id}`) },
   listOpenJobs(params) { return request.get('/recruitment/jobs', { params }) },
   apply(payload) { return request.post('/recruitment/candidates', payload) },
+  listMyCandidates() { return request.get('/recruitment/candidates/mine') },
   uploadResume(candidateId, file) {
     const formData = new FormData()
     formData.append('file', file)

@@ -88,6 +88,15 @@ public class RecruitmentController {
         return ApiResponse.success(recruitmentService.getCandidate(id));
     }
 
+    @PostMapping("/admin/candidates/{id}/reject-resume")
+    public ApiResponse<CandidateVO> rejectCandidateResume(Authentication authentication,
+                                                          @PathVariable Long id) {
+        CandidateVO rejected = recruitmentService.rejectCandidateResume(id);
+        SessionUserVO current = currentUser(authentication);
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "RECRUITMENT", "REJECT_RESUME", "RECRUITMENT_CANDIDATE", String.valueOf(id), rejected.getFullName() + " 简历面试拒绝");
+        return ApiResponse.success(rejected);
+    }
+
     @DeleteMapping("/admin/candidates/{id}")
     public ApiResponse<Void> deleteCandidate(Authentication authentication,
                                              @PathVariable Long id) {
@@ -109,8 +118,13 @@ public class RecruitmentController {
 
     @PostMapping("/candidates")
     public ApiResponse<CandidateVO> apply(Authentication authentication,
-                                          @Valid @RequestBody CandidateApplyRequest request) {
+                                           @Valid @RequestBody CandidateApplyRequest request) {
         return ApiResponse.success(recruitmentService.apply(request, authentication.getName()));
+    }
+
+    @GetMapping("/candidates/mine")
+    public ApiResponse<List<CandidateVO>> listMyCandidates(Authentication authentication) {
+        return ApiResponse.success(recruitmentService.listMyCandidates(authentication.getName()));
     }
 
     @PostMapping("/candidates/{candidateId}/resume")

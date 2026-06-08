@@ -24,7 +24,11 @@ public interface RecruitmentService {
 
     List<CandidateVO> listCandidates(Long jobId, String status, String interviewStageStatus, String keyword);
 
+    List<CandidateVO> listMyCandidates(String intervieweeUsername);
+
     CandidateVO getCandidate(Long id);
+
+    CandidateVO rejectCandidateResume(Long id);
 
     void deleteCandidate(Long id);
 

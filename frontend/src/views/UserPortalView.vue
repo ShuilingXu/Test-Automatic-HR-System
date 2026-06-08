@@ -9,7 +9,6 @@
         </div>
         <div class="link-row">
           <RouterLink class="link-chip" to="/candidate/register">去报名</RouterLink>
-          <RouterLink class="link-chip" to="/candidate/interview">去面试</RouterLink>
           <el-button @click="logout">退出登录</el-button>
         </div>
       </div>
@@ -32,19 +31,41 @@
           <p class="page-subtitle" style="margin-top: 16px">资料完成后再去报名页面，符合当前系统流程约束。</p>
         </div>
       </div>
+      <div class="surface application-panel">
+        <div class="section-head">
+          <div>
+            <h3>我的报名记录</h3>
+            <p class="page-subtitle">这里会长期保留你的报名记录和对应的面试入口，不再需要输入流程流水号。</p>
+          </div>
+          <el-button @click="loadMyCandidates">刷新</el-button>
+        </div>
+        <div v-if="candidates.length === 0" class="empty-box">暂无报名记录，完成报名后会显示在这里。</div>
+        <div v-else class="application-list">
+          <div v-for="item in candidates" :key="item.id" class="application-card">
+            <div>
+              <strong>{{ item.jobTitle || `岗位 ${item.jobId}` }}</strong>
+              <span>报名编号：{{ item.id }} / 状态：{{ item.interviewStageStatus || item.applicationStatus || '已提交' }}</span>
+              <small>简历：{{ item.resumeFileName || '未上传' }}</small>
+            </div>
+            <RouterLink v-if="item.interviewProcessId" class="link-chip" :to="`/interview/interviewee?processId=${item.interviewProcessId}`">进入面试</RouterLink>
+            <span v-else class="pending-chip">等待 HR 发起面试</span>
+          </div>
+        </div>
+      </div>
     </section>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { authApi } from '../services/api'
+import { authApi, recruitmentApi } from '../services/api'
 
 const router = useRouter()
 const session = reactive({ username: '', roleCode: '', email: '', profileCompleted: 0 })
 const profileForm = reactive({ displayName: '', mobilePhone: '', email: '' })
+const candidates = ref([])
 
 async function loadSession() {
   try {
@@ -55,9 +76,18 @@ async function loadSession() {
       mobilePhone: response.data.mobilePhone || '',
       email: response.data.email || '',
     })
+    await loadMyCandidates()
   } catch (error) {
     ElMessage.error(error.message || '请先登录')
     router.push('/login')
+  }
+}
+
+async function loadMyCandidates() {
+  try {
+    candidates.value = (await recruitmentApi.listMyCandidates()).data
+  } catch (error) {
+    ElMessage.error(error.message || '报名记录加载失败')
   }
 }
 
@@ -81,5 +111,13 @@ onMounted(loadSession)
 
 <style scoped>
 .topline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.application-panel { margin-top: 18px; }
+.section-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.application-list { display: grid; gap: 12px; margin-top: 12px; }
+.application-card { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 16px; border-radius: 18px; background: rgba(255, 255, 255, 0.82); }
+.application-card strong, .application-card span, .application-card small { display: block; }
+.application-card span { margin: 6px 0; color: #61727d; }
+.pending-chip { padding: 8px 12px; border-radius: 999px; background: #eef2f4; color: #61727d; white-space: nowrap; }
 @media (max-width: 900px) { .topline { flex-direction: column; } }
+@media (max-width: 900px) { .section-head, .application-card { flex-direction: column; align-items: flex-start; } }
 </style>

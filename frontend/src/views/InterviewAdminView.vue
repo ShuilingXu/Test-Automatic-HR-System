@@ -100,17 +100,34 @@
 
       <section v-if="activeTab === 'process'" class="surface">
         <h3>候选人面试流程</h3>
+        <el-form :model="processSearch" label-position="top" class="form-grid">
+          <el-form-item label="搜索候选人"><el-input v-model="processSearch.keyword" placeholder="候选人姓名 / 手机 / 邮箱 / 专业 / 学校" /></el-form-item>
+        </el-form>
         <el-form :model="processForm" label-position="top" class="form-grid">
-          <el-form-item label="招聘候选人"><el-select v-model="processForm.recruitmentCandidateId" @change="syncIntervieweeByCandidate"><el-option v-for="item in recruitmentCandidates" :key="item.id" :label="`${item.fullName} / ${item.mobilePhone}`" :value="item.id" /></el-select></el-form-item>
-          <el-form-item label="面试者用户ID"><el-input v-model="processForm.intervieweeUserId" disabled /></el-form-item>
-          <el-form-item label="岗位"><el-select v-model="processForm.jobId"><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
+          <el-form-item label="候选人投递记录"><el-select v-model="processForm.recruitmentCandidateId" filterable clearable @change="syncIntervieweeByCandidate"><el-option v-for="item in filteredProcessCandidates" :key="item.id" :label="`${item.fullName} / ${item.jobTitle || '未绑定岗位'} / 投递编号 ${item.id}`" :value="item.id" /></el-select></el-form-item>
+          <el-form-item label="投递岗位"><el-select v-model="processForm.jobId" disabled><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
+          <el-form-item label="投递编号"><el-input :model-value="processCandidatePreview?.id || '-'" disabled /></el-form-item>
           <el-form-item label="AI通过阈值"><el-input-number v-model="processForm.aiThresholdScore" :min="1" /></el-form-item>
         </el-form>
+        <div v-if="processCandidatePreview" class="candidate-preview">
+          <h4>候选人投递预览</h4>
+          <div class="preview-grid">
+            <div><span>候选人</span><strong>{{ processCandidatePreview.fullName }}</strong></div>
+            <div><span>投递岗位</span><strong>{{ processCandidatePreview.jobTitle || '-' }}</strong></div>
+            <div><span>投递编号</span><strong>{{ processCandidatePreview.id }}</strong></div>
+            <div><span>联系电话</span><strong>{{ processCandidatePreview.mobilePhone || '-' }}</strong></div>
+            <div><span>邮箱</span><strong>{{ processCandidatePreview.email || '-' }}</strong></div>
+            <div><span>专业</span><strong>{{ processCandidatePreview.major || '-' }}</strong></div>
+            <div><span>毕业院校</span><strong>{{ processCandidatePreview.graduationSchool || '-' }}</strong></div>
+            <div><span>状态</span><strong>{{ processCandidatePreview.interviewStageStatus || processCandidatePreview.applicationStatus || '-' }}</strong></div>
+          </div>
+        </div>
         <div class="link-row"><el-button type="primary" @click="startProcess">发起面试流程</el-button></div>
         <el-table :data="processes" stripe class="data-table" @row-click="selectProcess">
           <el-table-column prop="id" label="流程流水号" width="110" />
-          <el-table-column prop="recruitmentCandidateId" label="候选人ID" />
-          <el-table-column prop="intervieweeUserId" label="面试者用户ID" width="130" />
+          <el-table-column prop="candidateName" label="候选人" />
+          <el-table-column prop="questionTitle" label="投递岗位" />
+          <el-table-column prop="recruitmentCandidateId" label="投递编号" />
           <el-table-column prop="currentStage" label="当前轮次" />
           <el-table-column prop="processStatusView" label="状态展示" />
           <el-table-column prop="aiAverageScore" label="AI均分" />
@@ -188,6 +205,7 @@ const weightForm = reactive({ id: null, jobId: null, knowledgeBaseId: null, weig
 const interviewerLlmForm = reactive(createLlmForm('INTERVIEWER'))
 const scorerLlmForm = reactive(createLlmForm('SCORER'))
 const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 7 })
+const processSearch = reactive({ keyword: '' })
 
 const interviewerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')?.apiKeyMasked || '未配置')
 const scorerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'SCORER')?.apiKeyMasked || '未配置')
@@ -198,6 +216,14 @@ const canStartVideo = computed(() => canTerminate.value && selectedProcess.value
 const canStopVideo = computed(() => videoActive.value)
 const canApproveVideo = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'VIDEO' && ['WAITING_APPROVAL', 'RECORDED'].includes(selectedProcess.value?.sessionStatus))
 const canApproveOnsite = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'ONSITE')
+const filteredProcessCandidates = computed(() => {
+  const keyword = processSearch.keyword.trim().toLowerCase()
+  const candidates = recruitmentCandidates.value.filter((item) => !item.interviewProcessId && item.applicationStatus !== 'REJECTED')
+  if (!keyword) return candidates
+  return candidates.filter((item) => [item.fullName, item.mobilePhone, item.email, item.major, item.graduationSchool]
+    .some((value) => String(value || '').toLowerCase().includes(keyword)))
+})
+const processCandidatePreview = computed(() => recruitmentCandidates.value.find((item) => item.id === processForm.recruitmentCandidateId) || null)
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
 async function loadAll() {
@@ -236,8 +262,8 @@ function syncLlmForms() {
   Object.assign(interviewerLlmForm, interviewer ? { ...interviewer, apiKey: '' } : createLlmForm('INTERVIEWER'))
   Object.assign(scorerLlmForm, scorer ? { ...scorer, apiKey: '' } : createLlmForm('SCORER'))
 }
-async function syncIntervieweeByCandidate(candidateId) { const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId); processForm.intervieweeUserId = candidate?.intervieweeUserId ? String(candidate.intervieweeUserId) : '' }
-async function startProcess() { try { if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到面试者账号'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
+async function syncIntervieweeByCandidate(candidateId) { const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId); processForm.intervieweeUserId = candidate?.intervieweeUserId ? String(candidate.intervieweeUserId) : ''; processForm.jobId = candidate?.jobId || null }
+async function startProcess() { try { if (!processForm.recruitmentCandidateId) { ElMessage.warning('请先选择候选人投递记录'); return } if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到候选人账号'); return } if (!processForm.jobId) { ElMessage.warning('投递记录未绑定岗位'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
 async function selectProcess(row) { selectedProcess.value = row; aiRecords.value = (await interviewApi.listAiRecords({ processId: row.id })).data }
 async function approveAi(approved) { try { await interviewApi.approveAi(selectedProcess.value.id, { approved }); ElMessage.success('AI审批完成'); await loadAll() } catch (error) { fail(error) } }
 async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved }); ElMessage.success('视频面审批完成'); await loadAll() } catch (error) { fail(error) } }
@@ -336,10 +362,15 @@ onMounted(loadAll)
 .detail-surface { margin-top: 18px; }
 .serial-line { margin: 8px 0 14px; color: #42515b; }
 .video-link { margin-left: 12px; color: #0f6c8f; font-weight: 700; text-decoration: none; }
+.candidate-preview { margin: 10px 0 16px; padding: 16px; border-radius: 18px; background: rgba(255,255,255,0.82); }
+.candidate-preview h4 { margin: 0 0 12px; }
+.preview-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.preview-grid span { display: block; color: #6d7a83; font-size: 12px; margin-bottom: 4px; }
+.preview-grid strong { color: #102532; }
 .video-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin: 12px 0 18px; }
 .video-box { background: rgba(255,255,255,0.82); padding: 12px; border-radius: 16px; }
 .video-box span { display: block; margin-bottom: 8px; color: #6d7a83; }
 .video-box video { width: 100%; min-height: 220px; background: #111; border-radius: 12px; }
 .data-table { margin-top: 18px; }
-@media (max-width: 900px) { .form-grid, .video-grid, .llm-config-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .form-grid, .video-grid, .llm-config-grid, .preview-grid { grid-template-columns: 1fr; } }
 </style>

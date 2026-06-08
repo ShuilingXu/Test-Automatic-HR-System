@@ -145,7 +145,36 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     @Override
+    public List<CandidateVO> listMyCandidates(String intervieweeUsername) {
+        SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getUsername, intervieweeUsername)
+                .last("LIMIT 1"));
+        if (user == null) {
+            throw new BusinessException("面试者用户不存在");
+        }
+        List<RecruitmentCandidate> candidates = candidateMapper.selectList(new LambdaQueryWrapper<RecruitmentCandidate>()
+                .eq(RecruitmentCandidate::getIntervieweeUserId, user.getId())
+                .orderByDesc(RecruitmentCandidate::getId));
+        Map<Long, RecruitmentJob> jobMap = loadJobMap();
+        Map<Long, RecruitmentResumeFile> resumeMap = loadResumeMap();
+        return candidates.stream().map(item -> toCandidateVO(item, jobMap, resumeMap)).toList();
+    }
+
+    @Override
     public CandidateVO getCandidate(Long id) {
+        return toCandidateVO(requireCandidate(id), loadJobMap(), loadResumeMap());
+    }
+
+    @Override
+    @Transactional
+    public CandidateVO rejectCandidateResume(Long id) {
+        RecruitmentCandidate candidate = requireCandidate(id);
+        if (candidate.getInterviewProcessId() != null) {
+            throw new BusinessException("已发起面试流程，不能按简历面试拒绝");
+        }
+        candidate.setApplicationStatus("REJECTED");
+        candidate.setInterviewStageStatus("简历已拒绝");
+        candidateMapper.updateById(candidate);
         return toCandidateVO(requireCandidate(id), loadJobMap(), loadResumeMap());
     }
 

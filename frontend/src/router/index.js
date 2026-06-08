@@ -15,7 +15,7 @@ const routes = [
   { path: '/interview/hr', name: 'interview-hr', component: InterviewAdminView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'] } },
   { path: '/user', name: 'user-portal', component: UserPortalView, meta: { requiresAuth: true, roles: ['INTERVIEWEE'] } },
   { path: '/candidate/register', name: 'candidate-register', component: CandidateRegisterView, meta: { requiresAuth: true, roles: ['INTERVIEWEE'] } },
-  { path: '/candidate/interview', redirect: '/interview/interviewee' },
+  { path: '/candidate/interview', redirect: '/user' },
   { path: '/interview/interviewee', name: 'interview-interviewee', component: CandidateInterviewView, meta: { requiresAuth: true, roles: ['INTERVIEWEE'] } },
 ]
 
