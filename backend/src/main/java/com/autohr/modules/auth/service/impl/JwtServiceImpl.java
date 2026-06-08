@@ -19,7 +19,10 @@ public class JwtServiceImpl implements JwtService {
     private final long expiration;
 
     public JwtServiceImpl(@Value("${jwt.secret}") String secret,
-                          @Value("${jwt.expiration}") long expiration) {
+                           @Value("${jwt.expiration}") long expiration) {
+        if (secret == null || secret.length() < 32 || "AUTOHR_SYSTEM_SECRET_KEY_2026_SECURE_TOKEN_1234567890".equals(secret)) {
+            throw new IllegalStateException("jwt.secret must be configured with a non-default secret of at least 32 characters");
+        }
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expiration = expiration;
     }

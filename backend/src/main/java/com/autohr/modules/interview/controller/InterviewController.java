@@ -1,6 +1,8 @@
 package com.autohr.modules.interview.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.common.file.FileDownloadSupport;
+import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.service.AuthService;
 import com.autohr.modules.interview.dto.AiAnswerRequest;
@@ -16,10 +18,7 @@ import com.autohr.modules.interview.dto.VideoSignalVO;
 import com.autohr.modules.interview.service.InterviewService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,10 +30,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 
 @RestController
@@ -254,13 +249,7 @@ public class InterviewController {
     @GetMapping("/hr/video-recording/{processId}")
     public ResponseEntity<Resource> downloadRecording(@PathVariable Long processId) {
         var session = interviewService.getVideoSession(processId);
-        Path path = Paths.get(session.getRecordingPath()).toAbsolutePath().normalize();
-        Resource resource = new FileSystemResource(path);
-        String fileName = URLEncoder.encode(session.getRecordingFileName(), StandardCharsets.UTF_8).replace("+", "%20");
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType("video/webm"))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=UTF-8''" + fileName)
-                .body(resource);
+        return FileDownloadSupport.buildInlineResponse(session.getRecordingPath(), UploadPaths.RECORDING_DIR, session.getRecordingFileName(), "video/webm", "录制文件不可访问");
     }
 
     @PostMapping("/hr/approve-ai/{processId}")

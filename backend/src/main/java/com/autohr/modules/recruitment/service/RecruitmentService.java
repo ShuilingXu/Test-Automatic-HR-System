@@ -32,7 +32,7 @@ public interface RecruitmentService {
 
     void deleteCandidate(Long id);
 
-    ResumeFileVO uploadResume(Long candidateId, MultipartFile file);
+    ResumeFileVO uploadResume(Long candidateId, String intervieweeUsername, MultipartFile file);
 
-    RecruitmentResumeFile getResumeFile(Long id);
+    RecruitmentResumeFile getResumeFile(Long id, String username, boolean privileged);
 }

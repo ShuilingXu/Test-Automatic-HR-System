@@ -28,6 +28,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public ApiResponse<Void> handleException(Exception ex) {
-        return ApiResponse.fail(ex.getMessage());
+        return ApiResponse.fail("服务器内部错误");
     }
 }

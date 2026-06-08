@@ -2,6 +2,7 @@ package com.autohr.modules.recruitment.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.autohr.common.exception.BusinessException;
+import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.auth.entity.SysUser;
 import com.autohr.modules.auth.mapper.SysUserMapper;
 import com.autohr.modules.auth.service.AuditLogService;
@@ -32,6 +33,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Set;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -48,7 +50,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RecruitmentServiceImpl implements RecruitmentService {
 
-    private static final Path RESUME_DIR = Paths.get(System.getProperty("user.dir"), "uploads", "resumes");
+    private static final long MAX_RESUME_SIZE = 10 * 1024 * 1024;
+    private static final Set<String> ALLOWED_RESUME_EXTENSIONS = Set.of(".pdf", ".docx");
+    private static final Set<String> ALLOWED_RESUME_CONTENT_TYPES = Set.of(
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
 
     private final RecruitmentJobMapper jobMapper;
     private final RecruitmentCandidateMapper candidateMapper;
@@ -113,7 +119,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     @Transactional
     public CandidateVO apply(CandidateApplyRequest request, String intervieweeUsername) {
         requireJob(request.getJobId());
-        SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, intervieweeUsername).last("LIMIT 1"));
+        SysUser user = findUserByUsername(intervieweeUsername);
         if (user == null) {
             throw new BusinessException("面试者用户不存在");
         }
@@ -146,9 +152,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
 
     @Override
     public List<CandidateVO> listMyCandidates(String intervieweeUsername) {
-        SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getUsername, intervieweeUsername)
-                .last("LIMIT 1"));
+        SysUser user = findUserByUsername(intervieweeUsername);
         if (user == null) {
             throw new BusinessException("面试者用户不存在");
         }
@@ -195,17 +199,28 @@ public class RecruitmentServiceImpl implements RecruitmentService {
 
     @Override
     @Transactional
-    public ResumeFileVO uploadResume(Long candidateId, MultipartFile file) {
+    public ResumeFileVO uploadResume(Long candidateId, String intervieweeUsername, MultipartFile file) {
         RecruitmentCandidate candidate = requireCandidate(candidateId);
+        SysUser owner = findUserByUsername(intervieweeUsername);
+        if (owner == null || !Objects.equals(candidate.getIntervieweeUserId(), owner.getId())) {
+            throw new BusinessException("无权上传该报名记录的简历");
+        }
         if (file == null || file.isEmpty()) {
             throw new BusinessException("简历文件不能为空");
         }
+        if (file.getSize() > MAX_RESUME_SIZE) {
+            throw new BusinessException("简历文件不能超过10MB");
+        }
         try {
-            Files.createDirectories(RESUME_DIR);
-            String originalName = Objects.requireNonNullElse(file.getOriginalFilename(), "resume.bin");
-            String suffix = originalName.contains(".") ? originalName.substring(originalName.lastIndexOf('.')) : "";
+            Files.createDirectories(UploadPaths.RESUME_DIR);
+            String originalName = sanitizeOriginalFileName(file.getOriginalFilename());
+            String suffix = originalName.substring(originalName.lastIndexOf('.')).toLowerCase();
+            validateResumeFile(file, suffix);
             String storedName = UUID.randomUUID() + suffix;
-            Path target = RESUME_DIR.resolve(storedName).normalize().toAbsolutePath();
+            Path target = UploadPaths.RESUME_DIR.resolve(storedName).normalize().toAbsolutePath();
+            if (!target.startsWith(UploadPaths.RESUME_DIR)) {
+                throw new BusinessException("简历文件路径非法");
+            }
             try (InputStream inputStream = file.getInputStream()) {
                 Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
             }
@@ -220,8 +235,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             resumeFileMapper.insert(resumeFile);
             candidate.setResumeFileId(resumeFile.getId());
             candidateMapper.updateById(candidate);
-            SysUser user = candidate.getIntervieweeUserId() == null ? null : sysUserMapper.selectById(candidate.getIntervieweeUserId());
-            auditLogService.log(candidate.getIntervieweeUserId(), user == null ? candidate.getFullName() : displayName(user), user == null ? "INTERVIEWEE" : user.getRoleCode(), "RECRUITMENT", "UPLOAD_RESUME", "RECRUITMENT_RESUME", String.valueOf(resumeFile.getId()), originalName);
+            auditLogService.log(owner.getId(), displayName(owner), owner.getRoleCode(), "RECRUITMENT", "UPLOAD_RESUME", "RECRUITMENT_RESUME", String.valueOf(resumeFile.getId()), originalName);
             return toResumeFileVO(resumeFileMapper.selectById(resumeFile.getId()));
         } catch (IOException ex) {
             throw new BusinessException("简历上传失败: " + ex.getMessage());
@@ -229,12 +243,54 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     @Override
-    public RecruitmentResumeFile getResumeFile(Long id) {
+    public RecruitmentResumeFile getResumeFile(Long id, String username, boolean privileged) {
         RecruitmentResumeFile resumeFile = resumeFileMapper.selectById(id);
         if (resumeFile == null) {
             throw new BusinessException("简历文件不存在: " + id);
         }
+        if (!privileged) {
+            RecruitmentCandidate candidate = requireCandidate(resumeFile.getCandidateId());
+            SysUser user = findUserByUsername(username);
+            if (user == null || !Objects.equals(candidate.getIntervieweeUserId(), user.getId())) {
+                throw new BusinessException("无权访问该简历文件");
+            }
+        }
         return resumeFile;
+    }
+
+    private String sanitizeOriginalFileName(String originalFileName) {
+        String fileName = Paths.get(Objects.requireNonNullElse(originalFileName, "resume.pdf")).getFileName().toString().trim();
+        if (fileName.length() > 120) {
+            fileName = fileName.substring(fileName.length() - 120);
+        }
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex <= 0) {
+            throw new BusinessException("简历文件类型不支持");
+        }
+        String suffix = fileName.substring(dotIndex).toLowerCase();
+        if (!ALLOWED_RESUME_EXTENSIONS.contains(suffix)) {
+            throw new BusinessException("仅支持PDF或DOCX简历");
+        }
+        return fileName.replaceAll("[\\r\\n\\t]", "_");
+    }
+
+    private void validateResumeFile(MultipartFile file, String suffix) throws IOException {
+        String contentType = file.getContentType();
+        if (contentType != null && !ALLOWED_RESUME_CONTENT_TYPES.contains(contentType)) {
+            throw new BusinessException("简历文件Content-Type不支持");
+        }
+        byte[] header = new byte[4];
+        try (InputStream inputStream = file.getInputStream()) {
+            int read = inputStream.read(header);
+            if (read < 4) {
+                throw new BusinessException("简历文件内容无效");
+            }
+        }
+        boolean pdf = suffix.equals(".pdf") && header[0] == 0x25 && header[1] == 0x50 && header[2] == 0x44 && header[3] == 0x46;
+        boolean docx = suffix.equals(".docx") && header[0] == 0x50 && header[1] == 0x4b && header[2] == 0x03 && header[3] == 0x04;
+        if (!pdf && !docx) {
+            throw new BusinessException("简历文件内容与扩展名不匹配");
+        }
     }
 
     private RecruitmentJob requireJob(Long id) {
@@ -243,6 +299,12 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             throw new BusinessException("招聘岗位不存在: " + id);
         }
         return job;
+    }
+
+    private SysUser findUserByUsername(String username) {
+        return sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getUsername, username)
+                .last("LIMIT 1"));
     }
 
     private RecruitmentCandidate requireCandidate(Long id) {

@@ -33,7 +33,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             try {
                 String username = jwtService.extractUsername(token);
                 SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username).last("LIMIT 1"));
-                if (user != null) {
+                if (user != null && Integer.valueOf(1).equals(user.getStatus())) {
                     Integer tokenVersion = (Integer) jwtService.parseToken(token).get("tokenVersion");
                     if (tokenVersion != null && !tokenVersion.equals(user.getTokenVersion())) {
                         filterChain.doFilter(request, response);

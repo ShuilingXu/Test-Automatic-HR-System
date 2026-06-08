@@ -2,6 +2,7 @@ package com.autohr.modules.interview.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.autohr.common.exception.BusinessException;
+import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.auth.service.AuditLogService;
 import com.autohr.modules.hr.entity.Employee;
 import com.autohr.modules.hr.enums.EmploymentStatus;
@@ -55,6 +56,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -76,6 +78,9 @@ public class InterviewServiceImpl implements InterviewService {
 
     @Value("${interview.llm.debug:false}")
     private boolean llmDebug;
+
+    private static final long MAX_RECORDING_SIZE = 100 * 1024 * 1024;
+    private static final Set<String> ALLOWED_RECORDING_CONTENT_TYPES = Set.of("video/webm", "application/octet-stream");
 
     @Override
     @Transactional
@@ -404,9 +409,6 @@ public class InterviewServiceImpl implements InterviewService {
     public InterviewVO completeVideoSession(Long processId, String recordingPath) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
         session.setEndTime(LocalDateTime.now());
-        if (StrUtil.isNotBlank(recordingPath)) {
-            session.setRecordingPath(recordingPath);
-        }
         session.setSessionStatus("WAITING_APPROVAL");
         videoSessionMapper.updateById(session);
         InterviewProcess process = requireProcess(processId);
@@ -578,12 +580,15 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public VideoSignalVO uploadRecording(Long processId, String originalFileName, String contentType, MultipartFile file) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        validateRecordingFile(originalFileName, contentType, file);
         try {
-            Path dir = Paths.get(System.getProperty("user.dir"), "uploads", "interview-recordings");
-            Files.createDirectories(dir);
-            String ext = originalFileName != null && originalFileName.contains(".") ? originalFileName.substring(originalFileName.lastIndexOf('.')) : ".webm";
+            Files.createDirectories(UploadPaths.RECORDING_DIR);
+            String ext = ".webm";
             String storedName = session.getVideoSerialNo() + ext;
-            Path storedFile = dir.resolve(storedName).normalize().toAbsolutePath();
+            Path storedFile = UploadPaths.RECORDING_DIR.resolve(storedName).normalize().toAbsolutePath();
+            if (!storedFile.startsWith(UploadPaths.RECORDING_DIR)) {
+                throw new BusinessException("录制文件路径非法");
+            }
             file.transferTo(storedFile.toFile());
             session.setRecordingPath(storedFile.toString());
             session.setRecordingFileName(storedName);
@@ -593,6 +598,22 @@ public class InterviewServiceImpl implements InterviewService {
             return toVideoSignalVO(session);
         } catch (IOException ex) {
             throw new BusinessException("录制文件上传失败: " + ex.getMessage());
+        }
+    }
+
+    private void validateRecordingFile(String originalFileName, String contentType, MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("录制文件不能为空");
+        }
+        if (file.getSize() > MAX_RECORDING_SIZE) {
+            throw new BusinessException("录制文件不能超过100MB");
+        }
+        String fileName = Paths.get(StrUtil.blankToDefault(originalFileName, "recording.webm")).getFileName().toString().toLowerCase();
+        if (!fileName.endsWith(".webm")) {
+            throw new BusinessException("仅支持WebM录制文件");
+        }
+        if (StrUtil.isNotBlank(contentType) && !ALLOWED_RECORDING_CONTENT_TYPES.contains(contentType)) {
+            throw new BusinessException("录制文件Content-Type不支持");
         }
     }
 

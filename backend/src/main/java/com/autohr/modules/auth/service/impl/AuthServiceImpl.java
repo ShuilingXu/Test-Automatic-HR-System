@@ -34,7 +34,10 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public LoginResponse login(LoginRequest request) {
-        SysUser user = requireUserByUsername(request.getUsername());
+        SysUser user = findUserByUsername(request.getUsername());
+        if (user == null) {
+            throw new BusinessException("用户名或密码错误");
+        }
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new BusinessException("用户名或密码错误");
         }
@@ -160,11 +163,17 @@ public class AuthServiceImpl implements AuthService {
     }
 
     private SysUser requireUserByUsername(String username) {
-        SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username).last("LIMIT 1"));
+        SysUser user = findUserByUsername(username);
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
         return user;
+    }
+
+    private SysUser findUserByUsername(String username) {
+        return sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getUsername, username)
+                .last("LIMIT 1"));
     }
 
     private SysUser requireUser(Long id) {

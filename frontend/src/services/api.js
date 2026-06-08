@@ -130,14 +130,4 @@ export const interviewApi = {
   approveOnsite(processId, payload) { return request.post(`/interview/hr/approve-onsite/${processId}`, payload) },
   terminateProcess(processId, payload) { return request.post(`/interview/hr/terminate/${processId}`, payload) },
   submitAiAnswer(payload) { return request.post('/interview/interviewee/ai-answer', payload) },
-  getSystems() {
-    return Promise.resolve({ success: true, message: 'system entries', data: [
-      { code: 'ADMIN', name: '管理员门户', path: '/admin' },
-      { code: 'USER', name: '面试者门户', path: '/user' },
-      { code: 'LOGIN', name: '统一登录', path: '/login' },
-    ] })
-  },
-  getCandidateEntry() {
-    return Promise.resolve({ success: true, message: 'candidate entries', data: { registerPath: '/user', onlineInterviewPath: '/interview/interviewee' } })
-  },
 }

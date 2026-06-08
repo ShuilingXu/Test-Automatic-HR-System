@@ -1,6 +1,8 @@
 package com.autohr.modules.recruitment.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.common.file.FileDownloadSupport;
+import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.service.AuthService;
 import com.autohr.modules.auth.service.AuditLogService;
@@ -13,10 +15,7 @@ import com.autohr.modules.recruitment.entity.RecruitmentResumeFile;
 import com.autohr.modules.recruitment.service.RecruitmentService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -29,10 +28,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 
 @RestController
@@ -128,22 +123,19 @@ public class RecruitmentController {
     }
 
     @PostMapping("/candidates/{candidateId}/resume")
-    public ApiResponse<ResumeFileVO> uploadResume(@PathVariable Long candidateId,
-                                                  @RequestParam("file") MultipartFile file) {
-        return ApiResponse.success(recruitmentService.uploadResume(candidateId, file));
+    public ApiResponse<ResumeFileVO> uploadResume(Authentication authentication,
+                                                   @PathVariable Long candidateId,
+                                                   @RequestParam("file") MultipartFile file) {
+        return ApiResponse.success(recruitmentService.uploadResume(candidateId, authentication.getName(), file));
     }
 
     @GetMapping("/resumes/{id}")
-    public ResponseEntity<Resource> downloadResume(@PathVariable Long id) {
-        RecruitmentResumeFile resumeFile = recruitmentService.getResumeFile(id);
-        Path path = Paths.get(resumeFile.getFilePath()).toAbsolutePath().normalize();
-        Resource resource = new FileSystemResource(path);
-        String fileName = URLEncoder.encode(resumeFile.getOriginalFileName(), StandardCharsets.UTF_8).replace("+", "%20");
-        String contentType = resumeFile.getContentType() == null ? "application/octet-stream" : resumeFile.getContentType();
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename*=UTF-8''" + fileName)
-                .body(resource);
+    public ResponseEntity<Resource> downloadResume(Authentication authentication,
+                                                   @PathVariable Long id) {
+        SessionUserVO current = currentUser(authentication);
+        boolean privileged = List.of("IT_ADMIN", "HR_ADMIN", "HR_USER").contains(current.getRoleCode());
+        RecruitmentResumeFile resumeFile = recruitmentService.getResumeFile(id, authentication.getName(), privileged);
+        return FileDownloadSupport.buildAttachmentResponse(resumeFile.getFilePath(), UploadPaths.RESUME_DIR, resumeFile.getOriginalFileName(), resumeFile.getContentType(), "简历文件不可访问");
     }
 
     private SessionUserVO currentUser(Authentication authentication) {

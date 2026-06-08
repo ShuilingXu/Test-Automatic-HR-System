@@ -207,7 +207,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { authApi, hrApi, recruitmentApi } from '../services/api'
+import { authApi, hrApi, interviewApi, recruitmentApi } from '../services/api'
 
 const router = useRouter()
 const sessionUser = ref(JSON.parse(localStorage.getItem('session-user') || 'null'))
