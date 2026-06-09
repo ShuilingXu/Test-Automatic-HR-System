@@ -234,10 +234,10 @@ public class InterviewController {
 
     @PostMapping("/hr/video-recording/{processId}")
     public ApiResponse<VideoSignalVO> uploadHrRecording(@PathVariable Long processId,
-                                                        @RequestParam String originalFileName,
-                                                        @RequestParam(required = false) String contentType,
-                                                        @RequestParam("file") MultipartFile file) {
-        return ApiResponse.success(interviewService.uploadRecording(processId, originalFileName, contentType, file));
+                                                         @RequestParam String originalFileName,
+                                                         @RequestParam(required = false) String contentType,
+                                                         @RequestParam("file") MultipartFile file) {
+        return ApiResponse.success(interviewService.uploadHrRecording(processId, originalFileName, contentType, file));
     }
 
     @PostMapping("/hr/video-offer/{processId}")
@@ -294,7 +294,9 @@ public class InterviewController {
     @GetMapping("/hr/video-recording/{processId}")
     public ResponseEntity<Resource> downloadRecording(@PathVariable Long processId) {
         var session = interviewService.getVideoSession(processId);
-        return FileDownloadSupport.buildInlineResponse(session.getRecordingPath(), UploadPaths.RECORDING_DIR, session.getRecordingFileName(), "video/webm", "录制文件不可访问");
+        String path = session.getMergedRecordingPath() == null ? session.getRecordingPath() : session.getMergedRecordingPath();
+        String fileName = session.getMergedRecordingFileName() == null ? session.getRecordingFileName() : session.getMergedRecordingFileName();
+        return FileDownloadSupport.buildInlineResponse(path, UploadPaths.RECORDING_DIR, fileName, "video/webm", "录制文件不可访问");
     }
 
     @PostMapping("/hr/approve-ai/{processId}")

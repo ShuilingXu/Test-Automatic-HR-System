@@ -24,6 +24,12 @@ public class InterviewVideoSession {
     private LocalDateTime startTime;
     private LocalDateTime endTime;
     private String recordingPath;
+    private String hrRecordingPath;
+    private String hrRecordingFileName;
+    private String intervieweeRecordingPath;
+    private String intervieweeRecordingFileName;
+    private String mergedRecordingPath;
+    private String mergedRecordingFileName;
     private String hrOfferSdp;
     private String intervieweeAnswerSdp;
     private String hrIceCandidates;

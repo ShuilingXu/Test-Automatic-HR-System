@@ -33,6 +33,7 @@ import com.autohr.modules.interview.mapper.InterviewLlmConfigMapper;
 import com.autohr.modules.interview.mapper.InterviewProcessMapper;
 import com.autohr.modules.interview.mapper.InterviewVideoSessionMapper;
 import com.autohr.modules.interview.service.InterviewService;
+import com.autohr.modules.interview.service.VideoMergeService;
 import com.autohr.modules.recruitment.entity.RecruitmentCandidate;
 import com.autohr.modules.recruitment.entity.RecruitmentJob;
 import com.autohr.modules.recruitment.mapper.RecruitmentCandidateMapper;
@@ -82,6 +83,7 @@ public class InterviewServiceImpl implements InterviewService {
     private final RecruitmentJobMapper recruitmentJobMapper;
     private final EmployeeMapper employeeMapper;
     private final AuditLogService auditLogService;
+    private final VideoMergeService videoMergeService;
 
     @Value("${interview.llm.debug:false}")
     private boolean llmDebug;
@@ -566,6 +568,15 @@ public class InterviewServiceImpl implements InterviewService {
         session.setIntervieweeAnswerSdp(null);
         session.setHrIceCandidates(null);
         session.setIntervieweeIceCandidates(null);
+        session.setEndTime(null);
+        session.setRecordingPath(null);
+        session.setRecordingFileName(null);
+        session.setHrRecordingPath(null);
+        session.setHrRecordingFileName(null);
+        session.setIntervieweeRecordingPath(null);
+        session.setIntervieweeRecordingFileName(null);
+        session.setMergedRecordingPath(null);
+        session.setMergedRecordingFileName(null);
         session.setSessionStatus("OFFER_PUBLISHED");
         videoSessionMapper.updateById(session);
         auditLogService.log(session.getApproverUserId(), session.getApproverName(), "HR_ADMIN", "INTERVIEW", "PUBLISH_VIDEO_OFFER", "VIDEO_SESSION", String.valueOf(session.getId()), session.getVideoSerialNo());
@@ -582,7 +593,6 @@ public class InterviewServiceImpl implements InterviewService {
             return toVideoSignalVO(session);
         }
         session.setIntervieweeAnswerSdp(request.getAnswerSdp());
-        session.setHrIceCandidates(null);
         session.setIntervieweeIceCandidates(null);
         session.setSessionStatus("ANSWER_SUBMITTED");
         videoSessionMapper.updateById(session);
@@ -633,27 +643,38 @@ public class InterviewServiceImpl implements InterviewService {
 
     @Override
     @Transactional
-    public VideoSignalVO uploadRecording(Long processId, String originalFileName, String contentType, MultipartFile file) {
+    public VideoSignalVO uploadHrRecording(Long processId, String originalFileName, String contentType, MultipartFile file) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        VideoSignalVO vo = storeRecording(session, originalFileName, contentType, file, "hr");
+        auditLogService.log(session.getApproverUserId(), session.getApproverName(), "HR_ADMIN", "INTERVIEW", "UPLOAD_RECORDING", "VIDEO_SESSION", String.valueOf(session.getId()), session.getRecordingFileName());
+        return vo;
+    }
+
+    private VideoSignalVO storeRecording(InterviewVideoSession session, String originalFileName, String contentType, MultipartFile file, String role) {
         validateRecordingFile(originalFileName, contentType, file);
         try {
             Files.createDirectories(UploadPaths.RECORDING_DIR);
             String ext = ".webm";
-            String storedName = session.getVideoSerialNo() + ext;
+            String storedName = session.getVideoSerialNo() + "-" + role + ext;
             Path storedFile = UploadPaths.RECORDING_DIR.resolve(storedName).normalize().toAbsolutePath();
             if (!storedFile.startsWith(UploadPaths.RECORDING_DIR)) {
                 throw new BusinessException("录制文件路径非法");
             }
-            String previousRecordingPath = session.getRecordingPath();
-            String previousRecordingFileName = session.getRecordingFileName();
             file.transferTo(storedFile.toFile());
+            if (StrUtil.equals(role, "hr")) {
+                session.setHrRecordingPath(storedFile.toString());
+                session.setHrRecordingFileName(storedName);
+            } else {
+                session.setIntervieweeRecordingPath(storedFile.toString());
+                session.setIntervieweeRecordingFileName(storedName);
+            }
             session.setRecordingPath(storedFile.toString());
             session.setRecordingFileName(storedName);
+            if (videoMergeService.canMerge(session)) {
+                videoMergeService.mergeRecordings(session);
+            }
             session.setSessionStatus("RECORDED");
             videoSessionMapper.updateById(session);
-            if (!StrUtil.equals(previousRecordingFileName, storedName) || !StrUtil.equals(previousRecordingPath, storedFile.toString())) {
-                auditLogService.log(session.getApproverUserId(), session.getApproverName(), "HR_ADMIN", "INTERVIEW", "UPLOAD_RECORDING", "VIDEO_SESSION", String.valueOf(session.getId()), storedName);
-            }
             return toVideoSignalVO(session);
         } catch (IOException ex) {
             throw new BusinessException("录制文件上传失败: " + ex.getMessage());
@@ -680,7 +701,8 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public VideoSignalVO uploadIntervieweeRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file) {
         requireIntervieweeProcess(processId, intervieweeUserId);
-        VideoSignalVO vo = uploadRecording(processId, originalFileName, contentType, file);
+        InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        VideoSignalVO vo = storeRecording(session, originalFileName, contentType, file, "interviewee");
         auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "UPLOAD_RECORDING", "VIDEO_SESSION", String.valueOf(vo.getSessionId()), vo.getRecordingFileName());
         return vo;
     }
@@ -1255,8 +1277,8 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setHrJoinTime(entity.getHrJoinTime());
         vo.setStartTime(entity.getStartTime());
         vo.setEndTime(entity.getEndTime());
-        vo.setRecordingPath(entity.getRecordingPath());
-        vo.setRecordingFileName(entity.getRecordingFileName());
+        vo.setRecordingPath(StrUtil.blankToDefault(entity.getMergedRecordingPath(), entity.getRecordingPath()));
+        vo.setRecordingFileName(StrUtil.blankToDefault(entity.getMergedRecordingFileName(), entity.getRecordingFileName()));
         vo.setSessionStatus(entity.getSessionStatus());
         return vo;
     }
@@ -1272,8 +1294,8 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setVideoJoinLink(session.getVideoJoinLink());
         vo.setIntervieweeJoinTime(session.getIntervieweeJoinTime());
         vo.setHrJoinTime(session.getHrJoinTime());
-        vo.setRecordingPath(session.getRecordingPath());
-        vo.setRecordingFileName(session.getRecordingFileName());
+        vo.setRecordingPath(StrUtil.blankToDefault(session.getMergedRecordingPath(), session.getRecordingPath()));
+        vo.setRecordingFileName(StrUtil.blankToDefault(session.getMergedRecordingFileName(), session.getRecordingFileName()));
         vo.setSessionStatus(session.getSessionStatus());
     }
 
@@ -1287,8 +1309,8 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setAnswerSdp(entity.getIntervieweeAnswerSdp());
         vo.setHrIceCandidates(entity.getHrIceCandidates());
         vo.setIntervieweeIceCandidates(entity.getIntervieweeIceCandidates());
-        vo.setRecordingPath(entity.getRecordingPath());
-        vo.setRecordingFileName(entity.getRecordingFileName());
+        vo.setRecordingPath(StrUtil.blankToDefault(entity.getMergedRecordingPath(), entity.getRecordingPath()));
+        vo.setRecordingFileName(StrUtil.blankToDefault(entity.getMergedRecordingFileName(), entity.getRecordingFileName()));
         vo.setSessionStatus(entity.getSessionStatus());
         return vo;
     }
@@ -1321,7 +1343,11 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     private String extractSdpIceUfrag(String sessionDescription) {
-        Matcher matcher = SDP_ICE_UFRAG_PATTERN.matcher(sessionDescription);
+        String normalized = StrUtil.blankToDefault(sessionDescription, "")
+                .replace("\\r\\n", "\n")
+                .replace("\\n", "\n")
+                .replace("\r\n", "\n");
+        Matcher matcher = SDP_ICE_UFRAG_PATTERN.matcher(normalized);
         return matcher.find() ? matcher.group(1).trim() : null;
     }
 

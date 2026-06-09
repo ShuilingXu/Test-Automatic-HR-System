@@ -4,13 +4,13 @@
       <p class="page-eyebrow">Auto HR Console</p>
       <h1>管理后台</h1>
       <nav>
-        <button v-for="item in tabs" :key="item.key" :class="{ active: activeTab === item.key }" @click="activeTab = item.key">
+        <RouterLink v-for="item in tabs" :key="item.key" class="side-link" :class="{ active: activeTab === item.key }" :to="item.to">
           {{ item.label }}
-        </button>
+        </RouterLink>
       </nav>
       <el-button class="side-link logout-btn" @click="logout">退出登录</el-button>
-      <RouterLink class="side-link" to="/interview/hr">线上面试</RouterLink>
-      <RouterLink class="side-link" to="/interview/hr">面试系统管理</RouterLink>
+      <RouterLink class="side-link" to="/interview/hr/processes">线上面试</RouterLink>
+      <RouterLink class="side-link" to="/interview/hr/knowledge-bases">面试系统管理</RouterLink>
     </aside>
 
     <main class="console-main">
@@ -71,7 +71,7 @@
           </div>
           <el-button @click="loadUsers">刷新</el-button>
         </div>
-        <el-table :data="users" stripe class="data-table" @row-click="editUser">
+        <el-table :data="users" stripe class="data-table" @row-click="openUser">
           <el-table-column prop="username" label="用户名" />
           <el-table-column prop="displayName" label="姓名" />
           <el-table-column prop="roleCode" label="角色" />
@@ -122,7 +122,7 @@
             <el-form-item label="关键词"><el-input v-model="departmentFilter.keyword" placeholder="部门名称 / 编码 / 简介" /></el-form-item>
             <el-form-item label="操作"><div class="filter-actions"><el-button type="primary" @click="loadDepartments">查询</el-button><el-button @click="resetDepartmentFilter">重置</el-button></div></el-form-item>
           </el-form>
-          <el-table :data="departments" stripe class="data-table" @row-click="editDepartment">
+          <el-table :data="departments" stripe class="data-table" @row-click="openDepartment">
             <el-table-column prop="departmentName" label="部门名称" min-width="140" />
             <el-table-column prop="departmentCode" label="部门编码" min-width="120" />
             <el-table-column prop="parentDepartmentName" label="上级部门" min-width="120" />
@@ -158,7 +158,7 @@
             <el-form-item label="关键词"><el-input v-model="employeeFilter.keyword" placeholder="姓名 / 工号 / 手机 / 岗位" /></el-form-item>
             <el-form-item label="操作"><div class="filter-actions"><el-button type="primary" @click="loadEmployees">查询</el-button><el-button @click="resetEmployeeFilter">重置</el-button></div></el-form-item>
           </el-form>
-          <el-table :data="employees" stripe class="data-table" @row-click="editEmployee"><el-table-column prop="employeeCode" label="工号" /><el-table-column prop="fullName" label="姓名" /><el-table-column prop="departmentName" label="部门" /><el-table-column prop="positionName" label="岗位" /><el-table-column prop="mobilePhone" label="电话" /><el-table-column prop="bankName" label="开户银行" /><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteEmployee(scope.row.id)">删除</el-button></template></el-table-column></el-table>
+          <el-table :data="employees" stripe class="data-table" @row-click="openEmployee"><el-table-column prop="employeeCode" label="工号" /><el-table-column prop="fullName" label="姓名" /><el-table-column prop="departmentName" label="部门" /><el-table-column prop="positionName" label="岗位" /><el-table-column prop="mobilePhone" label="电话" /><el-table-column prop="bankName" label="开户银行" /><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteEmployee(scope.row.id)">删除</el-button></template></el-table-column></el-table>
         </template>
       </section>
 
@@ -166,7 +166,7 @@
         <div class="topline"><div><p class="page-eyebrow">Integrations</p><h2>系统挂接</h2></div><el-button @click="loadBindings">刷新</el-button></div>
         <el-form :model="bindingForm" label-position="top" class="form-grid"><el-form-item label="模块"><el-select v-model="bindingForm.moduleCode"><el-option label="招聘" value="RECRUITMENT" /><el-option label="绩效" value="PERFORMANCE" /><el-option label="面试" value="INTERVIEW" /></el-select></el-form-item><el-form-item label="业务类型"><el-input v-model="bindingForm.businessType" /></el-form-item><el-form-item label="员工"><el-select v-model="bindingForm.employeeId" clearable><el-option v-for="item in employees" :key="item.id" :label="item.fullName" :value="item.id" /></el-select></el-form-item><el-form-item label="部门"><el-select v-model="bindingForm.departmentId" clearable><el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" /></el-select></el-form-item><el-form-item label="外部引用"><el-input v-model="bindingForm.externalRef" /></el-form-item><el-form-item label="状态"><el-input v-model="bindingForm.bindingStatus" /></el-form-item></el-form>
         <el-button type="primary" @click="saveBinding">保存挂接</el-button>
-        <el-table :data="bindings" stripe class="data-table"><el-table-column prop="moduleCode" label="模块" /><el-table-column prop="businessType" label="业务类型" /><el-table-column prop="employeeName" label="员工" /><el-table-column prop="departmentName" label="部门" /></el-table>
+        <el-table :data="bindings" stripe class="data-table" @row-click="openBinding"><el-table-column prop="moduleCode" label="模块" /><el-table-column prop="businessType" label="业务类型" /><el-table-column prop="employeeName" label="员工" /><el-table-column prop="departmentName" label="部门" /></el-table>
       </section>
 
       <section v-if="activeTab === 'recruitment'" class="page-card">
@@ -184,7 +184,7 @@
             <el-form-item label="关键词"><el-input v-model="jobFilter.keyword" placeholder="岗位 / 编码 / 地点 / 薪资" /></el-form-item>
             <el-form-item label="操作"><div class="filter-actions"><el-button type="primary" @click="loadJobs">查询</el-button><el-button @click="resetJobFilter">重置</el-button></div></el-form-item>
           </el-form>
-          <el-table :data="jobs" stripe class="data-table" @row-click="editJob"><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="departmentName" label="部门" min-width="120" /><el-table-column prop="headcount" label="人数" width="80" /><el-table-column prop="status" label="状态" width="90"><template #default="scope">{{ scope.row.status === 1 ? '开放' : '关闭' }}</template></el-table-column><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteJob(scope.row.id)">删除</el-button></template></el-table-column></el-table>
+          <el-table :data="jobs" stripe class="data-table" @row-click="openJob"><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="departmentName" label="部门" min-width="120" /><el-table-column prop="headcount" label="人数" width="80" /><el-table-column prop="status" label="状态" width="90"><template #default="scope">{{ scope.row.status === 1 ? '开放' : '关闭' }}</template></el-table-column><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteJob(scope.row.id)">删除</el-button></template></el-table-column></el-table>
         </template>
         <template v-if="recruitmentMode === 'candidates'">
           <el-form :model="candidateFilter" label-position="top" class="filter-grid">
@@ -194,7 +194,7 @@
             <el-form-item label="关键词"><el-input v-model="candidateFilter.keyword" placeholder="姓名 / 手机 / 专业 / 学校" /></el-form-item>
             <el-form-item label="操作"><div class="filter-actions"><el-button type="primary" @click="loadCandidates">查询</el-button><el-button @click="resetCandidateFilter">重置</el-button></div></el-form-item>
           </el-form>
-          <el-table :data="candidates" stripe class="data-table" @row-click="selectCandidate"><el-table-column prop="fullName" label="报名者姓名" min-width="120" /><el-table-column prop="mobilePhone" label="联系电话" min-width="130" /><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="interviewStageStatus" label="面试状态" min-width="120" /><el-table-column prop="interviewProcessId" label="流程流水号" min-width="120" /><el-table-column label="简历" min-width="150"><template #default="scope"><a v-if="scope.row.resumeFileId" class="resume-link" :href="resumeUrl(scope.row.resumeFileId)" target="_blank" @click.stop>{{ scope.row.resumeFileName || '查看简历' }}</a><span v-else>未上传</span></template></el-table-column><el-table-column label="操作" width="280"><template #default="scope"><el-button text @click.stop="startCandidateInterview(scope.row)">发起面试</el-button><el-button text type="danger" @click.stop="rejectCandidateResume(scope.row.id)">简历拒绝</el-button><el-button text type="danger" @click.stop="deleteCandidate(scope.row.id)">删除候选人</el-button></template></el-table-column><el-table-column prop="applicationStatus" label="状态" width="110" /></el-table>
+          <el-table :data="candidates" stripe class="data-table" @row-click="openCandidate"><el-table-column prop="fullName" label="报名者姓名" min-width="120" /><el-table-column prop="mobilePhone" label="联系电话" min-width="130" /><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="interviewStageStatus" label="面试状态" min-width="120" /><el-table-column prop="interviewProcessId" label="流程流水号" min-width="120" /><el-table-column label="简历" min-width="150"><template #default="scope"><a v-if="scope.row.resumeFileId" class="resume-link" :href="resumeUrl(scope.row.resumeFileId)" target="_blank" @click.stop>{{ scope.row.resumeFileName || '查看简历' }}</a><span v-else>未上传</span></template></el-table-column><el-table-column label="操作" width="280"><template #default="scope"><el-button text @click.stop="startCandidateInterview(scope.row)">发起面试</el-button><el-button text type="danger" @click.stop="rejectCandidateResume(scope.row.id)">简历拒绝</el-button><el-button text type="danger" @click.stop="deleteCandidate(scope.row.id)">删除候选人</el-button></template></el-table-column><el-table-column prop="applicationStatus" label="状态" width="110" /></el-table>
           <div v-if="selectedCandidate" class="candidate-detail"><h3>候选人信息</h3><div class="detail-grid"><div><span>姓名</span><strong>{{ selectedCandidate.fullName }}</strong></div><div><span>联系电话</span><strong>{{ selectedCandidate.mobilePhone }}</strong></div><div><span>应聘岗位</span><strong>{{ selectedCandidate.jobTitle }}</strong></div><div><span>面试状态</span><strong>{{ selectedCandidate.interviewStageStatus || '简历待查' }}</strong></div><div><span>流程流水号</span><strong>{{ selectedCandidate.interviewProcessId || '-' }}</strong></div><div><span>面试者用户ID</span><strong>{{ selectedCandidate.intervieweeUserId || '-' }}</strong></div><div><span>专业</span><strong>{{ selectedCandidate.major }}</strong></div><div><span>邮箱</span><strong>{{ selectedCandidate.email || '-' }}</strong></div><div><span>身份证号</span><strong>{{ selectedCandidate.idCardNo || '-' }}</strong></div><div><span>学历</span><strong>{{ selectedCandidate.educationLevel || '-' }}</strong></div><div><span>毕业院校</span><strong>{{ selectedCandidate.graduationSchool || '-' }}</strong></div><div><span>工作年限</span><strong>{{ selectedCandidate.yearsOfExperience ?? '-' }}</strong></div><div><span>期望薪资</span><strong>{{ selectedCandidate.expectedSalary || '-' }}</strong></div></div><div class="intro-box"><span>个人简介</span><p>{{ selectedCandidate.selfIntroduction || '未填写' }}</p></div><a v-if="selectedCandidate.resumeFileId" class="resume-link" :href="resumeUrl(selectedCandidate.resumeFileId)" target="_blank">打开 PDF / 简历文件</a></div>
         </template>
       </section>
@@ -203,34 +203,35 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi, hrApi, interviewApi, recruitmentApi } from '../services/api'
 
 const router = useRouter()
+const route = useRoute()
 const sessionUser = ref(JSON.parse(localStorage.getItem('session-user') || 'null'))
 const isItAdmin = computed(() => sessionUser.value?.roleCode === 'IT_ADMIN')
 const isHrAdmin = computed(() => sessionUser.value?.roleCode === 'HR_ADMIN')
 const tabs = computed(() => {
   const base = [
-    { key: 'dashboard', label: '总览' },
-    { key: 'departments', label: '部门' },
-    { key: 'employees', label: '员工' },
-    { key: 'bindings', label: '挂接' },
-    { key: 'recruitment', label: '招聘' },
+    { key: 'dashboard', label: '总览', to: '/admin/dashboard' },
+    { key: 'departments', label: '部门', to: '/admin/departments' },
+    { key: 'employees', label: '员工', to: '/admin/employees' },
+    { key: 'bindings', label: '挂接', to: '/admin/bindings' },
+    { key: 'recruitment', label: '招聘', to: '/admin/recruitment/jobs' },
   ]
   if (isItAdmin.value || isHrAdmin.value) {
-    base.unshift({ key: 'audit', label: '审计日志' })
-    base.unshift({ key: 'users', label: '用户管理中心' })
+    base.unshift({ key: 'audit', label: '审计日志', to: '/admin/audit' })
+    base.unshift({ key: 'users', label: '用户管理中心', to: '/admin/users' })
   }
   return base
 })
 
-const activeTab = ref('dashboard')
+const activeTab = computed(() => route.meta.consoleTab || 'dashboard')
 const departmentMode = ref('create')
 const employeeMode = ref('create')
-const recruitmentMode = ref('jobCreate')
+const recruitmentMode = ref(route.meta.recruitmentMode || 'jobCreate')
 const dashboard = reactive({ departmentCount: 0, employeeCount: 0, activeEmployeeCount: 0, pendingOnboardingCount: 0, recruitmentBindingCount: 0, performanceBindingCount: 0 })
 const departments = ref([])
 const employees = ref([])
@@ -332,7 +333,7 @@ function localizeDetail(value) {
   if (!value) return '-'
   return Object.entries({ ...roleLabels, ...actionLabels, ...targetLabels, ...detailLabels }).reduce((text, [key, label]) => String(text).replaceAll(key, label), value)
 }
-async function loadSession() { try { const response = await authApi.getSession(); sessionUser.value = response.data; localStorage.setItem('session-user', JSON.stringify(response.data)); if (!(isItAdmin.value || isHrAdmin.value) && activeTab.value === 'users') { activeTab.value = 'dashboard' } } catch (error) { fail(error); router.push('/login') } }
+async function loadSession() { try { const response = await authApi.getSession(); sessionUser.value = response.data; localStorage.setItem('session-user', JSON.stringify(response.data)) } catch (error) { fail(error); router.push('/login') } }
 async function loadDashboard() { try { Object.assign(dashboard, (await hrApi.getDashboard()).data) } catch (error) { fail(error) } }
 async function loadDepartments() { try { departments.value = (await hrApi.listDepartments(cleanParams(departmentFilter))).data } catch (error) { fail(error) } }
 async function loadEmployees() { try { employees.value = (await hrApi.listEmployees(cleanParams(employeeFilter))).data } catch (error) { fail(error) } }
@@ -342,7 +343,7 @@ async function loadCandidates() { try { candidates.value = (await recruitmentApi
 async function loadRecruitment() { await Promise.all([loadJobs(), loadCandidates()]) }
 async function loadUsers() { if (!(isItAdmin.value || isHrAdmin.value)) return; try { users.value = (await authApi.listUsers()).data } catch (error) { fail(error) } }
 async function loadAuditLogs() { if (!(isItAdmin.value || isHrAdmin.value)) return; try { const params = cleanParams({ ...auditFilter, actionCode: resolveActionCode(auditFilter.actionCode) }); auditLogs.value = (await authApi.listAuditLogs(params)).data } catch (error) { fail(error) } }
-async function loadAll() { await Promise.all([loadSession(), loadDashboard(), loadDepartments(), loadEmployees(), loadBindings(), loadRecruitment()]); if (isItAdmin.value || isHrAdmin.value) { await Promise.all([loadUsers(), loadAuditLogs()]) } }
+async function loadAll() { await Promise.all([loadSession(), loadDashboard(), loadDepartments(), loadEmployees(), loadBindings(), loadRecruitment()]); if (isItAdmin.value || isHrAdmin.value) { await Promise.all([loadUsers(), loadAuditLogs()]) } syncRouteState() }
 async function saveDepartment() { try { await hrApi.saveDepartment({ ...departmentForm }); ElMessage.success('部门已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveEmployee() { try { await hrApi.saveEmployee({ ...employeeForm }); ElMessage.success('员工已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveBinding() { try { await hrApi.saveBinding({ ...bindingForm }); ElMessage.success('挂接已保存'); await loadAll() } catch (error) { fail(error) } }
@@ -365,6 +366,12 @@ function resetEmployeeForm() { Object.assign(employeeForm, { id: null, employeeC
 function showCreateEmployee() { resetEmployeeForm(); employeeMode.value = 'create' }
 function editEmployee(row) { Object.assign(employeeForm, row); employeeMode.value = 'edit' }
 function selectCandidate(row) { selectedCandidate.value = row }
+function openUser(row) { router.push(`/admin/users/${row.id}`) }
+function openDepartment(row) { router.push(`/admin/departments/${row.id}`) }
+function openEmployee(row) { router.push(`/admin/employees/${row.id}`) }
+function openBinding(row) { Object.assign(bindingForm, row); router.push(`/admin/bindings/${row.id}`) }
+function openJob(row) { router.push(`/admin/recruitment/jobs/${row.id}`) }
+function openCandidate(row) { router.push(`/admin/recruitment/candidates/${row.id}`) }
 function resumeUrl(id) { return recruitmentApi.getResumeUrl(id) }
 async function startCandidateInterview(candidate) {
   try {
@@ -410,6 +417,34 @@ function resolveActionCode(value) {
 }
 
 onMounted(loadAll)
+watch(() => route.fullPath, () => {
+  syncRouteState()
+}, { immediate: true })
+
+function syncRouteState() {
+  recruitmentMode.value = route.meta.recruitmentMode || recruitmentMode.value
+  const id = Number(route.params.id)
+  if (!id) return
+  if (activeTab.value === 'departments') {
+    const row = departments.value.find((item) => item.id === id)
+    if (row) editDepartment(row)
+  } else if (activeTab.value === 'employees') {
+    const row = employees.value.find((item) => item.id === id)
+    if (row) editEmployee(row)
+  } else if (activeTab.value === 'users') {
+    const row = users.value.find((item) => item.id === id)
+    if (row) editUser(row)
+  } else if (route.name === 'admin-recruitment-job-detail') {
+    const row = jobs.value.find((item) => item.id === id)
+    if (row) editJob(row)
+  } else if (route.name === 'admin-recruitment-candidate-detail') {
+    const row = candidates.value.find((item) => item.id === id)
+    if (row) selectCandidate(row)
+  } else if (activeTab.value === 'bindings') {
+    const row = bindings.value.find((item) => item.id === id)
+    if (row) Object.assign(bindingForm, row)
+  }
+}
 </script>
 
 <style scoped>

@@ -49,6 +49,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
                 execute(statement, sql);
             }
             migrateInterviewProcessColumns(connection, statement);
+            migrateInterviewVideoSessionColumns(connection, statement);
         }
         log.info("Database migration completed for {}", activeDatabase.type());
     }
@@ -106,6 +107,15 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "interview_process", "ai_max_question_rounds", "INTEGER NOT NULL DEFAULT 10");
         addColumnIfMissing(connection, statement, "interview_process", "anti_cheat_switch_limit", "INTEGER NOT NULL DEFAULT 5");
         addColumnIfMissing(connection, statement, "interview_process", "anti_cheat_switch_count", "INTEGER NOT NULL DEFAULT 0");
+    }
+
+    private void migrateInterviewVideoSessionColumns(Connection connection, Statement statement) throws SQLException {
+        addColumnIfMissing(connection, statement, "interview_video_session", "hr_recording_path", "VARCHAR(500)");
+        addColumnIfMissing(connection, statement, "interview_video_session", "hr_recording_file_name", "VARCHAR(255)");
+        addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_recording_path", "VARCHAR(500)");
+        addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_recording_file_name", "VARCHAR(255)");
+        addColumnIfMissing(connection, statement, "interview_video_session", "merged_recording_path", "VARCHAR(500)");
+        addColumnIfMissing(connection, statement, "interview_video_session", "merged_recording_file_name", "VARCHAR(255)");
     }
 
     private void addColumnIfMissing(Connection connection, Statement statement, String table, String column, String definition) throws SQLException {

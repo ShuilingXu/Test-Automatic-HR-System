@@ -43,6 +43,8 @@ interview:
     turn-urls: ${INTERVIEW_TURN_URLS:}
     turn-username: ${INTERVIEW_TURN_USERNAME:}
     turn-credential: ${INTERVIEW_TURN_CREDENTIAL:}
+  video:
+    ffmpeg-path: ${INTERVIEW_VIDEO_FFMPEG_PATH:${FFMPEG_PATH:ffmpeg}}
 
 app:
   database:

@@ -143,7 +143,7 @@
           <p class="serial-line">切屏次数：{{ selectedProcess.antiCheatSwitchCount || 0 }} / {{ selectedProcess.antiCheatSwitchLimit || 5 }}</p>
           <div v-if="selectedProcess.videoJoinLink || selectedProcess.videoSerialNo" class="serial-line">
             <span v-if="selectedProcess.videoSerialNo">视频流水号：{{ selectedProcess.videoSerialNo }}</span>
-            <a v-if="selectedProcess.videoJoinLink" :href="selectedProcess.videoJoinLink" target="_blank" class="video-link">打开面试链接</a>
+            <el-button v-if="selectedProcess.videoJoinLink" text class="video-link" @click="copyVideoJoinLink">复制候选人视频链接</el-button>
             <a v-if="selectedProcess.recordingPath || selectedProcess.recordingFileName" :href="interviewApi.getRecordingUrl(selectedProcess.id)" target="_blank" class="video-link">查看录制文件</a>
           </div>
           <div class="video-grid">
@@ -277,6 +277,17 @@ async function approveAi(approved) { try { await interviewApi.approveAi(selected
 async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved }); ElMessage.success('视频面审批完成'); await loadAll() } catch (error) { fail(error) } }
 async function approveOnsite(approved) { try { await interviewApi.approveOnsite(selectedProcess.value.id, { approved }); ElMessage.success('线下面审批完成'); await loadAll() } catch (error) { fail(error) } }
 async function terminateProcess() { try { await interviewApi.terminateProcess(selectedProcess.value.id, { approved: 0 }); ElMessage.success('流程已终止'); await loadAll() } catch (error) { fail(error) } }
+
+async function copyVideoJoinLink() {
+  if (!selectedProcess.value?.videoJoinLink) return
+  const url = new URL(selectedProcess.value.videoJoinLink, window.location.origin).toString()
+  try {
+    await navigator.clipboard.writeText(url)
+    ElMessage.success('候选人视频链接已复制')
+  } catch {
+    window.prompt('复制候选人视频链接', url)
+  }
+}
 
 async function startHrVideoCall() {
   if (!selectedProcess.value) return
