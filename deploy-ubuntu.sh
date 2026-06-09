@@ -63,7 +63,7 @@ set_env_value() {
 
 get_env_value() {
   local key="$1"
-  grep -m 1 "^${key}=" "$ENV_FILE" | cut -d= -f2-
+  grep -m 1 "^${key}=" "$ENV_FILE" | cut -d= -f2- || true
 }
 
 prepare_env() {
@@ -109,8 +109,9 @@ prepare_env() {
 }
 
 configure_coturn() {
+  local turn_service="coturn"
+
   echo "Configuring coturn on ${TURN_HOST}:3478 ..."
-  sudo install -m 0755 -d /var/log/turnserver
   sudo tee /etc/turnserver.conf >/dev/null <<EOF
 listening-port=3478
 fingerprint
@@ -122,8 +123,7 @@ no-multicast-peers
 no-cli
 min-port=${TURN_MIN_PORT}
 max-port=${TURN_MAX_PORT}
-log-file=/var/log/turnserver/turnserver.log
-simple-log
+syslog
 EOF
 
   if [ -f /etc/default/coturn ]; then
@@ -134,8 +134,12 @@ EOF
     fi
   fi
 
-  sudo systemctl enable coturn
-  sudo systemctl restart coturn
+  if ! systemctl list-unit-files coturn.service >/dev/null 2>&1 && systemctl list-unit-files turnserver.service >/dev/null 2>&1; then
+    turn_service="turnserver"
+  fi
+
+  sudo systemctl enable "$turn_service"
+  sudo systemctl restart "$turn_service"
 }
 
 stop_existing_processes() {
