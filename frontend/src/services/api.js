@@ -83,6 +83,7 @@ export const authApi = {
 }
 
 export const interviewApi = {
+  getRuntimeConfig() { return request.get('/interview/runtime-config') },
   getIceServers() { return request.get('/interview/ice-servers') },
   saveKnowledgeBase(payload) { return request.post('/interview/hr/knowledge-bases', payload) },
   listKnowledgeBases(params) { return request.get('/interview/hr/knowledge-bases', { params }) },

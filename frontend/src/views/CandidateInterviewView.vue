@@ -70,6 +70,7 @@ const aiRecords = ref([])
 const processSummary = ref(null)
 const currentQuestion = ref(null)
 const refreshState = reactive({ loading: false, retryCount: 0, lastError: '' })
+const runtimeConfig = reactive({ disableDevtoolsShortcuts: true })
 const antiCheat = reactive({ fullscreen: false, switchCount: 0, hasEnteredFullscreen: false, aiEndNotified: false })
 const localVideo = ref(null)
 const remoteVideo = ref(null)
@@ -217,6 +218,24 @@ function handleWindowBlur() {
   }
 }
 
+function handleRestrictedShortcut(event) {
+  if (!runtimeConfig.disableDevtoolsShortcuts) return
+  const key = event.key?.toLowerCase()
+  const blocked = event.key === 'F12'
+    || (event.ctrlKey && event.shiftKey && ['i', 'j', 'c'].includes(key))
+    || (event.metaKey && event.altKey && ['i', 'j', 'c'].includes(key))
+    || (event.ctrlKey && key === 'u')
+  if (!blocked) return
+  event.preventDefault()
+  event.stopPropagation()
+  ElMessage.warning('面试期间已禁用开发者工具快捷键')
+}
+
+function handleContextMenu(event) {
+  if (!runtimeConfig.disableDevtoolsShortcuts) return
+  event.preventDefault()
+}
+
 function shouldReportSwitch() {
   return antiCheat.hasEnteredFullscreen && processSummary.value?.currentStage === 'AI' && processSummary.value?.stageStatus === 'IN_PROGRESS' && processSummary.value?.overallStatus === 'IN_PROGRESS'
 }
@@ -334,8 +353,19 @@ async function loadIceServers() {
   }
 }
 
+async function loadRuntimeConfig() {
+  try {
+    const response = await interviewApi.getRuntimeConfig()
+    runtimeConfig.disableDevtoolsShortcuts = response.data?.disableDevtoolsShortcuts !== false
+  } catch {
+    runtimeConfig.disableDevtoolsShortcuts = true
+  }
+}
+
 onBeforeUnmount(() => {
   clearAiRefresh()
+  document.removeEventListener('keydown', handleRestrictedShortcut, true)
+  document.removeEventListener('contextmenu', handleContextMenu, true)
   document.removeEventListener('fullscreenchange', handleFullscreenChange)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   window.removeEventListener('blur', handleWindowBlur)
@@ -343,6 +373,9 @@ onBeforeUnmount(() => {
 })
 
 onMounted(async () => {
+  await loadRuntimeConfig()
+  document.addEventListener('keydown', handleRestrictedShortcut, true)
+  document.addEventListener('contextmenu', handleContextMenu, true)
   document.addEventListener('fullscreenchange', handleFullscreenChange)
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('blur', handleWindowBlur)

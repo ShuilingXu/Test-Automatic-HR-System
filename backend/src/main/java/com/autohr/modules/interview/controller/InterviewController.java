@@ -34,6 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/interview")
@@ -54,6 +55,14 @@ public class InterviewController {
 
     @Value("${interview.webrtc.turn-credential:}")
     private String turnCredential;
+
+    @Value("${interview.security.disable-devtools-shortcuts:true}")
+    private boolean disableDevtoolsShortcuts;
+
+    @GetMapping("/runtime-config")
+    public ApiResponse<Map<String, Boolean>> getRuntimeConfig() {
+        return ApiResponse.success(Map.of("disableDevtoolsShortcuts", disableDevtoolsShortcuts));
+    }
 
     @GetMapping("/ice-servers")
     public ApiResponse<List<IceServerVO>> getIceServers() {
