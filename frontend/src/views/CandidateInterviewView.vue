@@ -81,6 +81,7 @@ const processSummary = ref(null)
 const currentQuestion = ref(null)
 const refreshState = reactive({ loading: false, retryCount: 0, lastError: '' })
 const aiSubmitState = reactive({ submitting: false, message: '' })
+const aiPendingRefresh = reactive({ active: false, attempts: 0, questionId: null })
 const runtimeConfig = reactive({ disableDevtoolsShortcuts: true })
 const antiCheat = reactive({ fullscreen: false, switchCount: 0, hasEnteredFullscreen: false, aiEndNotified: false })
 const localVideo = ref(null)
@@ -97,6 +98,7 @@ let pendingHrIce = []
 
 const aiStatusText = computed(() => {
   if (aiSubmitState.submitting) return aiSubmitState.message || 'AI正在处理你的回答'
+  if (aiPendingRefresh.active) return 'AI仍在后台处理中'
   if (processSummary.value?.currentStage !== 'AI') return ''
   if (processSummary.value?.stageStatus === 'WAITING_APPROVAL') return 'AI面试已完成，等待HR审批'
   if (processSummary.value?.stageStatus === 'REJECTED' || processSummary.value?.overallStatus === 'REJECTED') return 'AI面试已结束'
@@ -107,6 +109,7 @@ const aiStatusText = computed(() => {
 
 const aiStatusHint = computed(() => {
   if (aiSubmitState.submitting) return '评分、评价和下一题生成可能需要几十秒'
+  if (aiPendingRefresh.active) return '请求已超时但不代表失败，系统会自动刷新最新面试状态'
   if (processSummary.value?.stageStatus === 'WAITING_APPROVAL') return '请保持关注流程状态，HR审批后会进入下一阶段'
   if (!currentQuestion.value && processSummary.value?.currentStage === 'AI') return '系统会自动刷新题目，请不要重复提交'
   return '提交后按钮会锁定，避免重复提交'
@@ -171,6 +174,10 @@ function clearAiRefresh() {
   aiRefreshTimer = null
 }
 
+function isTimeoutError(error) {
+  return error?.code === 'ECONNABORTED' || /timeout|exceeded/i.test(error?.message || '')
+}
+
 function nextRefreshDelay() {
   return Math.min(3000 + refreshState.retryCount * 1000, 10000)
 }
@@ -195,20 +202,71 @@ async function submitAiAnswer() {
     }
     aiSubmitState.submitting = true
     aiSubmitState.message = 'AI正在评分并生成下一步'
+    aiPendingRefresh.questionId = currentQuestion.value.id
     clearAiRefresh()
     await interviewApi.submitAiAnswer({ processId: sessionForm.processId, answerContent: aiAnswer.answerContent })
     aiSubmitState.message = '正在同步最新面试状态'
+    aiPendingRefresh.active = false
+    aiPendingRefresh.attempts = 0
+    aiPendingRefresh.questionId = null
     aiAnswer.answerContent = ''
     ElMessage.success('AI 回答已提交')
     await loadProcessRecords()
   } catch (error) {
+    if (isTimeoutError(error)) {
+      aiSubmitState.message = 'AI仍在后台处理，正在自动刷新状态'
+      aiPendingRefresh.active = true
+      aiPendingRefresh.attempts = 0
+      ElMessage.info('AI处理时间较长，系统将自动刷新状态，请不要重复提交')
+      schedulePendingAiRefresh()
+      return
+    }
     fail(error)
     scheduleAiRefresh(nextRefreshDelay())
   }
   finally {
+    if (!aiPendingRefresh.active) {
+      aiSubmitState.submitting = false
+      aiSubmitState.message = ''
+    }
+  }
+}
+
+function schedulePendingAiRefresh() {
+  clearAiRefresh()
+  aiRefreshTimer = setTimeout(refreshPendingAiState, Math.min(3000 + aiPendingRefresh.attempts * 1000, 10000))
+}
+
+async function refreshPendingAiState() {
+  aiPendingRefresh.attempts += 1
+  aiSubmitState.message = `AI仍在后台处理，正在第 ${aiPendingRefresh.attempts} 次同步状态`
+  try {
+    await loadProcessRecords({ silent: true })
+    if (!isPendingAiResolved()) {
+      schedulePendingAiRefresh()
+      return
+    }
+    aiPendingRefresh.active = false
+    aiPendingRefresh.attempts = 0
+    aiPendingRefresh.questionId = null
     aiSubmitState.submitting = false
     aiSubmitState.message = ''
+    aiAnswer.answerContent = ''
+    ElMessage.success('AI处理已完成，状态已更新')
+  } catch {
+    schedulePendingAiRefresh()
   }
+}
+
+function isPendingAiResolved() {
+  if (processSummary.value?.currentStage !== 'AI' || processSummary.value?.stageStatus === 'WAITING_APPROVAL' || processSummary.value?.overallStatus !== 'IN_PROGRESS') {
+    return true
+  }
+  const pendingRecord = aiRecords.value.find((item) => item.id === aiPendingRefresh.questionId)
+  if (pendingRecord?.answerContent) {
+    return true
+  }
+  return currentQuestion.value && currentQuestion.value.id !== aiPendingRefresh.questionId
 }
 
 async function enterAiExamMode() {

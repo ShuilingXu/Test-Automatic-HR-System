@@ -21,7 +21,10 @@ request.interceptors.response.use(
       window.localStorage.removeItem('session-user')
     }
     const message = error.response?.data?.message || error.message || '请求失败'
-    return Promise.reject(new Error(message))
+    const wrapped = new Error(message)
+    wrapped.code = error.code
+    wrapped.status = error.response?.status
+    return Promise.reject(wrapped)
   },
 )
 
@@ -137,5 +140,5 @@ export const interviewApi = {
   approveVideo(processId, payload) { return request.post(`/interview/hr/approve-video/${processId}`, payload) },
   approveOnsite(processId, payload) { return request.post(`/interview/hr/approve-onsite/${processId}`, payload) },
   terminateProcess(processId, payload) { return request.post(`/interview/hr/terminate/${processId}`, payload) },
-  submitAiAnswer(payload) { return request.post('/interview/interviewee/ai-answer', payload) },
+  submitAiAnswer(payload) { return request.post('/interview/interviewee/ai-answer', payload, { timeout: 120000 }) },
 }
