@@ -418,8 +418,8 @@ onMounted(loadAll)
 .console-side h1 { margin: 0; line-height: 1.1; }
 .console-side p { color: rgba(244, 239, 231, 0.76); line-height: 1.7; }
 .console-side nav { display: grid; gap: 10px; }
-.console-side button, .side-link { border: 1px solid rgba(240, 182, 111, 0.18); background: rgba(255,255,255,0.06); color: inherit; border-radius: 16px; padding: 12px 14px; text-align: left; text-decoration: none; font-weight: 700; transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease; }
-.console-side button.active { background: rgba(240, 182, 111, 0.22); }
+.console-side button, .side-link { text-align: left; }
+.console-side button.active { background: #f8f5ef; border-color: rgba(240, 182, 111, 0.58); color: #102532; }
 .console-main { display: grid; gap: 18px; }
 .topline { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
 .topline h2 { margin: 6px 0 0; }
