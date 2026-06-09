@@ -80,6 +80,22 @@ ensure_video_codecs() {
     fi
   fi
 
+  if [ -z "$INTERVIEW_VIDEO_VIDEO_CODEC" ]; then
+    echo "No VP9/VP8 WebM video encoder was detected in ffmpeg."
+    echo "Available video encoders containing vp8/vp9/vpx:"
+    list_ffmpeg_encoders "$ffmpeg_bin" | grep -Ei 'vp8|vp9|vpx' || true
+    echo "Install a full ffmpeg build or set INTERVIEW_VIDEO_VIDEO_CODEC to one listed above."
+    exit 1
+  fi
+
+  if [ -z "$INTERVIEW_VIDEO_AUDIO_CODEC" ]; then
+    echo "No Opus audio encoder was detected in ffmpeg."
+    echo "Available audio encoders containing opus:"
+    list_ffmpeg_encoders "$ffmpeg_bin" | grep -Ei 'opus' || true
+    echo "Install a full ffmpeg build or set INTERVIEW_VIDEO_AUDIO_CODEC to one listed above."
+    exit 1
+  fi
+
   if ! has_ffmpeg_encoder "$ffmpeg_bin" "$INTERVIEW_VIDEO_VIDEO_CODEC"; then
     echo "ffmpeg video encoder $INTERVIEW_VIDEO_VIDEO_CODEC was not found. Install an ffmpeg build with VP9/VP8 WebM support or set INTERVIEW_VIDEO_VIDEO_CODEC."
     exit 1
@@ -97,7 +113,12 @@ ensure_video_codecs() {
 has_ffmpeg_encoder() {
   local ffmpeg_bin="$1"
   local encoder="$2"
-  [ -n "$encoder" ] && "$ffmpeg_bin" -hide_banner -encoders 2>/dev/null | grep -Eq "(^|[[:space:]])${encoder}([[:space:]]|$)"
+  [ -n "$encoder" ] && list_ffmpeg_encoders "$ffmpeg_bin" | grep -Fxq "$encoder"
+}
+
+list_ffmpeg_encoders() {
+  local ffmpeg_bin="$1"
+  "$ffmpeg_bin" -hide_banner -encoders 2>/dev/null | awk '/^[[:space:]]*[VAS][A-Z\.]{5}[[:space:]]+/ { print $2 }'
 }
 
 random_secret() {
