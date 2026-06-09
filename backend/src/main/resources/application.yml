@@ -45,6 +45,8 @@ interview:
     turn-credential: ${INTERVIEW_TURN_CREDENTIAL:}
   video:
     ffmpeg-path: ${INTERVIEW_VIDEO_FFMPEG_PATH:${FFMPEG_PATH:ffmpeg}}
+    video-codec: ${INTERVIEW_VIDEO_VIDEO_CODEC:libvpx-vp9}
+    audio-codec: ${INTERVIEW_VIDEO_AUDIO_CODEC:libopus}
 
 app:
   database:

@@ -18,6 +18,12 @@ public class VideoMergeService {
     @Value("${interview.video.ffmpeg-path:ffmpeg}")
     private String ffmpegPath;
 
+    @Value("${interview.video.video-codec:libvpx-vp9}")
+    private String videoCodec;
+
+    @Value("${interview.video.audio-codec:libopus}")
+    private String audioCodec;
+
     public boolean canMerge(InterviewVideoSession session) {
         return isReadableRecording(session.getHrRecordingPath()) && isReadableRecording(session.getIntervieweeRecordingPath());
     }
@@ -52,9 +58,9 @@ public class VideoMergeService {
                 "-map", "[v]",
                 "-map", "0:a?",
                 "-map", "1:a?",
-                "-c:v", "libvpx-vp9",
+                "-c:v", videoCodec,
                 "-b:v", "1600k",
-                "-c:a", "libopus",
+                "-c:a", audioCodec,
                 "-shortest",
                 output.toString()
         ), "横向拼接视频失败");

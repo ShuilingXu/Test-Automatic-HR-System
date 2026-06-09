@@ -18,6 +18,8 @@ TURN_REALM="${TURN_REALM:-}"
 TURN_MIN_PORT="${TURN_MIN_PORT:-}"
 TURN_MAX_PORT="${TURN_MAX_PORT:-}"
 INTERVIEW_VIDEO_FFMPEG_PATH="${INTERVIEW_VIDEO_FFMPEG_PATH:-}"
+INTERVIEW_VIDEO_VIDEO_CODEC="${INTERVIEW_VIDEO_VIDEO_CODEC:-}"
+INTERVIEW_VIDEO_AUDIO_CODEC="${INTERVIEW_VIDEO_AUDIO_CODEC:-}"
 
 install_package() {
   local package_name="$1"
@@ -50,7 +52,6 @@ ensure_dependencies() {
     sudo apt-get install -y nodejs
   fi
 
-  ensure_video_codecs
 }
 
 ensure_video_codecs() {
@@ -61,15 +62,42 @@ ensure_video_codecs() {
     exit 1
   fi
 
-  if ! "$ffmpeg_bin" -hide_banner -encoders 2>/dev/null | grep -q 'libvpx-vp9'; then
-    echo "ffmpeg encoder libvpx-vp9 was not found. Install an ffmpeg build with VP9/WebM support."
+  if [ -z "$INTERVIEW_VIDEO_VIDEO_CODEC" ]; then
+    if has_ffmpeg_encoder "$ffmpeg_bin" "libvpx-vp9"; then
+      INTERVIEW_VIDEO_VIDEO_CODEC="libvpx-vp9"
+    elif has_ffmpeg_encoder "$ffmpeg_bin" "vp9"; then
+      INTERVIEW_VIDEO_VIDEO_CODEC="vp9"
+    elif has_ffmpeg_encoder "$ffmpeg_bin" "libvpx"; then
+      INTERVIEW_VIDEO_VIDEO_CODEC="libvpx"
+    fi
+  fi
+
+  if [ -z "$INTERVIEW_VIDEO_AUDIO_CODEC" ]; then
+    if has_ffmpeg_encoder "$ffmpeg_bin" "libopus"; then
+      INTERVIEW_VIDEO_AUDIO_CODEC="libopus"
+    elif has_ffmpeg_encoder "$ffmpeg_bin" "opus"; then
+      INTERVIEW_VIDEO_AUDIO_CODEC="opus"
+    fi
+  fi
+
+  if ! has_ffmpeg_encoder "$ffmpeg_bin" "$INTERVIEW_VIDEO_VIDEO_CODEC"; then
+    echo "ffmpeg video encoder $INTERVIEW_VIDEO_VIDEO_CODEC was not found. Install an ffmpeg build with VP9/VP8 WebM support or set INTERVIEW_VIDEO_VIDEO_CODEC."
     exit 1
   fi
 
-  if ! "$ffmpeg_bin" -hide_banner -encoders 2>/dev/null | grep -q 'libopus'; then
-    echo "ffmpeg encoder libopus was not found. Install an ffmpeg build with Opus/WebM support."
+  if ! has_ffmpeg_encoder "$ffmpeg_bin" "$INTERVIEW_VIDEO_AUDIO_CODEC"; then
+    echo "ffmpeg audio encoder $INTERVIEW_VIDEO_AUDIO_CODEC was not found. Install an ffmpeg build with Opus/WebM support or set INTERVIEW_VIDEO_AUDIO_CODEC."
     exit 1
   fi
+
+  set_env_value INTERVIEW_VIDEO_VIDEO_CODEC "$INTERVIEW_VIDEO_VIDEO_CODEC"
+  set_env_value INTERVIEW_VIDEO_AUDIO_CODEC "$INTERVIEW_VIDEO_AUDIO_CODEC"
+}
+
+has_ffmpeg_encoder() {
+  local ffmpeg_bin="$1"
+  local encoder="$2"
+  [ -n "$encoder" ] && "$ffmpeg_bin" -hide_banner -encoders 2>/dev/null | grep -Eq "(^|[[:space:]])${encoder}([[:space:]]|$)"
 }
 
 random_secret() {
@@ -134,6 +162,8 @@ prepare_env() {
   TURN_MAX_PORT="${TURN_MAX_PORT:-49200}"
   INTERVIEW_VIDEO_FFMPEG_PATH="${INTERVIEW_VIDEO_FFMPEG_PATH:-$(get_env_value INTERVIEW_VIDEO_FFMPEG_PATH)}"
   INTERVIEW_VIDEO_FFMPEG_PATH="${INTERVIEW_VIDEO_FFMPEG_PATH:-ffmpeg}"
+  INTERVIEW_VIDEO_VIDEO_CODEC="${INTERVIEW_VIDEO_VIDEO_CODEC:-$(get_env_value INTERVIEW_VIDEO_VIDEO_CODEC)}"
+  INTERVIEW_VIDEO_AUDIO_CODEC="${INTERVIEW_VIDEO_AUDIO_CODEC:-$(get_env_value INTERVIEW_VIDEO_AUDIO_CODEC)}"
 
   if [ -z "$TURN_HOST" ]; then
     echo "TURN_HOST is empty. Set TURN_HOST to this server's public IP or domain."
@@ -252,6 +282,7 @@ main() {
   mkdir -p "$LOG_DIR"
   ensure_dependencies
   prepare_env
+  ensure_video_codecs
   configure_coturn
   configure_firewall
   stop_existing_processes
@@ -263,7 +294,7 @@ main() {
   echo "Frontend: http://localhost:$FRONTEND_PORT"
   echo "TURN:     turn:$TURN_HOST:3478 udp/tcp"
   echo "TURN map: ${TURN_EXTERNAL_IP}${TURN_PRIVATE_IP:+/$TURN_PRIVATE_IP}"
-  echo "Video:    ffmpeg=$INTERVIEW_VIDEO_FFMPEG_PATH; encoders=libvpx-vp9,libopus"
+  echo "Video:    ffmpeg=$INTERVIEW_VIDEO_FFMPEG_PATH; encoders=$INTERVIEW_VIDEO_VIDEO_CODEC,$INTERVIEW_VIDEO_AUDIO_CODEC"
   echo "Firewall: allow tcp $FRONTEND_PORT,$BACKEND_PORT; tcp/udp 3478; udp $TURN_MIN_PORT:$TURN_MAX_PORT"
   echo "Logs:     $LOG_DIR"
   echo "Stop:     kill \$(cat logs/backend.pid) \$(cat logs/frontend.pid)"
