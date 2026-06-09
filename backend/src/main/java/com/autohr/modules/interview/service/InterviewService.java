@@ -21,6 +21,7 @@ public interface InterviewService {
     List<InterviewVO> listKnowledgeBases(Integer status, String keyword);
     void deleteKnowledgeBase(Long id);
     InterviewVO saveKnowledgeItem(KnowledgeItemSaveRequest request);
+    int importKnowledgeItems(Long knowledgeBaseId, MultipartFile file);
     List<InterviewVO> listKnowledgeItems(Long knowledgeBaseId, String keyword);
     void deleteKnowledgeItem(Long id);
     InterviewVO saveJobKnowledgeWeight(JobKnowledgeWeightSaveRequest request);

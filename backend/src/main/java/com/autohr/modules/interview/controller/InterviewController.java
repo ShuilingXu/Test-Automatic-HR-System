@@ -100,6 +100,12 @@ public class InterviewController {
         return ApiResponse.success(interviewService.saveKnowledgeItem(request));
     }
 
+    @PostMapping("/hr/knowledge-items/import-csv")
+    public ApiResponse<Map<String, Integer>> importKnowledgeItems(@RequestParam Long knowledgeBaseId,
+                                                                  @RequestParam("file") MultipartFile file) {
+        return ApiResponse.success(Map.of("imported", interviewService.importKnowledgeItems(knowledgeBaseId, file)));
+    }
+
     @GetMapping("/hr/knowledge-items")
     public ApiResponse<List<InterviewVO>> listKnowledgeItems(@RequestParam(required = false) Long knowledgeBaseId,
                                                              @RequestParam(required = false) String keyword) {

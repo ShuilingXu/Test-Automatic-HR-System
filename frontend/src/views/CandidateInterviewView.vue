@@ -74,7 +74,7 @@ import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaul
 
 const route = useRoute()
 const router = useRouter()
-const sessionForm = reactive({ processId: route.query.processId ? Number(route.query.processId) : null })
+const sessionForm = reactive({ processId: route.params.processId ? Number(route.params.processId) : route.query.processId ? Number(route.query.processId) : null })
 const aiAnswer = reactive({ answerContent: '' })
 const aiRecords = ref([])
 const processSummary = ref(null)

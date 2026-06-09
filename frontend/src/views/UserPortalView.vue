@@ -7,11 +7,13 @@
           <h1 class="page-title">面试者门户</h1>
         </div>
         <div class="link-row">
+          <RouterLink class="link-chip" :class="{ active: activePage === 'profile' }" to="/user/profile">个人资料</RouterLink>
+          <RouterLink class="link-chip" :class="{ active: activePage === 'applications' }" to="/user/applications">报名记录</RouterLink>
           <RouterLink class="link-chip" to="/candidate/register">去报名</RouterLink>
           <el-button @click="logout">退出登录</el-button>
         </div>
       </div>
-      <div class="page-grid">
+      <div v-if="activePage === 'profile'" class="page-grid">
         <el-form :model="profileForm" label-position="top" class="surface">
           <h3>个人资料</h3>
           <el-form-item label="姓名"><el-input v-model="profileForm.displayName" /></el-form-item>
@@ -29,7 +31,7 @@
           </div>
         </div>
       </div>
-      <div class="surface application-panel">
+      <div v-if="activePage === 'applications'" class="surface application-panel">
         <div class="section-head">
           <div>
             <h3>我的报名记录</h3>
@@ -38,14 +40,25 @@
         </div>
         <div v-if="candidates.length === 0" class="empty-box">暂无报名记录，完成报名后会显示在这里。</div>
         <div v-else class="application-list">
-          <div v-for="item in candidates" :key="item.id" class="application-card">
+          <div v-for="item in candidates" :key="item.id" class="application-card" :class="{ selected: selectedCandidate?.id === item.id }" @click="openApplication(item)">
             <div>
               <strong>{{ item.jobTitle || `岗位 ${item.jobId}` }}</strong>
               <span>报名编号：{{ item.id }} / 状态：{{ item.interviewStageStatus || item.applicationStatus || '已提交' }}</span>
               <small>简历：{{ item.resumeFileName || '未上传' }}</small>
             </div>
-            <RouterLink v-if="item.interviewProcessId" class="link-chip" :to="`/interview/interviewee?processId=${item.interviewProcessId}`">进入面试</RouterLink>
+            <RouterLink v-if="item.interviewProcessId" class="link-chip" :to="`/interview/interviewee/processes/${item.interviewProcessId}`" @click.stop>进入面试</RouterLink>
             <span v-else class="pending-chip">等待 HR 发起面试</span>
+          </div>
+        </div>
+        <div v-if="selectedCandidate" class="application-detail">
+          <h3>报名记录详情</h3>
+          <div class="kv-grid">
+            <div><span>报名编号</span><strong>{{ selectedCandidate.id }}</strong></div>
+            <div><span>岗位</span><strong>{{ selectedCandidate.jobTitle || selectedCandidate.jobId }}</strong></div>
+            <div><span>状态</span><strong>{{ selectedCandidate.interviewStageStatus || selectedCandidate.applicationStatus || '-' }}</strong></div>
+            <div><span>流程流水号</span><strong>{{ selectedCandidate.interviewProcessId || '-' }}</strong></div>
+            <div><span>简历</span><strong>{{ selectedCandidate.resumeFileName || '未上传' }}</strong></div>
+            <div><span>投递时间</span><strong>{{ selectedCandidate.createdAt || '-' }}</strong></div>
           </div>
         </div>
       </div>
@@ -54,15 +67,18 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
-import { useRouter, RouterLink } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi, recruitmentApi } from '../services/api'
 
 const router = useRouter()
+const route = useRoute()
+const activePage = computed(() => route.meta.portalPage || 'applications')
 const session = reactive({ username: '', roleCode: '', email: '', profileCompleted: 0 })
 const profileForm = reactive({ displayName: '', mobilePhone: '', email: '' })
 const candidates = ref([])
+const selectedCandidate = ref(null)
 
 async function loadSession() {
   try {
@@ -83,6 +99,7 @@ async function loadSession() {
 async function loadMyCandidates() {
   try {
     candidates.value = (await recruitmentApi.listMyCandidates()).data
+    syncRouteState()
   } catch (error) {
     ElMessage.error(error.message || '报名记录加载失败')
   }
@@ -103,7 +120,18 @@ async function logout() {
   router.push('/login')
 }
 
+function openApplication(item) {
+  selectedCandidate.value = item
+  router.push(`/user/applications/${item.id}`)
+}
+
+function syncRouteState() {
+  const id = Number(route.params.id)
+  selectedCandidate.value = id ? candidates.value.find((item) => item.id === id) || null : null
+}
+
 onMounted(loadSession)
+watch(() => route.fullPath, syncRouteState)
 </script>
 
 <style scoped>
@@ -112,6 +140,8 @@ onMounted(loadSession)
 .section-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .application-list { display: grid; gap: 12px; margin-top: 12px; }
 .application-card { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 16px; border-radius: 18px; background: rgba(255, 255, 255, 0.82); }
+.application-card.selected { outline: 2px solid rgba(15, 108, 143, 0.35); }
+.application-detail { margin-top: 18px; padding: 16px; border-radius: 18px; background: rgba(255, 255, 255, 0.82); }
 .application-card strong, .application-card span, .application-card small { display: block; }
 .application-card span { margin: 6px 0; color: #61727d; }
 .pending-chip { padding: 8px 12px; border-radius: 999px; background: #eef2f4; color: #61727d; white-space: nowrap; }

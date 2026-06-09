@@ -92,6 +92,14 @@ export const interviewApi = {
   listKnowledgeBases(params) { return request.get('/interview/hr/knowledge-bases', { params }) },
   deleteKnowledgeBase(id) { return request.post(`/interview/hr/knowledge-bases/${id}/delete`) },
   saveKnowledgeItem(payload) { return request.post('/interview/hr/knowledge-items', payload) },
+  importKnowledgeItems(knowledgeBaseId, file) {
+    const formData = new FormData()
+    formData.append('knowledgeBaseId', knowledgeBaseId)
+    formData.append('file', file)
+    return request.post('/interview/hr/knowledge-items/import-csv', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   listKnowledgeItems(params) { return request.get('/interview/hr/knowledge-items', { params }) },
   deleteKnowledgeItem(id) { return request.post(`/interview/hr/knowledge-items/${id}/delete`) },
   saveJobKnowledgeWeight(payload) { return request.post('/interview/hr/job-knowledge-weights', payload) },

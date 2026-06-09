@@ -49,6 +49,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -141,12 +142,126 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     @Override
+    @Transactional
+    public int importKnowledgeItems(Long knowledgeBaseId, MultipartFile file) {
+        requireKnowledgeBase(knowledgeBaseId);
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("CSV文件不能为空");
+        }
+        String originalName = StrUtil.blankToDefault(file.getOriginalFilename(), "knowledge-items.csv").toLowerCase();
+        if (!originalName.endsWith(".csv")) {
+            throw new BusinessException("仅支持CSV文件");
+        }
+        List<List<String>> rows = parseCsv(file);
+        if (rows.isEmpty()) {
+            throw new BusinessException("CSV文件没有可导入内容");
+        }
+        int startIndex = isKnowledgeItemHeader(rows.get(0)) ? 1 : 0;
+        int imported = 0;
+        for (int i = startIndex; i < rows.size(); i++) {
+            List<String> row = rows.get(i);
+            String point = csvValue(row, 0);
+            String content = csvValue(row, 1);
+            if (StrUtil.isBlank(point) && StrUtil.isBlank(content)) {
+                continue;
+            }
+            if (StrUtil.isBlank(point) || StrUtil.isBlank(content)) {
+                throw new BusinessException("CSV第" + (i + 1) + "行知识点或知识内容为空");
+            }
+            InterviewKnowledgeItem entity = new InterviewKnowledgeItem();
+            entity.setId(nextId(knowledgeItemMapper.selectList(null).stream().map(InterviewKnowledgeItem::getId).toList()));
+            entity.setKnowledgeBaseId(knowledgeBaseId);
+            entity.setKnowledgePoint(point);
+            entity.setKnowledgeContent(content);
+            entity.setStatus(parseCsvStatus(csvValue(row, 2)));
+            knowledgeItemMapper.insert(entity);
+            imported++;
+        }
+        if (imported == 0) {
+            throw new BusinessException("CSV文件没有可导入内容");
+        }
+        return imported;
+    }
+
+    @Override
     public List<InterviewVO> listKnowledgeItems(Long knowledgeBaseId, String keyword) {
         return knowledgeItemMapper.selectList(new LambdaQueryWrapper<InterviewKnowledgeItem>()
                 .eq(knowledgeBaseId != null, InterviewKnowledgeItem::getKnowledgeBaseId, knowledgeBaseId)
                 .and(StrUtil.isNotBlank(keyword), q -> q.like(InterviewKnowledgeItem::getKnowledgePoint, keyword)
                         .or().like(InterviewKnowledgeItem::getKnowledgeContent, keyword))
                 .orderByAsc(InterviewKnowledgeItem::getId)).stream().map(this::toKnowledgeItemVO).toList();
+    }
+
+    private List<List<String>> parseCsv(MultipartFile file) {
+        String text;
+        try {
+            byte[] bytes = file.getBytes();
+            text = new String(bytes, StandardCharsets.UTF_8);
+            if (text.startsWith("\uFEFF")) {
+                text = text.substring(1);
+            }
+            if (text.contains("�")) {
+                text = new String(bytes, Charset.forName("GBK"));
+            }
+        } catch (IOException ex) {
+            throw new BusinessException("CSV文件读取失败: " + ex.getMessage());
+        }
+        List<List<String>> rows = new java.util.ArrayList<>();
+        List<String> row = new java.util.ArrayList<>();
+        StringBuilder cell = new StringBuilder();
+        boolean quoted = false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (quoted) {
+                if (ch == '"') {
+                    if (i + 1 < text.length() && text.charAt(i + 1) == '"') {
+                        cell.append('"');
+                        i++;
+                    } else {
+                        quoted = false;
+                    }
+                } else {
+                    cell.append(ch);
+                }
+            } else if (ch == '"') {
+                quoted = true;
+            } else if (ch == ',') {
+                row.add(cell.toString().trim());
+                cell.setLength(0);
+            } else if (ch == '\n') {
+                row.add(cell.toString().trim());
+                rows.add(row);
+                row = new java.util.ArrayList<>();
+                cell.setLength(0);
+            } else if (ch != '\r') {
+                cell.append(ch);
+            }
+        }
+        row.add(cell.toString().trim());
+        if (row.stream().anyMatch(StrUtil::isNotBlank)) {
+            rows.add(row);
+        }
+        return rows.stream().filter(item -> item.stream().anyMatch(StrUtil::isNotBlank)).toList();
+    }
+
+    private boolean isKnowledgeItemHeader(List<String> row) {
+        return StrUtil.equalsAnyIgnoreCase(csvValue(row, 0), "knowledgePoint", "知识点")
+                && StrUtil.equalsAnyIgnoreCase(csvValue(row, 1), "knowledgeContent", "知识内容");
+    }
+
+    private String csvValue(List<String> row, int index) {
+        return index < row.size() ? StrUtil.trim(row.get(index)) : "";
+    }
+
+    private Integer parseCsvStatus(String value) {
+        if (StrUtil.isBlank(value)) {
+            return 1;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ex) {
+            throw new BusinessException("CSV状态必须为数字，建议填写1启用或0停用");
+        }
     }
 
     @Override

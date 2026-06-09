@@ -93,6 +93,10 @@ CREATE TABLE IF NOT EXISTS recruitment_candidate (
     interviewee_user_id INTEGER,
     interview_process_id INTEGER,
     resume_file_id INTEGER,
+    resume_llm_score INTEGER,
+    resume_llm_comment VARCHAR(2000),
+    resume_llm_status VARCHAR(32),
+    resume_llm_evaluated_at DATETIME,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (job_id) REFERENCES recruitment_job(id)

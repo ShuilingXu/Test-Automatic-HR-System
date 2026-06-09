@@ -26,6 +26,10 @@ public class CandidateVO {
     private Long interviewProcessId;
     private Long resumeFileId;
     private String resumeFileName;
+    private Integer resumeLlmScore;
+    private String resumeLlmComment;
+    private String resumeLlmStatus;
+    private LocalDateTime resumeLlmEvaluatedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

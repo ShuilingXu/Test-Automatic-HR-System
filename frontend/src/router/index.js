@@ -43,6 +43,7 @@ const routes = [
   { path: '/candidate/register', name: 'candidate-register', component: CandidateRegisterView, meta: { requiresAuth: true, roles: ['INTERVIEWEE'] } },
   { path: '/candidate/interview', redirect: '/user' },
   { path: '/interview/interviewee', name: 'interview-interviewee', component: CandidateInterviewView, meta: { requiresAuth: true, roles: ['INTERVIEWEE'] } },
+  { path: '/interview/interviewee/processes/:processId', name: 'interview-interviewee-process', component: CandidateInterviewView, meta: { requiresAuth: true, roles: ['INTERVIEWEE'] } },
 ]
 
 const router = createRouter({

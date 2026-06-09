@@ -32,6 +32,10 @@ public class RecruitmentCandidate {
     private Long intervieweeUserId;
     private Long interviewProcessId;
     private Long resumeFileId;
+    private Integer resumeLlmScore;
+    private String resumeLlmComment;
+    private String resumeLlmStatus;
+    private LocalDateTime resumeLlmEvaluatedAt;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

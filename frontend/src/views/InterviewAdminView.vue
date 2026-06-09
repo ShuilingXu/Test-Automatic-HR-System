@@ -10,10 +10,10 @@
       </div>
 
       <div class="sub-tabs">
-        <button :class="{ active: activeTab === 'kb' }" @click="activeTab = 'kb'">知识库</button>
-        <button :class="{ active: activeTab === 'weights' }" @click="activeTab = 'weights'">岗位权重</button>
-        <button v-if="isItAdmin" :class="{ active: activeTab === 'llm' }" @click="activeTab = 'llm'">LLM配置</button>
-        <button :class="{ active: activeTab === 'process' }" @click="activeTab = 'process'">面试流程</button>
+        <RouterLink class="link-chip" :class="{ active: activeTab === 'kb' }" to="/interview/hr/knowledge-bases">知识库</RouterLink>
+        <RouterLink class="link-chip" :class="{ active: activeTab === 'weights' }" to="/interview/hr/weights">岗位权重</RouterLink>
+        <RouterLink v-if="isItAdmin" class="link-chip" :class="{ active: activeTab === 'llm' }" to="/interview/hr/llm-configs">LLM配置</RouterLink>
+        <RouterLink class="link-chip" :class="{ active: activeTab === 'process' }" to="/interview/hr/processes">面试流程</RouterLink>
       </div>
 
       <section v-if="activeTab === 'kb'" class="surface">
@@ -31,8 +31,22 @@
             <el-form-item label="知识内容"><el-input v-model="itemForm.knowledgeContent" type="textarea" :rows="4" /></el-form-item>
             <el-button type="primary" @click="saveKnowledgeItem">保存知识点</el-button>
           </el-form>
+          <div class="surface inner-surface csv-import-box">
+            <h3>CSV批量添加知识点</h3>
+            <el-form label-position="top" class="form-grid">
+              <el-form-item label="目标知识库"><el-select v-model="itemForm.knowledgeBaseId"><el-option v-for="item in knowledgeBases" :key="item.id" :label="item.knowledgeBaseName" :value="item.id" /></el-select></el-form-item>
+              <el-form-item label="CSV格式"><el-input model-value="knowledgePoint,knowledgeContent,status" disabled /></el-form-item>
+            </el-form>
+            <p class="serial-line">支持UTF-8或GBK CSV。第一列知识点，第二列知识内容，第三列状态可选，1启用、0停用。</p>
+            <div class="action-row">
+              <el-upload :auto-upload="false" :show-file-list="false" accept=".csv,text/csv" :on-change="importKnowledgeItemsCsv">
+                <el-button type="primary">上传CSV批量添加</el-button>
+              </el-upload>
+              <a class="link-chip" href="/knowledge-items-template.csv" download>下载CSV模板</a>
+            </div>
+          </div>
         </div>
-        <el-table :data="knowledgeBases" stripe class="data-table" @row-click="selectKnowledgeBase">
+        <el-table :data="knowledgeBases" stripe class="data-table" @row-click="openKnowledgeBase">
           <el-table-column prop="knowledgeBaseName" label="知识库" />
           <el-table-column prop="techCategory" label="技术方向" />
           <el-table-column prop="jobCategory" label="岗位方向" />
@@ -53,7 +67,7 @@
           <el-form-item label="权重"><el-input-number v-model="weightForm.weight" :min="1" /></el-form-item>
         </el-form>
         <el-button type="primary" @click="saveWeight">保存权重</el-button>
-        <el-table :data="weights" stripe class="data-table">
+        <el-table :data="weights" stripe class="data-table" @row-click="openWeight">
           <el-table-column prop="jobId" label="岗位ID" />
           <el-table-column prop="knowledgeBaseId" label="知识库ID" />
           <el-table-column prop="weight" label="权重" />
@@ -86,8 +100,19 @@
             </el-form>
             <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(scorerLlmForm, 'SCORER')">保存评分模型</el-button><span class="serial-line">API Key：{{ scorerKeyLabel }}</span></div>
           </div>
+          <div class="surface inner-surface">
+            <h3>简历初筛 LLM</h3>
+            <el-form :model="resumeReviewLlmForm" label-position="top" class="form-grid">
+              <el-form-item label="配置名称"><el-input v-model="resumeReviewLlmForm.configName" /></el-form-item>
+              <el-form-item label="OpenAI接口地址"><el-input v-model="resumeReviewLlmForm.baseUrl" /></el-form-item>
+              <el-form-item label="API Key"><el-input v-model="resumeReviewLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
+              <el-form-item label="模型名称"><el-input v-model="resumeReviewLlmForm.modelName" /></el-form-item>
+              <el-form-item label="用户填写提示词" class="wide"><el-input v-model="resumeReviewLlmForm.scoringRulePrompt" type="textarea" :rows="4" placeholder="例如：重点考察岗位硬技能、项目经历、稳定性和薪资匹配度" /></el-form-item>
+            </el-form>
+            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(resumeReviewLlmForm, 'RESUME_REVIEW')">保存简历初筛模型</el-button><span class="serial-line">API Key：{{ resumeReviewKeyLabel }}</span></div>
+          </div>
         </div>
-        <el-table :data="llmConfigs" stripe class="data-table" @row-click="editLlmConfig">
+        <el-table :data="llmConfigs" stripe class="data-table" @row-click="openLlmConfig">
           <el-table-column prop="configName" label="配置名称" />
           <el-table-column prop="modelRole" label="角色" />
           <el-table-column prop="baseUrl" label="接口地址" min-width="220" />
@@ -125,7 +150,7 @@
           </div>
         </div>
         <div class="link-row"><el-button type="primary" @click="startProcess">发起面试流程</el-button></div>
-        <el-table :data="processes" stripe class="data-table" @row-click="selectProcess">
+        <el-table :data="processes" stripe class="data-table" @row-click="openProcess">
           <el-table-column prop="id" label="流程流水号" width="110" />
           <el-table-column prop="candidateName" label="候选人" />
           <el-table-column prop="questionTitle" label="投递岗位" />
@@ -176,15 +201,17 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi, interviewApi, recruitmentApi } from '../services/api'
 import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, playVideo, requestCameraAndMicrophone } from '../utils/media'
 
 const sessionUser = ref(JSON.parse(localStorage.getItem('session-user') || 'null'))
+const route = useRoute()
+const router = useRouter()
 const isItAdmin = computed(() => sessionUser.value?.roleCode === 'IT_ADMIN')
-const activeTab = ref('kb')
+const activeTab = computed(() => route.meta.interviewTab || 'process')
 const knowledgeBases = ref([])
 const knowledgeItems = ref([])
 const weights = ref([])
@@ -212,11 +239,13 @@ const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '',
 const weightForm = reactive({ id: null, jobId: null, knowledgeBaseId: null, weight: 1 })
 const interviewerLlmForm = reactive(createLlmForm('INTERVIEWER'))
 const scorerLlmForm = reactive(createLlmForm('SCORER'))
+const resumeReviewLlmForm = reactive(createLlmForm('RESUME_REVIEW'))
 const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 70, aiMinQuestionRounds: 1, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })
 const processSearch = reactive({ keyword: '' })
 
 const interviewerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')?.apiKeyMasked || '未配置')
 const scorerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'SCORER')?.apiKeyMasked || '未配置')
+const resumeReviewKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'RESUME_REVIEW')?.apiKeyMasked || '未配置，默认回退评分模型')
 
 const canTerminate = computed(() => selectedProcess.value?.overallStatus === 'IN_PROGRESS')
 const canApproveAi = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'AI')
@@ -243,7 +272,7 @@ async function loadAll() {
       syncLlmForms()
     } else {
       llmConfigs.value = []
-      if (activeTab.value === 'llm') activeTab.value = 'kb'
+      if (activeTab.value === 'llm') router.replace('/interview/hr/knowledge-bases')
     }
     jobs.value = (await recruitmentApi.listAdminJobs()).data
     recruitmentCandidates.value = (await recruitmentApi.listCandidates()).data
@@ -251,24 +280,33 @@ async function loadAll() {
     if (selectedProcess.value) {
       selectedProcess.value = processes.value.find((item) => item.id === selectedProcess.value.id) || selectedProcess.value
     }
+    await syncRouteState()
   } catch (error) { fail(error) }
 }
 async function selectKnowledgeBase(row) { itemForm.knowledgeBaseId = row.id; knowledgeItems.value = (await interviewApi.listKnowledgeItems({ knowledgeBaseId: row.id })).data }
+async function openKnowledgeBase(row) { await router.push(`/interview/hr/knowledge-bases/${row.id}`) }
+function openWeight(row) { Object.assign(weightForm, row); router.push(`/interview/hr/weights/${row.id}`) }
+function openLlmConfig(row) { editLlmConfig(row); router.push(`/interview/hr/llm-configs/${row.id}`) }
+function openProcess(row) { router.push(`/interview/hr/processes/${row.id}`) }
 async function saveKnowledgeBase() { try { await interviewApi.saveKnowledgeBase({ ...kbForm }); ElMessage.success('知识库已保存'); await loadAll() } catch (error) { fail(error) } }
 async function deleteKnowledgeBase(id) { try { await interviewApi.deleteKnowledgeBase(id); ElMessage.success('知识库已删除'); await loadAll() } catch (error) { fail(error) } }
 async function saveKnowledgeItem() { try { await interviewApi.saveKnowledgeItem({ ...itemForm }); ElMessage.success('知识点已保存'); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
+async function importKnowledgeItemsCsv(uploadFile) { try { if (!itemForm.knowledgeBaseId) { ElMessage.warning('请先选择目标知识库'); return } const response = await interviewApi.importKnowledgeItems(itemForm.knowledgeBaseId, uploadFile.raw); ElMessage.success(`已导入 ${response.data.imported} 条知识点`); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
 async function deleteKnowledgeItem(id) { try { await interviewApi.deleteKnowledgeItem(id); ElMessage.success('知识点已删除'); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
 async function saveWeight() { try { await interviewApi.saveJobKnowledgeWeight({ ...weightForm }); ElMessage.success('权重已保存'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
 async function deleteWeight(id) { try { await interviewApi.deleteJobKnowledgeWeight(id); ElMessage.success('权重已删除'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
 async function saveRoleLlmConfig(form, role) { try { await interviewApi.saveLlmConfig({ ...form, modelRole: role }); ElMessage.success('LLM配置已保存'); form.apiKey = ''; await loadAll() } catch (error) { fail(error) } }
 async function deleteLlmConfig(id) { try { await interviewApi.deleteLlmConfig(id); ElMessage.success('LLM配置已删除'); await loadAll() } catch (error) { fail(error) } }
-function editLlmConfig(row) { Object.assign(row.modelRole === 'SCORER' ? scorerLlmForm : interviewerLlmForm, { ...row, apiKey: '' }) }
-function createLlmForm(role) { return { id: null, configName: role === 'SCORER' ? '评分模型' : '面试官模型', modelRole: role, baseUrl: '', apiKey: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 } }
+function editLlmConfig(row) { Object.assign(llmFormByRole(row.modelRole), { ...row, apiKey: '' }) }
+function createLlmForm(role) { return { id: null, configName: role === 'SCORER' ? '评分模型' : role === 'RESUME_REVIEW' ? '简历初筛模型' : '面试官模型', modelRole: role, baseUrl: '', apiKey: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 } }
+function llmFormByRole(role) { return role === 'SCORER' ? scorerLlmForm : role === 'RESUME_REVIEW' ? resumeReviewLlmForm : interviewerLlmForm }
 function syncLlmForms() {
   const interviewer = llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')
   const scorer = llmConfigs.value.find((item) => item.modelRole === 'SCORER')
+  const resumeReview = llmConfigs.value.find((item) => item.modelRole === 'RESUME_REVIEW')
   Object.assign(interviewerLlmForm, interviewer ? { ...interviewer, apiKey: '' } : createLlmForm('INTERVIEWER'))
   Object.assign(scorerLlmForm, scorer ? { ...scorer, apiKey: '' } : createLlmForm('SCORER'))
+  Object.assign(resumeReviewLlmForm, resumeReview ? { ...resumeReview, apiKey: '' } : createLlmForm('RESUME_REVIEW'))
 }
 async function syncIntervieweeByCandidate(candidateId) { const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId); processForm.intervieweeUserId = candidate?.intervieweeUserId ? String(candidate.intervieweeUserId) : ''; processForm.jobId = candidate?.jobId || null }
 async function startProcess() { try { if (!processForm.recruitmentCandidateId) { ElMessage.warning('请先选择候选人投递记录'); return } if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到候选人账号'); return } if (!processForm.jobId) { ElMessage.warning('投递记录未绑定岗位'); return } if (processForm.aiMaxQuestionRounds < processForm.aiMinQuestionRounds) { ElMessage.warning('AI最多问答轮数不能小于最少问答轮数'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
@@ -407,6 +445,28 @@ onBeforeUnmount(() => {
   disconnectHrVideo()
 })
 
+async function syncRouteState() {
+  const id = Number(route.params.id)
+  if (!id) return
+  if (route.name === 'interview-knowledge-base-detail') {
+    const row = knowledgeBases.value.find((item) => item.id === id)
+    if (row) await selectKnowledgeBase(row)
+  } else if (route.name === 'interview-weight-detail') {
+    const row = weights.value.find((item) => item.id === id)
+    if (row) Object.assign(weightForm, row)
+  } else if (route.name === 'interview-llm-config-detail') {
+    const row = llmConfigs.value.find((item) => item.id === id)
+    if (row) editLlmConfig(row)
+  } else if (route.name === 'interview-process-detail') {
+    const row = processes.value.find((item) => item.id === id)
+    if (row) await selectProcess(row)
+  }
+}
+
+watch(() => route.fullPath, () => {
+  syncRouteState()
+})
+
 onMounted(loadAll)
 </script>
 
@@ -418,6 +478,7 @@ onMounted(loadAll)
 .wide { grid-column: 1 / -1; }
 .inner-surface { background: rgba(255,255,255,0.82); }
 .detail-surface { margin-top: 18px; }
+.csv-import-box { grid-column: 1 / -1; }
 .serial-line { margin: 8px 0 14px; color: #42515b; }
 .video-link { margin-left: 12px; color: #0f6c8f; font-weight: 700; text-decoration: none; }
 .candidate-preview { margin: 10px 0 16px; padding: 16px; border-radius: 18px; background: rgba(255,255,255,0.82); }
