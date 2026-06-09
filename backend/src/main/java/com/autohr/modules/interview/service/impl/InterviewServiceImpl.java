@@ -278,7 +278,7 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     @Override
-    public InterviewVO getNextAiQuestion(Long processId) {
+    public synchronized InterviewVO getNextAiQuestion(Long processId) {
         InterviewProcess process = requireProcess(processId);
         if (!StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
             return null;
@@ -311,7 +311,7 @@ public class InterviewServiceImpl implements InterviewService {
 
     @Override
     @Transactional
-    public InterviewVO submitAiAnswer(AiAnswerRequest request) {
+    public synchronized InterviewVO submitAiAnswer(AiAnswerRequest request) {
         InterviewProcess process = requireProcess(request.getProcessId());
         ensureInProgress(process);
         if (!StrUtil.equals(process.getCurrentStage(), "AI")) {
@@ -879,7 +879,7 @@ public class InterviewServiceImpl implements InterviewService {
         });
     }
 
-    private void generateInitialQuestionSafely(Long processId) {
+    private synchronized void generateInitialQuestionSafely(Long processId) {
         try {
             generateNextQuestion(requireProcess(processId));
         } catch (Exception ex) {
@@ -887,7 +887,7 @@ public class InterviewServiceImpl implements InterviewService {
         }
     }
 
-    private void saveQuestionGenerationFailure(Long processId, Exception ex) {
+    private synchronized void saveQuestionGenerationFailure(Long processId, Exception ex) {
         InterviewAiRecord record = new InterviewAiRecord();
         record.setId(nextId(aiRecordMapper.selectList(null).stream().map(InterviewAiRecord::getId).toList()));
         record.setProcessId(processId);
@@ -897,7 +897,7 @@ public class InterviewServiceImpl implements InterviewService {
         aiRecordMapper.insert(record);
     }
 
-    private void generateNextQuestion(InterviewProcess process) {
+    private synchronized void generateNextQuestion(InterviewProcess process) {
         InterviewJobKnowledgeWeight weight = pickKnowledgeWeight(process);
         InterviewAiRecord record = new InterviewAiRecord();
         record.setId(nextId(aiRecordMapper.selectList(null).stream().map(InterviewAiRecord::getId).toList()));
@@ -945,7 +945,7 @@ public class InterviewServiceImpl implements InterviewService {
         return question;
     }
 
-    private void generateNextQuestion(InterviewProcess process, String nextQuestion) {
+    private synchronized void generateNextQuestion(InterviewProcess process, String nextQuestion) {
         if (StrUtil.isBlank(nextQuestion)) {
             generateNextQuestion(process);
             return;

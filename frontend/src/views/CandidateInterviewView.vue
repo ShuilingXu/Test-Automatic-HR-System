@@ -31,8 +31,18 @@
           </div>
         </div>
 
-        <div class="surface">
+        <div class="surface ai-panel">
           <h3>AI 面试</h3>
+          <div v-if="aiStatusText" class="ai-status-card" :class="{ busy: aiSubmitState.submitting }">
+            <span class="status-dot"></span>
+            <strong>{{ aiStatusText }}</strong>
+            <small>{{ aiStatusHint }}</small>
+          </div>
+          <div v-if="aiSubmitState.submitting" class="ai-submit-overlay">
+            <div class="ai-orbit"><span></span><span></span><span></span></div>
+            <strong>{{ aiSubmitState.message }}</strong>
+            <p>请勿重复点击或刷新页面，AI 正在评分并生成后续安排。</p>
+          </div>
           <div v-if="currentQuestion" class="question-card highlighted-question">
             <strong>当前问题 {{ currentQuestion.sequenceNo }}</strong>
             <p>{{ currentQuestion.questionContent }}</p>
@@ -47,8 +57,8 @@
             <p>你的回答：{{ item.answerContent || '待回答' }}</p>
             <p v-if="item.interviewerComment">面试官反馈：{{ item.interviewerComment }}</p>
           </div>
-          <el-input v-model="aiAnswer.answerContent" type="textarea" :rows="4" placeholder="回答当前 AI 问题" />
-          <div class="link-row"><el-button type="primary" @click="submitAiAnswer">提交 AI 回答</el-button></div>
+          <el-input v-model="aiAnswer.answerContent" type="textarea" :rows="4" placeholder="回答当前 AI 问题" :disabled="aiSubmitState.submitting || !currentQuestion" />
+          <div class="link-row"><el-button type="primary" :loading="aiSubmitState.submitting" :disabled="aiSubmitState.submitting || !currentQuestion" @click="submitAiAnswer">{{ aiSubmitState.submitting ? 'AI处理中' : '提交 AI 回答' }}</el-button></div>
         </div>
       </div>
     </section>
@@ -56,7 +66,7 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { interviewApi } from '../services/api'
@@ -70,6 +80,7 @@ const aiRecords = ref([])
 const processSummary = ref(null)
 const currentQuestion = ref(null)
 const refreshState = reactive({ loading: false, retryCount: 0, lastError: '' })
+const aiSubmitState = reactive({ submitting: false, message: '' })
 const runtimeConfig = reactive({ disableDevtoolsShortcuts: true })
 const antiCheat = reactive({ fullscreen: false, switchCount: 0, hasEnteredFullscreen: false, aiEndNotified: false })
 const localVideo = ref(null)
@@ -83,6 +94,23 @@ let recordedChunks = []
 let addedHrIce = new Set()
 let remoteStream = null
 let pendingHrIce = []
+
+const aiStatusText = computed(() => {
+  if (aiSubmitState.submitting) return aiSubmitState.message || 'AI正在处理你的回答'
+  if (processSummary.value?.currentStage !== 'AI') return ''
+  if (processSummary.value?.stageStatus === 'WAITING_APPROVAL') return 'AI面试已完成，等待HR审批'
+  if (processSummary.value?.stageStatus === 'REJECTED' || processSummary.value?.overallStatus === 'REJECTED') return 'AI面试已结束'
+  if (refreshState.loading) return '正在同步面试状态'
+  if (!currentQuestion.value) return '正在生成下一道题'
+  return '请阅读当前问题并作答'
+})
+
+const aiStatusHint = computed(() => {
+  if (aiSubmitState.submitting) return '评分、评价和下一题生成可能需要几十秒'
+  if (processSummary.value?.stageStatus === 'WAITING_APPROVAL') return '请保持关注流程状态，HR审批后会进入下一阶段'
+  if (!currentQuestion.value && processSummary.value?.currentStage === 'AI') return '系统会自动刷新题目，请不要重复提交'
+  return '提交后按钮会锁定，避免重复提交'
+})
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
 async function loadProcessRecords(options = {}) {
@@ -147,20 +175,39 @@ function nextRefreshDelay() {
   return Math.min(3000 + refreshState.retryCount * 1000, 10000)
 }
 async function submitAiAnswer() {
+  if (aiSubmitState.submitting) {
+    ElMessage.info('AI正在处理上一轮回答，请稍候')
+    return
+  }
   try {
+    if (!currentQuestion.value) {
+      ElMessage.warning('当前没有可提交的问题，请等待题目生成')
+      return
+    }
+    if (!aiAnswer.answerContent.trim()) {
+      ElMessage.warning('请先填写回答内容')
+      return
+    }
     if (!antiCheat.fullscreen) {
       ElMessage.warning('请先进入全屏答题模式')
       await enterAiExamMode()
       return
     }
+    aiSubmitState.submitting = true
+    aiSubmitState.message = 'AI正在评分并生成下一步'
     clearAiRefresh()
     await interviewApi.submitAiAnswer({ processId: sessionForm.processId, answerContent: aiAnswer.answerContent })
+    aiSubmitState.message = '正在同步最新面试状态'
     aiAnswer.answerContent = ''
     ElMessage.success('AI 回答已提交')
     await loadProcessRecords()
   } catch (error) {
     fail(error)
     scheduleAiRefresh(nextRefreshDelay())
+  }
+  finally {
+    aiSubmitState.submitting = false
+    aiSubmitState.message = ''
   }
 }
 
@@ -395,6 +442,19 @@ onMounted(async () => {
 <style scoped>
 .summary-box { margin-top: 16px; padding: 14px; border-radius: 16px; background: rgba(255,255,255,0.82); }
 .summary-box p { margin: 6px 0; }
+.ai-panel { position: relative; overflow: hidden; }
+.ai-status-card { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; margin-bottom: 14px; padding: 14px; border-radius: 16px; background: rgba(16, 37, 50, 0.06); border: 1px solid rgba(16, 37, 50, 0.08); }
+.ai-status-card small { grid-column: 2; color: #6d7a83; }
+.ai-status-card.busy { background: rgba(15, 108, 143, 0.1); border-color: rgba(15, 108, 143, 0.22); }
+.status-dot { width: 10px; height: 10px; border-radius: 999px; background: #0f6c8f; box-shadow: 0 0 0 6px rgba(15, 108, 143, 0.12); }
+.ai-status-card.busy .status-dot { animation: pulse 1.2s ease-in-out infinite; }
+.ai-submit-overlay { position: absolute; inset: 0; z-index: 5; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; background: rgba(248, 245, 239, 0.88); backdrop-filter: blur(8px); }
+.ai-submit-overlay p { max-width: 360px; margin: 0; color: #6d7a83; line-height: 1.7; }
+.ai-orbit { position: relative; width: 64px; height: 64px; border-radius: 999px; border: 2px solid rgba(15, 108, 143, 0.18); animation: spin 1.4s linear infinite; }
+.ai-orbit span { position: absolute; width: 12px; height: 12px; border-radius: 999px; background: #0f6c8f; }
+.ai-orbit span:nth-child(1) { top: -6px; left: 26px; }
+.ai-orbit span:nth-child(2) { right: 2px; bottom: 8px; background: #f0b66f; }
+.ai-orbit span:nth-child(3) { left: 2px; bottom: 8px; background: #102532; }
 .empty-box { padding: 18px; border-radius: 16px; background: rgba(255,255,255,0.75); color: #6d7a83; }
 .question-card { display: grid; gap: 8px; padding: 16px; border-radius: 18px; background: rgba(255,255,255,0.82); margin-bottom: 14px; }
 .question-card p { margin: 0; line-height: 1.7; }
@@ -403,5 +463,7 @@ onMounted(async () => {
 .video-box { background: rgba(255,255,255,0.82); padding: 12px; border-radius: 16px; }
 .video-box span { display: block; margin-bottom: 8px; color: #6d7a83; }
 .video-box video { width: 100%; min-height: 220px; background: #111; border-radius: 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.45); opacity: 0.55; } }
 @media (max-width: 900px) { .video-grid { grid-template-columns: 1fr; } }
 </style>
