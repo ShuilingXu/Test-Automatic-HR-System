@@ -70,7 +70,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { interviewApi } from '../services/api'
-import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, playVideo, requestCameraAndMicrophone } from '../utils/media'
+import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, isRelayIceCandidate, playVideo, requestCameraAndMicrophone } from '../utils/media'
 
 const route = useRoute()
 const router = useRouter()
@@ -372,7 +372,7 @@ async function joinVideo() {
       }
     }
     peer.onicecandidate = async (event) => {
-      if (event.candidate) {
+      if (isRelayIceCandidate(event.candidate)) {
         await interviewApi.addIntervieweeIce(sessionForm.processId, { iceCandidate: JSON.stringify(event.candidate) })
       }
     }

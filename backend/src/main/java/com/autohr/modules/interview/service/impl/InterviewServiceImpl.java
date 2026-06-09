@@ -1483,12 +1483,31 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setVideoJoinLink(entity.getVideoJoinLink());
         vo.setOfferSdp(entity.getHrOfferSdp());
         vo.setAnswerSdp(entity.getIntervieweeAnswerSdp());
-        vo.setHrIceCandidates(entity.getHrIceCandidates());
-        vo.setIntervieweeIceCandidates(entity.getIntervieweeIceCandidates());
+        vo.setHrIceCandidates(currentIceCandidates(entity.getHrOfferSdp(), entity.getHrIceCandidates()));
+        vo.setIntervieweeIceCandidates(currentIceCandidates(entity.getIntervieweeAnswerSdp(), entity.getIntervieweeIceCandidates()));
         vo.setRecordingPath(StrUtil.blankToDefault(entity.getMergedRecordingPath(), entity.getRecordingPath()));
         vo.setRecordingFileName(StrUtil.blankToDefault(entity.getMergedRecordingFileName(), entity.getRecordingFileName()));
         vo.setSessionStatus(entity.getSessionStatus());
         return vo;
+    }
+
+    private String currentIceCandidates(String sessionDescription, String candidates) {
+        if (StrUtil.isBlank(candidates)) {
+            return candidates;
+        }
+        return java.util.Arrays.stream(candidates.split("\\n"))
+                .filter(StrUtil::isNotBlank)
+                .filter(item -> isRelayIceCandidate(item))
+                .filter(item -> isCurrentIceCandidate(sessionDescription, item))
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse(null);
+    }
+
+    private boolean isRelayIceCandidate(String iceCandidate) {
+        return StrUtil.contains(iceCandidate, " typ relay ")
+                || StrUtil.endWith(iceCandidate, " typ relay")
+                || StrUtil.contains(iceCandidate, " typ relay\\r")
+                || StrUtil.contains(iceCandidate, " typ relay\\n");
     }
 
     private String appendSignal(String existing, String value) {

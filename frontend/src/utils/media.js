@@ -16,6 +16,10 @@ export function createPeerConnection(iceServers = defaultIceServers()) {
   return new RTCPeerConnection({ iceServers, iceTransportPolicy: 'relay' })
 }
 
+export function isRelayIceCandidate(candidate) {
+  return / typ relay(?: |$)/.test(candidate?.candidate || '')
+}
+
 export function defaultIceServers() {
   return [
     { urls: 'stun:stun.l.google.com:19302' },

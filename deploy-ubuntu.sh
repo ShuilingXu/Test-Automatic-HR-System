@@ -17,6 +17,7 @@ TURN_CREDENTIAL="${TURN_CREDENTIAL:-}"
 TURN_REALM="${TURN_REALM:-}"
 TURN_MIN_PORT="${TURN_MIN_PORT:-}"
 TURN_MAX_PORT="${TURN_MAX_PORT:-}"
+INTERVIEW_VIDEO_FFMPEG_PATH="${INTERVIEW_VIDEO_FFMPEG_PATH:-}"
 
 install_package() {
   local package_name="$1"
@@ -36,6 +37,7 @@ ensure_dependencies() {
   install_package maven
   install_package coturn
   install_package curl
+  install_package ffmpeg
 
   local node_major=0
   if command -v node >/dev/null 2>&1; then
@@ -46,6 +48,27 @@ ensure_dependencies() {
     sudo apt-get install -y ca-certificates curl gnupg
     curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
     sudo apt-get install -y nodejs
+  fi
+
+  ensure_video_codecs
+}
+
+ensure_video_codecs() {
+  local ffmpeg_bin="${INTERVIEW_VIDEO_FFMPEG_PATH:-ffmpeg}"
+
+  if ! command -v "$ffmpeg_bin" >/dev/null 2>&1; then
+    echo "ffmpeg was not found. Install ffmpeg or set INTERVIEW_VIDEO_FFMPEG_PATH."
+    exit 1
+  fi
+
+  if ! "$ffmpeg_bin" -hide_banner -encoders 2>/dev/null | grep -q 'libvpx-vp9'; then
+    echo "ffmpeg encoder libvpx-vp9 was not found. Install an ffmpeg build with VP9/WebM support."
+    exit 1
+  fi
+
+  if ! "$ffmpeg_bin" -hide_banner -encoders 2>/dev/null | grep -q 'libopus'; then
+    echo "ffmpeg encoder libopus was not found. Install an ffmpeg build with Opus/WebM support."
+    exit 1
   fi
 }
 
@@ -109,6 +132,8 @@ prepare_env() {
   TURN_MIN_PORT="${TURN_MIN_PORT:-49160}"
   TURN_MAX_PORT="${TURN_MAX_PORT:-$(get_env_value TURN_MAX_PORT)}"
   TURN_MAX_PORT="${TURN_MAX_PORT:-49200}"
+  INTERVIEW_VIDEO_FFMPEG_PATH="${INTERVIEW_VIDEO_FFMPEG_PATH:-$(get_env_value INTERVIEW_VIDEO_FFMPEG_PATH)}"
+  INTERVIEW_VIDEO_FFMPEG_PATH="${INTERVIEW_VIDEO_FFMPEG_PATH:-ffmpeg}"
 
   if [ -z "$TURN_HOST" ]; then
     echo "TURN_HOST is empty. Set TURN_HOST to this server's public IP or domain."
@@ -131,6 +156,7 @@ prepare_env() {
   set_env_value TURN_REALM "$TURN_REALM"
   set_env_value TURN_MIN_PORT "$TURN_MIN_PORT"
   set_env_value TURN_MAX_PORT "$TURN_MAX_PORT"
+  set_env_value INTERVIEW_VIDEO_FFMPEG_PATH "$INTERVIEW_VIDEO_FFMPEG_PATH"
 }
 
 configure_coturn() {
@@ -237,6 +263,7 @@ main() {
   echo "Frontend: http://localhost:$FRONTEND_PORT"
   echo "TURN:     turn:$TURN_HOST:3478 udp/tcp"
   echo "TURN map: ${TURN_EXTERNAL_IP}${TURN_PRIVATE_IP:+/$TURN_PRIVATE_IP}"
+  echo "Video:    ffmpeg=$INTERVIEW_VIDEO_FFMPEG_PATH; encoders=libvpx-vp9,libopus"
   echo "Firewall: allow tcp $FRONTEND_PORT,$BACKEND_PORT; tcp/udp 3478; udp $TURN_MIN_PORT:$TURN_MAX_PORT"
   echo "Logs:     $LOG_DIR"
   echo "Stop:     kill \$(cat logs/backend.pid) \$(cat logs/frontend.pid)"

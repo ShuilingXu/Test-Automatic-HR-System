@@ -206,7 +206,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi, interviewApi, recruitmentApi } from '../services/api'
-import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, playVideo, requestCameraAndMicrophone } from '../utils/media'
+import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, isRelayIceCandidate, playVideo, requestCameraAndMicrophone } from '../utils/media'
 
 const sessionUser = ref(JSON.parse(localStorage.getItem('session-user') || 'null'))
 const route = useRoute()
@@ -354,7 +354,7 @@ async function startHrVideoCall() {
       }
     }
     hrPeer.onicecandidate = async (event) => {
-      if (event.candidate) {
+      if (isRelayIceCandidate(event.candidate)) {
         await interviewApi.addHrIce(selectedProcess.value.id, { iceCandidate: JSON.stringify(event.candidate) })
       }
     }
