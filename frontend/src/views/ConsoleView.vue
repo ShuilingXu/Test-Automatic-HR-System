@@ -365,7 +365,7 @@ function resetEmployeeForm() { Object.assign(employeeForm, { id: null, employeeC
 function showCreateEmployee() { resetEmployeeForm(); employeeMode.value = 'create' }
 function editEmployee(row) { Object.assign(employeeForm, row); employeeMode.value = 'edit' }
 function selectCandidate(row) { selectedCandidate.value = row }
-function resumeUrl(id) { return `/api/recruitment/resumes/${id}` }
+function resumeUrl(id) { return recruitmentApi.getResumeUrl(id) }
 async function startCandidateInterview(candidate) {
   try {
     const userList = (await authApi.listUsers({ roleCode: 'INTERVIEWEE', keyword: candidate.mobilePhone })).data

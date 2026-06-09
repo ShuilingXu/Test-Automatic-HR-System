@@ -28,27 +28,35 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
         String header = request.getHeader("Authorization");
+        String token = null;
         if (header != null && header.startsWith("Bearer ")) {
-            String token = header.substring(7);
+            token = header.substring(7);
+        } else {
+            token = request.getParameter("token");
+        }
+        if (token != null && !token.isBlank()) {
             try {
-                String username = jwtService.extractUsername(token);
-                SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username).last("LIMIT 1"));
-                if (user != null && Integer.valueOf(1).equals(user.getStatus())) {
-                    Integer tokenVersion = (Integer) jwtService.parseToken(token).get("tokenVersion");
-                    if (tokenVersion != null && !tokenVersion.equals(user.getTokenVersion())) {
-                        filterChain.doFilter(request, response);
-                        return;
-                    }
-                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                            username,
-                            null,
-                            List.of(new SimpleGrantedAuthority("ROLE_" + user.getRoleCode()))
-                    );
-                    SecurityContextHolder.getContext().setAuthentication(authentication);
-                }
+                authenticateToken(token);
             } catch (Exception ignored) {
             }
         }
         filterChain.doFilter(request, response);
+    }
+
+    private void authenticateToken(String token) throws IOException, ServletException {
+        String username = jwtService.extractUsername(token);
+        SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username).last("LIMIT 1"));
+        if (user != null && Integer.valueOf(1).equals(user.getStatus())) {
+            Integer tokenVersion = (Integer) jwtService.parseToken(token).get("tokenVersion");
+            if (tokenVersion != null && !tokenVersion.equals(user.getTokenVersion())) {
+                return;
+            }
+            UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                    username,
+                    null,
+                    List.of(new SimpleGrantedAuthority("ROLE_" + user.getRoleCode()))
+            );
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+        }
     }
 }

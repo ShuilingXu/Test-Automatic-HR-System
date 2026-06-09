@@ -25,6 +25,11 @@ request.interceptors.response.use(
   },
 )
 
+function authenticatedFileUrl(path) {
+  const token = window.localStorage.getItem('demo-token')
+  return token ? `${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : path
+}
+
 export const hrApi = {
   getDashboard() { return request.get('/hr/dashboard') },
   listDepartments(params) { return request.get('/hr/departments', { params }) },
@@ -58,6 +63,7 @@ export const recruitmentApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  getResumeUrl(id) { return authenticatedFileUrl(`/api/recruitment/resumes/${id}`) },
 }
 
 export const authApi = {
@@ -122,7 +128,7 @@ export const interviewApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
-  getRecordingUrl(processId) { return `/api/interview/hr/video-recording/${processId}` },
+  getRecordingUrl(processId) { return authenticatedFileUrl(`/api/interview/hr/video-recording/${processId}`) },
   intervieweeJoin(processId) { return request.post(`/interview/interviewee/video-join/${processId}`) },
   hrJoin(processId, params) { return request.post(`/interview/hr/video-join/${processId}`, null, { params }) },
   completeVideo(processId, params) { return request.post(`/interview/hr/video-complete/${processId}`, null, { params }) },
