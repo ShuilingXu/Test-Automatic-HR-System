@@ -4,6 +4,12 @@
   color: #1d2a33;
   background: linear-gradient(135deg, #f3efe7 0%, #dce7ec 45%, #f7f9fb 100%);
   font-family: 'Outfit', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --brand-ink: #102532;
+  --brand-cream: #f4efe7;
+  --brand-surface: #f8f5ef;
+  --brand-accent: #d78b33;
+  --brand-accent-dark: #b86d1f;
+  --brand-danger: #b84343;
 }
 
 * {
@@ -17,6 +23,120 @@ body {
 
 a {
   color: inherit;
+}
+
+button,
+.el-button {
+  font-family: inherit;
+}
+
+button:not(:disabled),
+.el-button:not(.is-disabled) {
+  cursor: pointer;
+}
+
+.el-button {
+  --el-button-border-radius: 999px;
+  --el-button-font-weight: 700;
+  --el-button-size: 38px;
+  --el-button-bg-color: rgba(255, 255, 255, 0.82);
+  --el-button-border-color: rgba(16, 37, 50, 0.14);
+  --el-button-text-color: var(--brand-ink);
+  --el-button-hover-bg-color: var(--brand-surface);
+  --el-button-hover-border-color: rgba(16, 37, 50, 0.24);
+  --el-button-hover-text-color: var(--brand-ink);
+  --el-button-active-bg-color: #ede5d9;
+  --el-button-active-border-color: rgba(16, 37, 50, 0.28);
+  min-height: 38px;
+  padding: 10px 18px;
+  letter-spacing: 0.01em;
+  box-shadow: 0 8px 18px rgba(16, 37, 50, 0.06);
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.el-button:not(.is-disabled):hover,
+.sub-tabs button:hover,
+.job-list button:hover,
+.console-side button:hover,
+.side-link:hover,
+.link-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(16, 37, 50, 0.1);
+}
+
+.el-button--primary {
+  --el-button-bg-color: var(--brand-ink);
+  --el-button-border-color: var(--brand-ink);
+  --el-button-text-color: var(--brand-cream);
+  --el-button-hover-bg-color: #173446;
+  --el-button-hover-border-color: #173446;
+  --el-button-hover-text-color: #fff7ef;
+  --el-button-active-bg-color: #0b1a24;
+  --el-button-active-border-color: #0b1a24;
+}
+
+.el-button--warning {
+  --el-button-bg-color: var(--brand-accent);
+  --el-button-border-color: var(--brand-accent);
+  --el-button-text-color: #fff7ef;
+  --el-button-hover-bg-color: var(--brand-accent-dark);
+  --el-button-hover-border-color: var(--brand-accent-dark);
+  --el-button-hover-text-color: #fff7ef;
+  --el-button-active-bg-color: #9d5817;
+  --el-button-active-border-color: #9d5817;
+}
+
+.el-button--danger {
+  --el-button-bg-color: var(--brand-danger);
+  --el-button-border-color: var(--brand-danger);
+  --el-button-text-color: #fff7ef;
+  --el-button-hover-bg-color: #9e3434;
+  --el-button-hover-border-color: #9e3434;
+  --el-button-hover-text-color: #fff7ef;
+  --el-button-active-bg-color: #842828;
+  --el-button-active-border-color: #842828;
+}
+
+.el-button.is-text {
+  box-shadow: none;
+  padding-inline: 8px;
+}
+
+.sub-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sub-tabs button {
+  min-height: 38px;
+  border: 1px solid rgba(16, 37, 50, 0.14);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--brand-ink);
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  box-shadow: 0 8px 18px rgba(16, 37, 50, 0.06);
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.sub-tabs button.active {
+  background: var(--brand-ink);
+  border-color: var(--brand-ink);
+  color: var(--brand-cream);
+}
+
+.job-list button {
+  width: 100%;
+  border: 1px solid rgba(16, 37, 50, 0.1);
+  border-radius: 18px;
+  padding: 16px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--brand-ink);
+  box-shadow: 0 8px 18px rgba(16, 37, 50, 0.06);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
 .page-shell {
@@ -64,7 +184,7 @@ a {
 }
 
 .surface {
-  background: #f8f5ef;
+  background: var(--brand-surface);
   border-radius: 22px;
   padding: 20px;
 }
@@ -105,6 +225,8 @@ a {
   border-radius: 999px;
   background: #173446;
   color: #fff7ef;
+  box-shadow: 0 8px 18px rgba(16, 37, 50, 0.08);
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
 }
 
 @media (max-width: 900px) {

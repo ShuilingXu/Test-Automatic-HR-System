@@ -401,9 +401,7 @@ onMounted(loadAll)
 
 <style scoped>
 .topline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
-.sub-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin: 22px 0; }
-.sub-tabs button { border: 1px solid rgba(16, 37, 50, 0.12); background: #f8f5ef; color: #102532; border-radius: 999px; padding: 10px 16px; cursor: pointer; }
-.sub-tabs button.active { background: #102532; color: #f4efe7; }
+.sub-tabs { margin: 22px 0; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
 .llm-config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .wide { grid-column: 1 / -1; }

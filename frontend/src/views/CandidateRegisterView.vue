@@ -111,7 +111,6 @@ onMounted(async () => {
 
 <style scoped>
 .job-list { display: grid; gap: 12px; }
-.job-list button { border: 0; border-radius: 16px; padding: 14px; text-align: left; background: rgba(255, 255, 255, 0.82); cursor: pointer; }
 .job-list strong, .job-list span, .job-list small { display: block; }
 .job-list span { margin: 6px 0; color: #61727d; }
 .upload-tip { color: #6d7a83; margin-top: 8px; }
