@@ -1056,12 +1056,17 @@ public class InterviewServiceImpl implements InterviewService {
                 new cn.hutool.json.JSONObject().set("role", "user").set("content", userPrompt)
         )));
         debugLlm("REQUEST", config, systemPrompt, userPrompt, null, null);
-        cn.hutool.http.HttpResponse httpResponse = cn.hutool.http.HttpRequest.post(resolveChatCompletionsUrl(config.getBaseUrl()))
-                .header("Authorization", "Bearer " + config.getApiKey())
-                .header("Content-Type", "application/json")
-                .body(payload.toString())
-                .timeout(15000)
-                .execute();
+        cn.hutool.http.HttpResponse httpResponse;
+        try {
+            httpResponse = cn.hutool.http.HttpRequest.post(resolveChatCompletionsUrl(config.getBaseUrl()))
+                    .header("Authorization", "Bearer " + config.getApiKey())
+                    .header("Content-Type", "application/json")
+                    .body(payload.toString())
+                    .timeout(15000)
+                    .execute();
+        } catch (Exception ex) {
+            throw new BusinessException("LLM接口调用失败: " + abbreviate(ex.getMessage()));
+        }
         String responseText = httpResponse.body();
         debugLlm("RESPONSE", config, systemPrompt, userPrompt, httpResponse.getStatus(), responseText);
         if (!httpResponse.isOk()) {
@@ -1078,7 +1083,11 @@ public class InterviewServiceImpl implements InterviewService {
             String error = response.getByPath("error.message", String.class);
             throw new BusinessException("LLM接口返回缺少choices，请检查接口地址、模型名和API Key: " + abbreviate(StrUtil.blankToDefault(error, responseText)));
         }
-        cn.hutool.json.JSONObject message = choices.getJSONObject(0).getJSONObject("message");
+        cn.hutool.json.JSONObject firstChoice = choices.getJSONObject(0);
+        if (firstChoice == null) {
+            throw new BusinessException("LLM接口返回choices格式异常: " + abbreviate(responseText));
+        }
+        cn.hutool.json.JSONObject message = firstChoice.getJSONObject("message");
         if (message == null || StrUtil.isBlank(message.getStr("content"))) {
             throw new BusinessException("LLM接口返回缺少message.content: " + abbreviate(responseText));
         }
