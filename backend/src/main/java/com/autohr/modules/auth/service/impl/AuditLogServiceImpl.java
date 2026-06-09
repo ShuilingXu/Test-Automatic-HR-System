@@ -19,7 +19,7 @@ public class AuditLogServiceImpl implements AuditLogService {
     private final SysAuditLogMapper auditLogMapper;
 
     @Override
-    public void log(Long operatorUserId, String operatorUsername, String operatorRoleCode, String moduleCode, String actionCode, String targetType, String targetId, String detail) {
+    public synchronized void log(Long operatorUserId, String operatorUsername, String operatorRoleCode, String moduleCode, String actionCode, String targetType, String targetId, String detail) {
         SysAuditLog log = new SysAuditLog();
         log.setId(nextId(auditLogMapper.selectList(null).stream().map(SysAuditLog::getId).toList()));
         log.setOperatorUserId(operatorUserId);

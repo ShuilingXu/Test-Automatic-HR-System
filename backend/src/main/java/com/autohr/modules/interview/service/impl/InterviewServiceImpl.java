@@ -60,10 +60,16 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
 public class InterviewServiceImpl implements InterviewService {
+
+    private static final Pattern SDP_ICE_UFRAG_PATTERN = Pattern.compile("(?m)^a=ice-ufrag:([^\\r\\n]+)");
+    private static final Pattern CANDIDATE_JSON_UFRAG_PATTERN = Pattern.compile("\\\"usernameFragment\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
+    private static final Pattern CANDIDATE_SDP_UFRAG_PATTERN = Pattern.compile("(?:^|\\s)ufrag\\s+([^\\s]+)");
 
     private final InterviewKnowledgeBaseMapper knowledgeBaseMapper;
     private final InterviewKnowledgeItemMapper knowledgeItemMapper;
@@ -576,6 +582,7 @@ public class InterviewServiceImpl implements InterviewService {
             return toVideoSignalVO(session);
         }
         session.setIntervieweeAnswerSdp(request.getAnswerSdp());
+        session.setHrIceCandidates(null);
         session.setIntervieweeIceCandidates(null);
         session.setSessionStatus("ANSWER_SUBMITTED");
         videoSessionMapper.updateById(session);
@@ -587,12 +594,14 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public VideoSignalVO addHrIceCandidate(Long processId, VideoSignalRequest request) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        if (!isCurrentIceCandidate(session.getHrOfferSdp(), request.getIceCandidate())) {
+            return toVideoSignalVO(session);
+        }
         if (containsSignal(session.getHrIceCandidates(), request.getIceCandidate())) {
             return toVideoSignalVO(session);
         }
         session.setHrIceCandidates(appendSignal(session.getHrIceCandidates(), request.getIceCandidate()));
         videoSessionMapper.updateById(session);
-        auditLogService.log(session.getApproverUserId(), session.getApproverName(), "HR_ADMIN", "INTERVIEW", "ADD_HR_ICE", "VIDEO_SESSION", String.valueOf(session.getId()), "ice");
         return toVideoSignalVO(session);
     }
 
@@ -601,12 +610,14 @@ public class InterviewServiceImpl implements InterviewService {
     public VideoSignalVO addIntervieweeIceCandidate(Long processId, VideoSignalRequest request, Long intervieweeUserId, String intervieweeName) {
         requireIntervieweeProcess(processId, intervieweeUserId);
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        if (!isCurrentIceCandidate(session.getIntervieweeAnswerSdp(), request.getIceCandidate())) {
+            return toVideoSignalVO(session);
+        }
         if (containsSignal(session.getIntervieweeIceCandidates(), request.getIceCandidate())) {
             return toVideoSignalVO(session);
         }
         session.setIntervieweeIceCandidates(appendSignal(session.getIntervieweeIceCandidates(), request.getIceCandidate()));
         videoSessionMapper.updateById(session);
-        auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "ADD_INTERVIEWEE_ICE", "VIDEO_SESSION", String.valueOf(session.getId()), "ice");
         return toVideoSignalVO(session);
     }
 
@@ -1286,6 +1297,32 @@ public class InterviewServiceImpl implements InterviewService {
         }
         return java.util.Arrays.stream(existing.split("\\n"))
                 .anyMatch(item -> StrUtil.equals(item, value));
+    }
+
+    private boolean isCurrentIceCandidate(String sessionDescription, String iceCandidate) {
+        if (StrUtil.isBlank(sessionDescription) || StrUtil.isBlank(iceCandidate)) {
+            return false;
+        }
+        String sdpUfrag = extractSdpIceUfrag(sessionDescription);
+        String candidateUfrag = extractCandidateIceUfrag(iceCandidate);
+        if (StrUtil.isBlank(sdpUfrag) || StrUtil.isBlank(candidateUfrag)) {
+            return true;
+        }
+        return StrUtil.equals(sdpUfrag, candidateUfrag);
+    }
+
+    private String extractSdpIceUfrag(String sessionDescription) {
+        Matcher matcher = SDP_ICE_UFRAG_PATTERN.matcher(sessionDescription);
+        return matcher.find() ? matcher.group(1).trim() : null;
+    }
+
+    private String extractCandidateIceUfrag(String iceCandidate) {
+        Matcher jsonMatcher = CANDIDATE_JSON_UFRAG_PATTERN.matcher(iceCandidate);
+        if (jsonMatcher.find()) {
+            return jsonMatcher.group(1).trim();
+        }
+        Matcher sdpMatcher = CANDIDATE_SDP_UFRAG_PATTERN.matcher(iceCandidate);
+        return sdpMatcher.find() ? sdpMatcher.group(1).trim() : null;
     }
 
     private boolean isTerminalVideoSessionStatus(String status) {
