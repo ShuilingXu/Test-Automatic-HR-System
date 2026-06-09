@@ -267,6 +267,56 @@ stun:stun.cloudflare.com:3478
 
 公网或复杂 NAT 环境建议配置 TURN 服务。
 
+#### 本地 coturn 转发服务
+
+项目提供了 Docker 方式的本地 coturn 配置，用于 WebRTC TURN 中继转发测试。
+
+1. 安装 Docker Desktop 或 Docker Engine。
+2. 修改 `.env` 中 TURN 配置。浏览器和 coturn 在同一台机器时可用：
+
+```properties
+INTERVIEW_TURN_URLS=turn:127.0.0.1:3478?transport=udp,turn:127.0.0.1:3478?transport=tcp
+INTERVIEW_TURN_USERNAME=autohr
+INTERVIEW_TURN_CREDENTIAL=change-this-password
+TURN_HOST=127.0.0.1
+TURN_USERNAME=autohr
+TURN_CREDENTIAL=change-this-password
+TURN_REALM=autohr.local
+TURN_MIN_PORT=49160
+TURN_MAX_PORT=49200
+```
+
+如果使用手机或局域网其他机器访问前端，`127.0.0.1` 必须改为运行 coturn 的电脑局域网 IP，例如 `192.168.1.20`：
+
+```properties
+INTERVIEW_TURN_URLS=turn:192.168.1.20:3478?transport=udp,turn:192.168.1.20:3478?transport=tcp
+TURN_HOST=192.168.1.20
+```
+
+3. 启动 coturn：
+
+```bash
+# Windows
+start-coturn.bat
+
+# Linux/macOS
+./start-coturn.sh
+```
+
+4. 重启后端，使 `/api/interview/ice-servers` 返回新的 TURN 配置。
+
+5. 停止 coturn：
+
+```bash
+# Windows
+stop-coturn.bat
+
+# Linux/macOS
+./stop-coturn.sh
+```
+
+本地 Docker 配置会映射 `3478/tcp`、`3478/udp`、`5349/tcp`、`5349/udp` 和 `49160-49200/udp` 中继端口。Windows 或防火墙环境下需允许 Docker/WSL 访问这些端口。生产环境建议使用公网 IP/域名、强密码，并按需配置 TLS。
+
 ### 13. 线下面试审批
 
 1. 视频面试通过后，流程进入线下面试阶段。

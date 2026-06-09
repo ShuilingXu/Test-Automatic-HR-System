@@ -111,12 +111,28 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
     }
 
     private void migrateInterviewVideoSessionColumns(Connection connection, Statement statement) throws SQLException {
+        addColumnIfMissing(connection, statement, "interview_video_session", "approver_user_id", "INTEGER");
+        addColumnIfMissing(connection, statement, "interview_video_session", "approver_name", "VARCHAR(64)");
+        addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_join_time", dateTimeType());
+        addColumnIfMissing(connection, statement, "interview_video_session", "hr_join_time", dateTimeType());
+        addColumnIfMissing(connection, statement, "interview_video_session", "start_time", dateTimeType());
+        addColumnIfMissing(connection, statement, "interview_video_session", "end_time", dateTimeType());
+        addColumnIfMissing(connection, statement, "interview_video_session", "recording_path", "VARCHAR(500)");
         addColumnIfMissing(connection, statement, "interview_video_session", "hr_recording_path", "VARCHAR(500)");
         addColumnIfMissing(connection, statement, "interview_video_session", "hr_recording_file_name", "VARCHAR(255)");
         addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_recording_path", "VARCHAR(500)");
         addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_recording_file_name", "VARCHAR(255)");
         addColumnIfMissing(connection, statement, "interview_video_session", "merged_recording_path", "VARCHAR(500)");
         addColumnIfMissing(connection, statement, "interview_video_session", "merged_recording_file_name", "VARCHAR(255)");
+        addColumnIfMissing(connection, statement, "interview_video_session", "hr_offer_sdp", "TEXT");
+        addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_answer_sdp", "TEXT");
+        addColumnIfMissing(connection, statement, "interview_video_session", "hr_ice_candidates", "TEXT");
+        addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_ice_candidates", "TEXT");
+        addColumnIfMissing(connection, statement, "interview_video_session", "recording_file_name", "VARCHAR(255)");
+    }
+
+    private String dateTimeType() {
+        return activeDatabase.type() == DatabaseType.PGSQL ? "TIMESTAMP" : "DATETIME";
     }
 
     private void migrateRecruitmentCandidateColumns(Connection connection, Statement statement) throws SQLException {

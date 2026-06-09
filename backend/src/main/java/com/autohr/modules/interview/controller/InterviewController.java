@@ -234,8 +234,15 @@ public class InterviewController {
 
     @PostMapping("/hr/video-complete/{processId}")
     public ApiResponse<InterviewVO> completeVideo(@PathVariable Long processId,
-                                                   @RequestParam(required = false) String recordingPath) {
+                                                    @RequestParam(required = false) String recordingPath) {
         return ApiResponse.success(interviewService.completeVideoSession(processId, recordingPath));
+    }
+
+    @PostMapping("/interviewee/video-complete/{processId}")
+    public ApiResponse<InterviewVO> intervieweeCompleteVideo(Authentication authentication,
+                                                             @PathVariable Long processId) {
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.requestIntervieweeVideoEnd(processId, current.getId()));
     }
 
     @PostMapping("/hr/video-recording/{processId}")
@@ -299,7 +306,7 @@ public class InterviewController {
 
     @GetMapping("/hr/video-recording/{processId}")
     public ResponseEntity<Resource> downloadRecording(@PathVariable Long processId) {
-        var session = interviewService.getVideoSession(processId);
+        var session = interviewService.getDownloadableVideoSession(processId);
         String path = session.getMergedRecordingPath() == null ? session.getRecordingPath() : session.getMergedRecordingPath();
         String fileName = session.getMergedRecordingFileName() == null ? session.getRecordingFileName() : session.getMergedRecordingFileName();
         return FileDownloadSupport.buildInlineResponse(path, UploadPaths.RECORDING_DIR, fileName, "video/webm", "录制文件不可访问");

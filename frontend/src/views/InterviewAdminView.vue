@@ -29,7 +29,7 @@
             <el-form-item label="所属知识库"><el-select v-model="itemForm.knowledgeBaseId"><el-option v-for="item in knowledgeBases" :key="item.id" :label="item.knowledgeBaseName" :value="item.id" /></el-select></el-form-item>
             <el-form-item label="知识点"><el-input v-model="itemForm.knowledgePoint" /></el-form-item>
             <el-form-item label="知识内容"><el-input v-model="itemForm.knowledgeContent" type="textarea" :rows="4" /></el-form-item>
-            <el-button type="primary" @click="saveKnowledgeItem">保存知识点</el-button>
+            <div class="action-row"><el-button type="primary" @click="saveKnowledgeItem">{{ itemForm.id ? '保存修改' : '保存知识点' }}</el-button><el-button @click="resetKnowledgeItemForm">清空新增</el-button></div>
           </el-form>
           <div class="surface inner-surface csv-import-box">
             <h3>CSV批量添加知识点</h3>
@@ -52,10 +52,11 @@
           <el-table-column prop="jobCategory" label="岗位方向" />
           <el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteKnowledgeBase(scope.row.id)">删除</el-button></template></el-table-column>
         </el-table>
-        <el-table :data="knowledgeItems" stripe class="data-table">
+        <el-table :data="knowledgeItems" stripe class="data-table" @row-click="editKnowledgeItem">
           <el-table-column prop="knowledgePoint" label="知识点" />
           <el-table-column prop="knowledgeContent" label="知识内容" min-width="280" />
-          <el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteKnowledgeItem(scope.row.id)">删除</el-button></template></el-table-column>
+          <el-table-column prop="status" label="状态" width="90"><template #default="scope">{{ scope.row.status === 0 ? '停用' : '启用' }}</template></el-table-column>
+          <el-table-column label="操作" width="160"><template #default="scope"><el-button text @click.stop="editKnowledgeItem(scope.row)">编辑</el-button><el-button text type="danger" @click.stop="deleteKnowledgeItem(scope.row.id)">删除</el-button></template></el-table-column>
         </el-table>
       </section>
 
@@ -125,12 +126,12 @@
       <section v-if="activeTab === 'process'" class="surface">
         <h3>候选人面试流程</h3>
         <el-form :model="processSearch" label-position="top" class="form-grid">
-          <el-form-item label="搜索候选人"><el-input v-model="processSearch.keyword" placeholder="候选人姓名 / 手机 / 邮箱 / 专业 / 学校" /></el-form-item>
+          <el-form-item label="搜索候选人"><el-input v-model="processSearch.keyword" placeholder="候选人ID / 姓名 / 手机 / 邮箱 / 专业 / 学校" /></el-form-item>
         </el-form>
         <el-form :model="processForm" label-position="top" class="form-grid">
-          <el-form-item label="候选人投递记录"><el-select v-model="processForm.recruitmentCandidateId" filterable clearable @change="syncIntervieweeByCandidate"><el-option v-for="item in filteredProcessCandidates" :key="item.id" :label="`${item.fullName} / ${item.jobTitle || '未绑定岗位'} / 投递编号 ${item.id}`" :value="item.id" /></el-select></el-form-item>
+          <el-form-item label="候选人投递记录"><el-select v-model="processForm.recruitmentCandidateId" filterable clearable @change="syncIntervieweeByCandidate"><el-option v-for="item in filteredProcessCandidates" :key="item.id" :label="`ID ${item.id} / ${item.fullName} / ${item.jobTitle || '未绑定岗位'}`" :value="item.id" /></el-select></el-form-item>
           <el-form-item label="投递岗位"><el-select v-model="processForm.jobId" disabled><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
-          <el-form-item label="投递编号"><el-input :model-value="processCandidatePreview?.id || '-'" disabled /></el-form-item>
+          <el-form-item label="候选人唯一ID"><el-input :model-value="processCandidatePreview?.id || '-'" disabled /></el-form-item>
           <el-form-item label="AI通过阈值"><el-input-number v-model="processForm.aiThresholdScore" :min="1" /></el-form-item>
           <el-form-item label="AI最少问答轮数"><el-input-number v-model="processForm.aiMinQuestionRounds" :min="1" /></el-form-item>
           <el-form-item label="AI最多问答轮数"><el-input-number v-model="processForm.aiMaxQuestionRounds" :min="1" /></el-form-item>
@@ -139,9 +140,9 @@
         <div v-if="processCandidatePreview" class="candidate-preview">
           <h4>候选人投递预览</h4>
           <div class="preview-grid">
-            <div><span>候选人</span><strong>{{ processCandidatePreview.fullName }}</strong></div>
+            <div><span>候选人ID</span><strong>{{ processCandidatePreview.id }}</strong></div>
+            <div><span>候选人姓名</span><strong>{{ processCandidatePreview.fullName }}</strong></div>
             <div><span>投递岗位</span><strong>{{ processCandidatePreview.jobTitle || '-' }}</strong></div>
-            <div><span>投递编号</span><strong>{{ processCandidatePreview.id }}</strong></div>
             <div><span>联系电话</span><strong>{{ processCandidatePreview.mobilePhone || '-' }}</strong></div>
             <div><span>邮箱</span><strong>{{ processCandidatePreview.email || '-' }}</strong></div>
             <div><span>专业</span><strong>{{ processCandidatePreview.major || '-' }}</strong></div>
@@ -152,9 +153,9 @@
         <div class="link-row"><el-button type="primary" @click="startProcess">发起面试流程</el-button></div>
         <el-table :data="processes" stripe class="data-table" @row-click="openProcess">
           <el-table-column prop="id" label="流程流水号" width="110" />
-          <el-table-column prop="candidateName" label="候选人" />
+          <el-table-column prop="recruitmentCandidateId" label="候选人ID" />
+          <el-table-column prop="candidateName" label="候选人姓名" />
           <el-table-column prop="questionTitle" label="投递岗位" />
-          <el-table-column prop="recruitmentCandidateId" label="投递编号" />
           <el-table-column prop="currentStage" label="当前轮次" />
           <el-table-column prop="processStatusView" label="状态展示" />
           <el-table-column prop="aiAverageScore" label="AI均分" />
@@ -169,7 +170,7 @@
           <div v-if="selectedProcess.videoJoinLink || selectedProcess.videoSerialNo" class="serial-line">
             <span v-if="selectedProcess.videoSerialNo">视频流水号：{{ selectedProcess.videoSerialNo }}</span>
             <el-button v-if="selectedProcess.videoJoinLink" text class="video-link" @click="copyVideoJoinLink">复制候选人视频链接</el-button>
-            <a v-if="selectedProcess.recordingPath || selectedProcess.recordingFileName" :href="interviewApi.getRecordingUrl(selectedProcess.id)" target="_blank" class="video-link">查看录制文件</a>
+            <a v-if="selectedProcess.recordingPath || selectedProcess.recordingFileName" :href="interviewApi.getRecordingUrl(selectedProcess.id)" target="_blank" class="video-link">查看合并录制文件</a>
           </div>
           <div class="video-grid">
             <div class="video-box"><span>HR本地视频</span><video ref="hrLocalVideo" autoplay muted playsinline></video></div>
@@ -257,7 +258,7 @@ const filteredProcessCandidates = computed(() => {
   const keyword = processSearch.keyword.trim().toLowerCase()
   const candidates = recruitmentCandidates.value.filter((item) => !item.interviewProcessId && item.applicationStatus !== 'REJECTED')
   if (!keyword) return candidates
-  return candidates.filter((item) => [item.fullName, item.mobilePhone, item.email, item.major, item.graduationSchool]
+  return candidates.filter((item) => [item.id, item.fullName, item.mobilePhone, item.email, item.major, item.graduationSchool]
     .some((value) => String(value || '').toLowerCase().includes(keyword)))
 })
 const processCandidatePreview = computed(() => recruitmentCandidates.value.find((item) => item.id === processForm.recruitmentCandidateId) || null)
@@ -291,6 +292,8 @@ function openProcess(row) { router.push(`/interview/hr/processes/${row.id}`) }
 async function saveKnowledgeBase() { try { await interviewApi.saveKnowledgeBase({ ...kbForm }); ElMessage.success('知识库已保存'); await loadAll() } catch (error) { fail(error) } }
 async function deleteKnowledgeBase(id) { try { await interviewApi.deleteKnowledgeBase(id); ElMessage.success('知识库已删除'); await loadAll() } catch (error) { fail(error) } }
 async function saveKnowledgeItem() { try { await interviewApi.saveKnowledgeItem({ ...itemForm }); ElMessage.success('知识点已保存'); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
+function editKnowledgeItem(row) { Object.assign(itemForm, { id: row.id, knowledgeBaseId: row.knowledgeBaseId, knowledgePoint: row.knowledgePoint, knowledgeContent: row.knowledgeContent, status: row.status ?? 1 }) }
+function resetKnowledgeItemForm() { Object.assign(itemForm, { id: null, knowledgeBaseId: itemForm.knowledgeBaseId, knowledgePoint: '', knowledgeContent: '', status: 1 }) }
 async function importKnowledgeItemsCsv(uploadFile) { try { if (!itemForm.knowledgeBaseId) { ElMessage.warning('请先选择目标知识库'); return } const response = await interviewApi.importKnowledgeItems(itemForm.knowledgeBaseId, uploadFile.raw); ElMessage.success(`已导入 ${response.data.imported} 条知识点`); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
 async function deleteKnowledgeItem(id) { try { await interviewApi.deleteKnowledgeItem(id); ElMessage.success('知识点已删除'); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
 async function saveWeight() { try { await interviewApi.saveJobKnowledgeWeight({ ...weightForm }); ElMessage.success('权重已保存'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
@@ -331,6 +334,11 @@ async function startHrVideoCall() {
   if (!selectedProcess.value) return
   try {
     disconnectHrVideo()
+    const sessionResponse = await interviewApi.createVideoSession(selectedProcess.value.id, {
+      approverUserId: sessionUser.value?.id,
+      approverName: sessionUser.value?.displayName || sessionUser.value?.username,
+    })
+    selectedProcess.value.videoJoinLink = sessionResponse.data?.videoJoinLink || selectedProcess.value.videoJoinLink
     hrLocalStream = await requestCameraAndMicrophone()
     hrLocalVideo.value.srcObject = hrLocalStream
     playVideo(hrLocalVideo.value)
@@ -354,10 +362,6 @@ async function startHrVideoCall() {
     await hrPeer.setLocalDescription(offer)
     await interviewApi.publishVideoOffer(selectedProcess.value.id, { offerSdp: JSON.stringify(offer) })
     await interviewApi.hrJoin(selectedProcess.value.id)
-    hrRecorder = new MediaRecorder(hrLocalStream)
-    hrRecordedChunks = []
-    hrRecorder.ondataavailable = (event) => { if (event.data.size > 0) hrRecordedChunks.push(event.data) }
-    hrRecorder.start(1000)
     videoActive.value = true
     hrPollTimer = setInterval(async () => {
       const state = (await interviewApi.getHrVideoState(selectedProcess.value.id)).data
@@ -374,27 +378,49 @@ async function startHrVideoCall() {
           }
         }
       }
+      if (state.sessionStatus === 'RECORDING') {
+        startHrRecordingIfNeeded()
+      }
+      if (state.sessionStatus === 'END_REQUESTED') {
+        await stopAndUploadHrRecording()
+        disconnectHrVideo()
+        await loadAll()
+      }
     }, 1000)
-    ElMessage.success('HR视频通话已开始')
+    ElMessage.success('HR视频已就绪，等待面试者加入后同步开始录制')
   } catch (error) { ElMessage.error(buildMediaErrorMessage(error)) }
 }
 
 async function stopHrRecording() {
   try {
-    if (hrRecorder && hrRecorder.state !== 'inactive') {
-      await new Promise((resolve) => {
-        hrRecorder.onstop = resolve
-        hrRecorder.stop()
-      })
-      const blob = new Blob(hrRecordedChunks, { type: 'video/webm' })
-      const file = new File([blob], `hr-${selectedProcess.value.id}.webm`, { type: 'video/webm' })
-      await interviewApi.uploadHrVideoRecording(selectedProcess.value.id, file)
-      await interviewApi.completeVideo(selectedProcess.value.id)
-      ElMessage.success('录制已上传')
-    }
+    await interviewApi.completeVideo(selectedProcess.value.id)
+    await stopAndUploadHrRecording()
     disconnectHrVideo()
     await loadAll()
   } catch (error) { fail(error) }
+}
+
+function startHrRecordingIfNeeded() {
+  if (!hrLocalStream || (hrRecorder && hrRecorder.state !== 'inactive')) return
+  hrRecorder = new MediaRecorder(hrLocalStream)
+  hrRecordedChunks = []
+  hrRecorder.ondataavailable = (event) => { if (event.data.size > 0) hrRecordedChunks.push(event.data) }
+  hrRecorder.start(1000)
+  ElMessage.success('双方已进入视频面，录制已同步开始')
+}
+
+async function stopAndUploadHrRecording() {
+  if (!hrRecorder || hrRecorder.state === 'inactive') return
+  await new Promise((resolve) => {
+    hrRecorder.onstop = resolve
+    hrRecorder.stop()
+  })
+  const blob = new Blob(hrRecordedChunks, { type: 'video/webm' })
+  if (blob.size > 0) {
+    const file = new File([blob], `hr-${selectedProcess.value.id}.webm`, { type: 'video/webm' })
+    await interviewApi.uploadHrVideoRecording(selectedProcess.value.id, file)
+    ElMessage.success('HR录制已上传')
+  }
 }
 
 function disconnectHrVideo() {
@@ -403,6 +429,8 @@ function disconnectHrVideo() {
   hrPeer?.getSenders?.().forEach((sender) => sender.track?.stop())
   hrPeer?.close()
   hrPeer = null
+  hrRecorder = null
+  hrRecordedChunks = []
   hrLocalStream?.getTracks().forEach((track) => track.stop())
   hrLocalStream = null
   hrRemoteStream = null

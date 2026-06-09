@@ -30,6 +30,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -141,7 +142,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         candidate.setResumeLlmStatus("PENDING");
         candidateMapper.insert(candidate);
         auditLogService.log(user.getId(), displayName(user), user.getRoleCode(), "RECRUITMENT", "APPLY_CANDIDATE", "RECRUITMENT_CANDIDATE", String.valueOf(candidate.getId()), candidate.getFullName() + " 投递岗位 " + request.getJobId());
-        runAfterCommit(() -> CompletableFuture.runAsync(() -> evaluateCandidateResumeSafely(candidate.getId())));
+        runAfterCommit(() -> CompletableFuture.runAsync(() -> evaluateCandidateResumeSafely(candidate.getId(), null)));
         return toCandidateVO(requireCandidate(candidate.getId()), loadJobMap(), loadResumeMap());
     }
 
@@ -249,7 +250,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             candidate.setResumeLlmStatus("PENDING");
             candidateMapper.updateById(candidate);
             auditLogService.log(owner.getId(), displayName(owner), owner.getRoleCode(), "RECRUITMENT", "UPLOAD_RESUME", "RECRUITMENT_RESUME", String.valueOf(resumeFile.getId()), originalName);
-            runAfterCommit(() -> CompletableFuture.runAsync(() -> evaluateCandidateResumeSafely(candidateId)));
+            runAfterCommit(() -> CompletableFuture.runAsync(() -> evaluateCandidateResumeSafely(candidateId, resumeFile.getId())));
             return toResumeFileVO(resumeFileMapper.selectById(resumeFile.getId()));
         } catch (IOException ex) {
             throw new BusinessException("简历上传失败: " + ex.getMessage());
@@ -272,13 +273,20 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         return resumeFile;
     }
 
-    private void evaluateCandidateResumeSafely(Long candidateId) {
+    private void evaluateCandidateResumeSafely(Long candidateId, Long expectedResumeFileId) {
         try {
             RecruitmentCandidate candidate = requireCandidate(candidateId);
+            if (!Objects.equals(candidate.getResumeFileId(), expectedResumeFileId)) {
+                return;
+            }
             RecruitmentJob job = requireJob(candidate.getJobId());
             RecruitmentResumeFile resumeFile = candidate.getResumeFileId() == null ? null : resumeFileMapper.selectById(candidate.getResumeFileId());
             String resumeText = resumeFile == null ? "未上传简历文件" : extractResumeText(resumeFile);
             ResumeLlmEvaluation evaluation = callResumeReviewLlm(job, candidate, resumeFile, resumeText);
+            RecruitmentCandidate latest = requireCandidate(candidateId);
+            if (!Objects.equals(latest.getResumeFileId(), expectedResumeFileId)) {
+                return;
+            }
             candidate.setResumeLlmScore(evaluation.score());
             candidate.setResumeLlmComment(evaluation.comment());
             candidate.setResumeLlmStatus("COMPLETED");
@@ -305,7 +313,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             }
         } else if (fileName.endsWith(".docx")) {
             try (InputStream inputStream = Files.newInputStream(path); XWPFDocument document = new XWPFDocument(inputStream)) {
-                text = document.getParagraphs().stream().map(paragraph -> paragraph.getText()).collect(Collectors.joining("\n"));
+                text = new XWPFWordExtractor(document).getText();
             }
         } else {
             text = "简历文件类型不支持文本提取: " + fileName;

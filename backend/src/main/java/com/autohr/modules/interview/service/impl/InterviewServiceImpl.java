@@ -344,12 +344,18 @@ public class InterviewServiceImpl implements InterviewService {
         if (!Objects.equals(candidate.getIntervieweeUserId(), request.getIntervieweeUserId())) {
             throw new BusinessException("候选人与面试者账号不匹配");
         }
-        if (candidate.getInterviewProcessId() != null) {
+        if (candidate.getId() == null) {
+            throw new BusinessException("候选人唯一ID不存在，不能发起面试流程");
+        }
+        InterviewProcess existingProcess = processMapper.selectOne(new LambdaQueryWrapper<InterviewProcess>()
+                .eq(InterviewProcess::getRecruitmentCandidateId, candidate.getId())
+                .last("LIMIT 1"));
+        if (candidate.getInterviewProcessId() != null || existingProcess != null) {
             throw new BusinessException("该候选人已存在面试流程");
         }
         InterviewProcess process = new InterviewProcess();
         process.setId(nextId(processMapper.selectList(null).stream().map(InterviewProcess::getId).toList()));
-        process.setRecruitmentCandidateId(request.getRecruitmentCandidateId());
+        process.setRecruitmentCandidateId(candidate.getId());
         process.setIntervieweeUserId(request.getIntervieweeUserId());
         process.setJobId(request.getJobId());
         process.setCurrentStage("AI");
@@ -545,7 +551,7 @@ public class InterviewServiceImpl implements InterviewService {
         session.setApproverName(approverName);
         session.setHrJoinTime(LocalDateTime.now());
         session.setStartTime(session.getStartTime() == null ? LocalDateTime.now() : session.getStartTime());
-        session.setSessionStatus("HR_JOINED");
+        session.setSessionStatus(canStartSynchronizedRecording(session) ? "RECORDING" : "HR_JOINED");
         videoSessionMapper.updateById(session);
         auditLogService.log(approverUserId, displayName(approverName, "HR"), "HR_ADMIN", "INTERVIEW", "HR_JOIN_VIDEO", "VIDEO_SESSION", String.valueOf(session.getId()), String.valueOf(processId));
         return toVideoSessionVO(session);
@@ -555,19 +561,36 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO completeVideoSession(Long processId, String recordingPath) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
-        if (!isTerminalVideoSessionStatus(session.getSessionStatus())) {
+        if (isTerminalVideoSessionStatus(session.getSessionStatus())) {
+            return toVideoSessionVO(session);
+        }
+        if (!isTerminalVideoSessionStatus(session.getSessionStatus()) && !StrUtil.equals(session.getSessionStatus(), "END_REQUESTED")) {
             session.setEndTime(session.getEndTime() == null ? LocalDateTime.now() : session.getEndTime());
-            session.setSessionStatus("WAITING_APPROVAL");
+            session.setSessionStatus("END_REQUESTED");
             videoSessionMapper.updateById(session);
         }
         InterviewProcess process = requireProcess(processId);
         if (StrUtil.equals(process.getCurrentStage(), "VIDEO") && StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
-            process.setStageStatus("WAITING_APPROVAL");
-            process.setProcessStatusView("视频待审批");
+            if (hasAnyRecording(session)) {
+                session.setSessionStatus("RECORDED");
+                videoSessionMapper.updateById(session);
+                process.setStageStatus("WAITING_APPROVAL");
+                process.setProcessStatusView("视频待审批");
+            } else {
+                process.setStageStatus("UPLOADING");
+                process.setProcessStatusView("视频录制上传中");
+            }
             processMapper.updateById(process);
             updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
         }
         return toVideoSessionVO(session);
+    }
+
+    @Override
+    @Transactional
+    public InterviewVO requestIntervieweeVideoEnd(Long processId, Long intervieweeUserId) {
+        requireIntervieweeProcess(processId, intervieweeUserId);
+        return completeVideoSession(processId, null);
     }
 
     @Override
@@ -709,7 +732,7 @@ public class InterviewServiceImpl implements InterviewService {
         }
         session.setIntervieweeAnswerSdp(request.getAnswerSdp());
         session.setIntervieweeIceCandidates(null);
-        session.setSessionStatus("ANSWER_SUBMITTED");
+        session.setSessionStatus(canStartSynchronizedRecording(session) ? "RECORDING" : "ANSWER_SUBMITTED");
         videoSessionMapper.updateById(session);
         auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "SUBMIT_VIDEO_ANSWER", "VIDEO_SESSION", String.valueOf(session.getId()), session.getVideoSerialNo());
         return toVideoSignalVO(session);
@@ -758,6 +781,17 @@ public class InterviewServiceImpl implements InterviewService {
 
     @Override
     @Transactional
+    public InterviewVideoSession getDownloadableVideoSession(Long processId) {
+        InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        if (videoMergeService.canMerge(session) && !isReadableFile(session.getMergedRecordingPath())) {
+            videoMergeService.mergeRecordings(session);
+            videoSessionMapper.updateById(session);
+        }
+        return session;
+    }
+
+    @Override
+    @Transactional
     public VideoSignalVO uploadHrRecording(Long processId, String originalFileName, String contentType, MultipartFile file) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
         VideoSignalVO vo = storeRecording(session, originalFileName, contentType, file, "hr");
@@ -789,6 +823,7 @@ public class InterviewServiceImpl implements InterviewService {
                 videoMergeService.mergeRecordings(session);
             }
             session.setSessionStatus("RECORDED");
+            markVideoWaitingApproval(session.getProcessId());
             videoSessionMapper.updateById(session);
             return toVideoSignalVO(session);
         } catch (IOException ex) {
@@ -938,6 +973,8 @@ public class InterviewServiceImpl implements InterviewService {
                 .eq(InterviewVideoSession::getProcessId, processId)
                 .last("LIMIT 1"));
         if (existing != null) {
+            resetVideoSession(existing, approverUserId, approverName);
+            videoSessionMapper.updateById(existing);
             return existing;
         }
         InterviewVideoSession session = new InterviewVideoSession();
@@ -950,6 +987,30 @@ public class InterviewServiceImpl implements InterviewService {
         session.setSessionStatus("CREATED");
         videoSessionMapper.insert(session);
         return session;
+    }
+
+    private void resetVideoSession(InterviewVideoSession session, Long approverUserId, String approverName) {
+        session.setVideoSerialNo("VID-" + UUID.randomUUID());
+        session.setVideoJoinLink("/interview/interviewee?processId=" + session.getProcessId() + "&serial=" + session.getVideoSerialNo());
+        session.setApproverUserId(approverUserId);
+        session.setApproverName(approverName);
+        session.setIntervieweeJoinTime(null);
+        session.setHrJoinTime(null);
+        session.setStartTime(null);
+        session.setEndTime(null);
+        session.setRecordingPath(null);
+        session.setRecordingFileName(null);
+        session.setHrRecordingPath(null);
+        session.setHrRecordingFileName(null);
+        session.setIntervieweeRecordingPath(null);
+        session.setIntervieweeRecordingFileName(null);
+        session.setMergedRecordingPath(null);
+        session.setMergedRecordingFileName(null);
+        session.setHrOfferSdp(null);
+        session.setIntervieweeAnswerSdp(null);
+        session.setHrIceCandidates(null);
+        session.setIntervieweeIceCandidates(null);
+        session.setSessionStatus("CREATED");
     }
 
     private void ensureInProgress(InterviewProcess process) {
@@ -1445,6 +1506,10 @@ public class InterviewServiceImpl implements InterviewService {
                 .anyMatch(item -> StrUtil.equals(item, value));
     }
 
+    private boolean isReadableFile(String path) {
+        return StrUtil.isNotBlank(path) && Files.isRegularFile(Path.of(path)) && Files.isReadable(Path.of(path));
+    }
+
     private boolean isCurrentIceCandidate(String sessionDescription, String iceCandidate) {
         if (StrUtil.isBlank(sessionDescription) || StrUtil.isBlank(iceCandidate)) {
             return false;
@@ -1477,6 +1542,30 @@ public class InterviewServiceImpl implements InterviewService {
 
     private boolean isTerminalVideoSessionStatus(String status) {
         return StrUtil.equalsAny(status, "WAITING_APPROVAL", "RECORDED", "PASSED", "REJECTED");
+    }
+
+    private boolean canStartSynchronizedRecording(InterviewVideoSession session) {
+        return session.getHrJoinTime() != null
+                && session.getIntervieweeJoinTime() != null
+                && StrUtil.isNotBlank(session.getHrOfferSdp())
+                && StrUtil.isNotBlank(session.getIntervieweeAnswerSdp());
+    }
+
+    private boolean hasAnyRecording(InterviewVideoSession session) {
+        return StrUtil.isNotBlank(session.getRecordingPath())
+                || StrUtil.isNotBlank(session.getHrRecordingPath())
+                || StrUtil.isNotBlank(session.getIntervieweeRecordingPath())
+                || StrUtil.isNotBlank(session.getMergedRecordingPath());
+    }
+
+    private void markVideoWaitingApproval(Long processId) {
+        InterviewProcess process = requireProcess(processId);
+        if (StrUtil.equals(process.getCurrentStage(), "VIDEO") && StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
+            process.setStageStatus("WAITING_APPROVAL");
+            process.setProcessStatusView("视频待审批");
+            processMapper.updateById(process);
+            updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+        }
     }
 
     private String displayName(String name, String fallback) {

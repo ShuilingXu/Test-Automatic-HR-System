@@ -44,6 +44,7 @@ public interface InterviewService {
     InterviewVO intervieweeJoinVideo(Long processId, Long intervieweeUserId, String intervieweeName);
     InterviewVO hrJoinVideo(Long processId, Long approverUserId, String approverName);
     InterviewVO completeVideoSession(Long processId, String recordingPath);
+    InterviewVO requestIntervieweeVideoEnd(Long processId, Long intervieweeUserId);
     VideoSignalVO publishHrOffer(Long processId, VideoSignalRequest request);
     VideoSignalVO submitIntervieweeAnswer(Long processId, VideoSignalRequest request, Long intervieweeUserId, String intervieweeName);
     VideoSignalVO addHrIceCandidate(Long processId, VideoSignalRequest request);
@@ -53,6 +54,7 @@ public interface InterviewService {
     VideoSignalVO uploadIntervieweeRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file);
     InterviewVO reportAntiCheatEvent(AntiCheatEventRequest request, Long intervieweeUserId, String intervieweeName);
     InterviewVideoSession getVideoSession(Long processId);
+    InterviewVideoSession getDownloadableVideoSession(Long processId);
     InterviewVO approveAiToVideo(Long processId, InterviewDecisionRequest request);
     InterviewVO approveVideoToOnsite(Long processId, InterviewDecisionRequest request);
     InterviewVO decideOnsite(Long processId, InterviewDecisionRequest request);

@@ -193,8 +193,7 @@
             <el-form-item label="关键词"><el-input v-model="candidateFilter.keyword" placeholder="姓名 / 手机 / 专业 / 学校" /></el-form-item>
             <el-form-item label="操作"><div class="filter-actions"><el-button type="primary" @click="loadCandidates">查询</el-button><el-button @click="resetCandidateFilter">重置</el-button></div></el-form-item>
           </el-form>
-          <el-table :data="candidates" stripe class="data-table" @row-click="openCandidate"><el-table-column prop="fullName" label="报名者姓名" min-width="120" /><el-table-column prop="mobilePhone" label="联系电话" min-width="130" /><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="interviewStageStatus" label="面试状态" min-width="120" /><el-table-column label="LLM简历评分" min-width="120"><template #default="scope"><span>{{ scope.row.resumeLlmScore ?? resumeLlmStatusLabel(scope.row.resumeLlmStatus) }}</span></template></el-table-column><el-table-column prop="interviewProcessId" label="流程流水号" min-width="120" /><el-table-column label="简历" min-width="150"><template #default="scope"><a v-if="scope.row.resumeFileId" class="resume-link" :href="resumeUrl(scope.row.resumeFileId)" target="_blank" @click.stop>{{ scope.row.resumeFileName || '查看简历' }}</a><span v-else>未上传</span></template></el-table-column><el-table-column label="操作" width="280"><template #default="scope"><el-button text @click.stop="startCandidateInterview(scope.row)">发起面试</el-button><el-button text type="danger" @click.stop="rejectCandidateResume(scope.row.id)">简历拒绝</el-button><el-button text type="danger" @click.stop="deleteCandidate(scope.row.id)">删除候选人</el-button></template></el-table-column><el-table-column prop="applicationStatus" label="状态" width="110" /></el-table>
-          <div v-if="selectedCandidate" class="candidate-detail"><h3>候选人信息</h3><div class="detail-grid"><div><span>姓名</span><strong>{{ selectedCandidate.fullName }}</strong></div><div><span>联系电话</span><strong>{{ selectedCandidate.mobilePhone }}</strong></div><div><span>应聘岗位</span><strong>{{ selectedCandidate.jobTitle }}</strong></div><div><span>面试状态</span><strong>{{ selectedCandidate.interviewStageStatus || '简历待查' }}</strong></div><div><span>LLM简历评分</span><strong>{{ selectedCandidate.resumeLlmScore ?? resumeLlmStatusLabel(selectedCandidate.resumeLlmStatus) }}</strong></div><div><span>评分状态</span><strong>{{ resumeLlmStatusLabel(selectedCandidate.resumeLlmStatus) }}</strong></div><div><span>流程流水号</span><strong>{{ selectedCandidate.interviewProcessId || '-' }}</strong></div><div><span>面试者用户ID</span><strong>{{ selectedCandidate.intervieweeUserId || '-' }}</strong></div><div><span>专业</span><strong>{{ selectedCandidate.major }}</strong></div><div><span>邮箱</span><strong>{{ selectedCandidate.email || '-' }}</strong></div><div><span>身份证号</span><strong>{{ selectedCandidate.idCardNo || '-' }}</strong></div><div><span>学历</span><strong>{{ selectedCandidate.educationLevel || '-' }}</strong></div><div><span>毕业院校</span><strong>{{ selectedCandidate.graduationSchool || '-' }}</strong></div><div><span>工作年限</span><strong>{{ selectedCandidate.yearsOfExperience ?? '-' }}</strong></div><div><span>期望薪资</span><strong>{{ selectedCandidate.expectedSalary || '-' }}</strong></div></div><div class="intro-box"><span>LLM简历评价</span><p>{{ selectedCandidate.resumeLlmComment || '暂无评价' }}</p></div><div class="intro-box"><span>个人简介</span><p>{{ selectedCandidate.selfIntroduction || '未填写' }}</p></div><a v-if="selectedCandidate.resumeFileId" class="resume-link" :href="resumeUrl(selectedCandidate.resumeFileId)" target="_blank">打开 PDF / 简历文件</a></div>
+          <el-table :data="candidates" stripe class="data-table" @row-click="openCandidate"><el-table-column prop="id" label="候选人ID" min-width="100" /><el-table-column prop="fullName" label="报名者姓名" min-width="120" /><el-table-column prop="mobilePhone" label="联系电话" min-width="130" /><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="interviewStageStatus" label="面试状态" min-width="120" /><el-table-column label="LLM简历评分" min-width="120"><template #default="scope"><span>{{ scope.row.resumeLlmScore ?? resumeLlmStatusLabel(scope.row.resumeLlmStatus) }}</span></template></el-table-column><el-table-column prop="interviewProcessId" label="流程流水号" min-width="120" /><el-table-column label="简历" min-width="150"><template #default="scope"><a v-if="scope.row.resumeFileId" class="resume-link" :href="resumeUrl(scope.row.resumeFileId)" target="_blank" @click.stop>{{ scope.row.resumeFileName || '查看简历' }}</a><span v-else>未上传</span></template></el-table-column><el-table-column label="操作" width="340"><template #default="scope"><el-button text @click.stop="openCandidate(scope.row)">查看详情</el-button><el-button text @click.stop="startCandidateInterview(scope.row)">发起面试</el-button><el-button text type="danger" @click.stop="rejectCandidateResume(scope.row.id)">简历拒绝</el-button><el-button text type="danger" @click.stop="deleteCandidate(scope.row.id)">删除候选人</el-button></template></el-table-column><el-table-column prop="applicationStatus" label="状态" width="110" /></el-table>
         </template>
       </section>
     </main>
@@ -239,7 +238,6 @@ const jobs = ref([])
 const candidates = ref([])
 const users = ref([])
 const auditLogs = ref([])
-const selectedCandidate = ref(null)
 
 const userForm = reactive({ id: null, username: '', displayName: '', roleCode: 'HR_USER', status: 1, mobilePhone: '', email: '', newPassword: '' })
 const departmentForm = reactive({ id: null, departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '', sortOrder: 0, status: 1 })
@@ -364,7 +362,6 @@ function editDepartment(row) { Object.assign(departmentForm, row); if (departmen
 function resetEmployeeForm() { Object.assign(employeeForm, { id: null, employeeCode: '', fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' }) }
 function showCreateEmployee() { resetEmployeeForm(); employeeMode.value = 'create' }
 function editEmployee(row) { Object.assign(employeeForm, row); employeeMode.value = 'edit' }
-function selectCandidate(row) { selectedCandidate.value = row }
 function openUser(row) { router.push(`/admin/users/${row.id}`) }
 function openDepartment(row) { router.push(`/admin/departments/${row.id}`) }
 function openEmployee(row) { router.push(`/admin/employees/${row.id}`) }
@@ -390,9 +387,6 @@ async function rejectCandidateResume(id) {
   try {
     await recruitmentApi.rejectCandidateResume(id)
     ElMessage.success('已拒绝该报名者简历面试')
-    if (selectedCandidate.value?.id === id) {
-      selectedCandidate.value = null
-    }
     await loadRecruitment()
   } catch (error) { fail(error) }
 }
@@ -400,9 +394,6 @@ async function deleteCandidate(id) {
   try {
     await recruitmentApi.deleteCandidate(id)
     ElMessage.success('候选人已删除')
-    if (selectedCandidate.value?.id === id) {
-      selectedCandidate.value = null
-    }
     await loadRecruitment()
   } catch (error) { fail(error) }
 }
@@ -437,9 +428,6 @@ function syncRouteState() {
   } else if (route.name === 'admin-recruitment-job-detail') {
     const row = jobs.value.find((item) => item.id === id)
     if (row) editJob(row)
-  } else if (route.name === 'admin-recruitment-candidate-detail') {
-    const row = candidates.value.find((item) => item.id === id)
-    if (row) selectCandidate(row)
   } else if (activeTab.value === 'bindings') {
     const row = bindings.value.find((item) => item.id === id)
     if (row) Object.assign(bindingForm, row)

@@ -13,7 +13,7 @@ export async function requestCameraAndMicrophone() {
 }
 
 export function createPeerConnection(iceServers = defaultIceServers()) {
-  return new RTCPeerConnection({ iceServers })
+  return new RTCPeerConnection({ iceServers, iceTransportPolicy: 'relay' })
 }
 
 export function defaultIceServers() {

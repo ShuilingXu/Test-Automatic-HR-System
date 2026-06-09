@@ -376,10 +376,6 @@ async function joinVideo() {
         await interviewApi.addIntervieweeIce(sessionForm.processId, { iceCandidate: JSON.stringify(event.candidate) })
       }
     }
-    recorder = new MediaRecorder(localStream)
-    recordedChunks = []
-    recorder.ondataavailable = (event) => { if (event.data.size > 0) recordedChunks.push(event.data) }
-    recorder.start(1000)
     pollTimer = setInterval(async () => {
       const state = (await interviewApi.getVideoState(sessionForm.processId)).data
       if (state.offerSdp && !peer.currentRemoteDescription) {
@@ -398,21 +394,43 @@ async function joinVideo() {
           }
         }
       }
+      if (state.sessionStatus === 'RECORDING') {
+        startRecordingIfNeeded()
+      }
+      if (state.sessionStatus === 'END_REQUESTED') {
+        await stopAndUploadRecording()
+        disconnectVideo()
+      }
     }, 1000)
-    ElMessage.success('已加入视频面并开始录制')
+    ElMessage.success('已加入视频面，等待HR就绪后同步开始录制')
   } catch (error) { ElMessage.error(buildMediaErrorMessage(error)) }
 }
 async function stopRecording() {
   try {
-    if (recorder && recorder.state !== 'inactive') {
-      await new Promise((resolve) => { recorder.onstop = resolve; recorder.stop() })
-      const blob = new Blob(recordedChunks, { type: 'video/webm' })
-      const file = new File([blob], `interviewee-${sessionForm.processId}.webm`, { type: 'video/webm' })
-      await interviewApi.uploadVideoRecording(sessionForm.processId, file)
-      ElMessage.success('录制文件已上传')
-    }
+    await interviewApi.completeIntervieweeVideo(sessionForm.processId)
+    await stopAndUploadRecording()
     disconnectVideo()
   } catch (error) { fail(error) }
+}
+
+function startRecordingIfNeeded() {
+  if (!localStream || (recorder && recorder.state !== 'inactive')) return
+  recorder = new MediaRecorder(localStream)
+  recordedChunks = []
+  recorder.ondataavailable = (event) => { if (event.data.size > 0) recordedChunks.push(event.data) }
+  recorder.start(1000)
+  ElMessage.success('双方已进入视频面，录制已同步开始')
+}
+
+async function stopAndUploadRecording() {
+  if (!recorder || recorder.state === 'inactive') return
+  await new Promise((resolve) => { recorder.onstop = resolve; recorder.stop() })
+  const blob = new Blob(recordedChunks, { type: 'video/webm' })
+  if (blob.size > 0) {
+    const file = new File([blob], `interviewee-${sessionForm.processId}.webm`, { type: 'video/webm' })
+    await interviewApi.uploadVideoRecording(sessionForm.processId, file)
+    ElMessage.success('面试者录制已上传')
+  }
 }
 
 function disconnectVideo() {
@@ -421,6 +439,8 @@ function disconnectVideo() {
   peer?.getSenders?.().forEach((sender) => sender.track?.stop())
   peer?.close()
   peer = null
+  recorder = null
+  recordedChunks = []
   localStream?.getTracks().forEach((track) => track.stop())
   localStream = null
   remoteStream = null

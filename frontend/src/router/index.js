@@ -4,6 +4,7 @@ import ConsoleView from '../views/ConsoleView.vue'
 import LoginView from '../views/LoginView.vue'
 import CandidateRegisterView from '../views/CandidateRegisterView.vue'
 import CandidateInterviewView from '../views/CandidateInterviewView.vue'
+import CandidateDetailView from '../views/CandidateDetailView.vue'
 import InterviewAdminView from '../views/InterviewAdminView.vue'
 import UserPortalView from '../views/UserPortalView.vue'
 
@@ -25,7 +26,7 @@ const routes = [
   { path: '/admin/recruitment/jobs/new', name: 'admin-recruitment-job-new', component: ConsoleView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'], consoleTab: 'recruitment', recruitmentMode: 'jobCreate' } },
   { path: '/admin/recruitment/jobs/:id', name: 'admin-recruitment-job-detail', component: ConsoleView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'], consoleTab: 'recruitment', recruitmentMode: 'jobEdit' } },
   { path: '/admin/recruitment/candidates', name: 'admin-recruitment-candidates', component: ConsoleView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'], consoleTab: 'recruitment', recruitmentMode: 'candidates' } },
-  { path: '/admin/recruitment/candidates/:id', name: 'admin-recruitment-candidate-detail', component: ConsoleView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'], consoleTab: 'recruitment', recruitmentMode: 'candidates' } },
+  { path: '/admin/recruitment/candidates/:id', name: 'admin-recruitment-candidate-detail', component: CandidateDetailView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'] } },
   { path: '/admin/interview', redirect: '/interview/hr' },
   { path: '/interview/hr', redirect: '/interview/hr/processes' },
   { path: '/interview/hr/knowledge-bases', name: 'interview-knowledge-bases', component: InterviewAdminView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'], interviewTab: 'kb' } },

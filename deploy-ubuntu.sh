@@ -10,6 +10,8 @@ ENV_FILE="$ROOT_DIR/.env"
 BACKEND_PORT="${BACKEND_PORT:-8080}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 TURN_HOST="${TURN_HOST:-}"
+TURN_EXTERNAL_IP="${TURN_EXTERNAL_IP:-}"
+TURN_PRIVATE_IP="${TURN_PRIVATE_IP:-}"
 TURN_USERNAME="${TURN_USERNAME:-}"
 TURN_CREDENTIAL="${TURN_CREDENTIAL:-}"
 TURN_REALM="${TURN_REALM:-}"
@@ -33,6 +35,7 @@ ensure_dependencies() {
   install_package openjdk-17-jdk
   install_package maven
   install_package coturn
+  install_package curl
 
   local node_major=0
   if command -v node >/dev/null 2>&1; then
@@ -48,6 +51,22 @@ ensure_dependencies() {
 
 random_secret() {
   openssl rand -hex 18 2>/dev/null || date +%s%N
+}
+
+detect_public_ip() {
+  local ip=""
+  ip="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
+  if [ -z "$ip" ]; then
+    ip="$(curl -fsS --max-time 3 https://ifconfig.me 2>/dev/null || true)"
+  fi
+  if [ -z "$ip" ]; then
+    ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  echo "$ip"
+}
+
+detect_private_ip() {
+  hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | grep -v '^127\.' | head -n 1 || true
 }
 
 set_env_value() {
@@ -76,7 +95,11 @@ prepare_env() {
   fi
 
   TURN_HOST="${TURN_HOST:-$(get_env_value TURN_HOST)}"
-  TURN_HOST="${TURN_HOST:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+  TURN_EXTERNAL_IP="${TURN_EXTERNAL_IP:-$(get_env_value TURN_EXTERNAL_IP)}"
+  TURN_EXTERNAL_IP="${TURN_EXTERNAL_IP:-$(detect_public_ip)}"
+  TURN_HOST="${TURN_HOST:-$TURN_EXTERNAL_IP}"
+  TURN_PRIVATE_IP="${TURN_PRIVATE_IP:-$(get_env_value TURN_PRIVATE_IP)}"
+  TURN_PRIVATE_IP="${TURN_PRIVATE_IP:-$(detect_private_ip)}"
   TURN_USERNAME="${TURN_USERNAME:-$(get_env_value TURN_USERNAME)}"
   TURN_USERNAME="${TURN_USERNAME:-autohr}"
   TURN_CREDENTIAL="${TURN_CREDENTIAL:-$(get_env_value TURN_CREDENTIAL)}"
@@ -101,6 +124,8 @@ prepare_env() {
   set_env_value INTERVIEW_TURN_USERNAME "$TURN_USERNAME"
   set_env_value INTERVIEW_TURN_CREDENTIAL "$TURN_CREDENTIAL"
   set_env_value TURN_HOST "$TURN_HOST"
+  set_env_value TURN_EXTERNAL_IP "$TURN_EXTERNAL_IP"
+  set_env_value TURN_PRIVATE_IP "$TURN_PRIVATE_IP"
   set_env_value TURN_USERNAME "$TURN_USERNAME"
   set_env_value TURN_CREDENTIAL "$TURN_CREDENTIAL"
   set_env_value TURN_REALM "$TURN_REALM"
@@ -110,10 +135,17 @@ prepare_env() {
 
 configure_coturn() {
   local turn_service="coturn"
+  local external_ip_line="external-ip=${TURN_EXTERNAL_IP}"
+
+  if [ -n "$TURN_PRIVATE_IP" ] && [ "$TURN_PRIVATE_IP" != "$TURN_EXTERNAL_IP" ]; then
+    external_ip_line="external-ip=${TURN_EXTERNAL_IP}/${TURN_PRIVATE_IP}"
+  fi
 
   echo "Configuring coturn on ${TURN_HOST}:3478 ..."
   sudo tee /etc/turnserver.conf >/dev/null <<EOF
 listening-port=3478
+listening-ip=0.0.0.0
+${external_ip_line}
 fingerprint
 lt-cred-mech
 realm=${TURN_REALM}
@@ -123,6 +155,8 @@ no-multicast-peers
 no-cli
 min-port=${TURN_MIN_PORT}
 max-port=${TURN_MAX_PORT}
+verbose
+log-binding
 syslog
 EOF
 
@@ -140,6 +174,20 @@ EOF
 
   sudo systemctl enable "$turn_service"
   sudo systemctl restart "$turn_service"
+}
+
+configure_firewall() {
+  if ! command -v ufw >/dev/null 2>&1; then
+    return
+  fi
+
+  if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+    sudo ufw allow "${BACKEND_PORT}/tcp" || true
+    sudo ufw allow "${FRONTEND_PORT}/tcp" || true
+    sudo ufw allow 3478/tcp || true
+    sudo ufw allow 3478/udp || true
+    sudo ufw allow "${TURN_MIN_PORT}:${TURN_MAX_PORT}/udp" || true
+  fi
 }
 
 stop_existing_processes() {
@@ -179,6 +227,7 @@ main() {
   ensure_dependencies
   prepare_env
   configure_coturn
+  configure_firewall
   stop_existing_processes
   start_backend
   start_frontend
@@ -187,7 +236,8 @@ main() {
   echo "Backend:  http://localhost:$BACKEND_PORT"
   echo "Frontend: http://localhost:$FRONTEND_PORT"
   echo "TURN:     turn:$TURN_HOST:3478 udp/tcp"
-  echo "Firewall: allow tcp/udp 3478 and udp $TURN_MIN_PORT:$TURN_MAX_PORT"
+  echo "TURN map: ${TURN_EXTERNAL_IP}${TURN_PRIVATE_IP:+/$TURN_PRIVATE_IP}"
+  echo "Firewall: allow tcp $FRONTEND_PORT,$BACKEND_PORT; tcp/udp 3478; udp $TURN_MIN_PORT:$TURN_MAX_PORT"
   echo "Logs:     $LOG_DIR"
   echo "Stop:     kill \$(cat logs/backend.pid) \$(cat logs/frontend.pid)"
 }
