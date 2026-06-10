@@ -118,7 +118,7 @@ has_ffmpeg_encoder() {
 
 list_ffmpeg_encoders() {
   local ffmpeg_bin="$1"
-  "$ffmpeg_bin" -hide_banner -encoders 2>/dev/null | awk '/^[[:space:]]*[VAS][A-Z\.]{5}[[:space:]]+/ { print $2 }'
+  "$ffmpeg_bin" -hide_banner -encoders 2>/dev/null | awk '$1 ~ /^[VAS]/ { print $2 }'
 }
 
 random_secret() {
