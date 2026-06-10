@@ -30,6 +30,8 @@ public interface RecruitmentService {
 
     CandidateVO rejectCandidateResume(Long id);
 
+    CandidateVO retryResumeLlmEvaluation(Long id);
+
     void deleteCandidate(Long id);
 
     ResumeFileVO uploadResume(Long candidateId, String intervieweeUsername, MultipartFile file);

@@ -193,7 +193,7 @@
             <el-form-item label="关键词"><el-input v-model="candidateFilter.keyword" placeholder="姓名 / 手机 / 专业 / 学校" /></el-form-item>
             <el-form-item label="操作"><div class="filter-actions"><el-button type="primary" @click="loadCandidates">查询</el-button><el-button @click="resetCandidateFilter">重置</el-button></div></el-form-item>
           </el-form>
-          <el-table :data="candidates" stripe class="data-table" @row-click="openCandidate"><el-table-column prop="id" label="候选人ID" min-width="100" /><el-table-column prop="fullName" label="报名者姓名" min-width="120" /><el-table-column prop="mobilePhone" label="联系电话" min-width="130" /><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="interviewStageStatus" label="面试状态" min-width="120" /><el-table-column label="LLM简历评分" min-width="120"><template #default="scope"><span>{{ scope.row.resumeLlmScore ?? resumeLlmStatusLabel(scope.row.resumeLlmStatus) }}</span></template></el-table-column><el-table-column prop="interviewProcessId" label="流程流水号" min-width="120" /><el-table-column label="简历" min-width="150"><template #default="scope"><a v-if="scope.row.resumeFileId" class="resume-link" :href="resumeUrl(scope.row.resumeFileId)" target="_blank" @click.stop>{{ scope.row.resumeFileName || '查看简历' }}</a><span v-else>未上传</span></template></el-table-column><el-table-column label="操作" width="340"><template #default="scope"><el-button text @click.stop="openCandidate(scope.row)">查看详情</el-button><el-button text @click.stop="startCandidateInterview(scope.row)">发起面试</el-button><el-button text type="danger" @click.stop="rejectCandidateResume(scope.row.id)">简历拒绝</el-button><el-button text type="danger" @click.stop="deleteCandidate(scope.row.id)">删除候选人</el-button></template></el-table-column><el-table-column prop="applicationStatus" label="状态" width="110" /></el-table>
+          <el-table :data="candidates" stripe class="data-table" @row-click="openCandidate"><el-table-column prop="id" label="候选人ID" min-width="100" /><el-table-column prop="fullName" label="报名者姓名" min-width="120" /><el-table-column prop="mobilePhone" label="联系电话" min-width="130" /><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="interviewStageStatus" label="面试状态" min-width="120" /><el-table-column label="LLM简历评分" min-width="120"><template #default="scope"><span>{{ scope.row.resumeLlmScore ?? resumeLlmStatusLabel(scope.row.resumeLlmStatus) }}</span></template></el-table-column><el-table-column prop="interviewProcessId" label="流程流水号" min-width="120" /><el-table-column label="简历" min-width="150"><template #default="scope"><a v-if="scope.row.resumeFileId" class="resume-link" :href="resumeUrl(scope.row.resumeFileId)" target="_blank" @click.stop>{{ scope.row.resumeFileName || '查看简历' }}</a><span v-else>未上传</span></template></el-table-column><el-table-column label="操作" width="420"><template #default="scope"><el-button text @click.stop="openCandidate(scope.row)">查看详情</el-button><el-button v-if="canRetryResumeLlm(scope.row)" text @click.stop="retryResumeLlmEvaluation(scope.row.id)">重试评分</el-button><el-button text @click.stop="startCandidateInterview(scope.row)">发起面试</el-button><el-button text type="danger" @click.stop="rejectCandidateResume(scope.row.id)">简历拒绝</el-button><el-button text type="danger" @click.stop="deleteCandidate(scope.row.id)">删除候选人</el-button></template></el-table-column><el-table-column prop="applicationStatus" label="状态" width="110" /></el-table>
         </template>
       </section>
     </main>
@@ -272,6 +272,7 @@ const actionLabels = {
   DELETE_RECRUITMENT_JOB: '删除招聘岗位',
   DELETE_RECRUITMENT_CANDIDATE: '删除候选人',
   REJECT_RESUME: '简历面试拒绝',
+  RETRY_RESUME_LLM: '重试简历评分',
   APPLY_CANDIDATE: '投递报名',
   UPLOAD_RESUME: '上传简历',
   CREATE_VIDEO_SESSION: '创建视频面试任务',
@@ -370,6 +371,7 @@ function openJob(row) { router.push(`/admin/recruitment/jobs/${row.id}`) }
 function openCandidate(row) { router.push(`/admin/recruitment/candidates/${row.id}`) }
 function resumeUrl(id) { return recruitmentApi.getResumeUrl(id) }
 function resumeLlmStatusLabel(status) { return ({ PENDING: '评分中', COMPLETED: '已完成', FAILED: '评分失败' })[status] || '-' }
+function canRetryResumeLlm(candidate) { return candidate?.resumeLlmStatus !== 'PENDING' }
 async function startCandidateInterview(candidate) {
   try {
     const userList = (await authApi.listUsers({ roleCode: 'INTERVIEWEE', keyword: candidate.mobilePhone })).data
@@ -387,6 +389,13 @@ async function rejectCandidateResume(id) {
   try {
     await recruitmentApi.rejectCandidateResume(id)
     ElMessage.success('已拒绝该报名者简历面试')
+    await loadRecruitment()
+  } catch (error) { fail(error) }
+}
+async function retryResumeLlmEvaluation(id) {
+  try {
+    await recruitmentApi.retryResumeLlmEvaluation(id)
+    ElMessage.success('已重新提交简历评分')
     await loadRecruitment()
   } catch (error) { fail(error) }
 }

@@ -56,6 +56,7 @@ export const recruitmentApi = {
   listCandidates(params) { return request.get('/recruitment/admin/candidates', { params }) },
   getCandidate(id) { return request.get(`/recruitment/admin/candidates/${id}`) },
   rejectCandidateResume(id) { return request.post(`/recruitment/admin/candidates/${id}/reject-resume`) },
+  retryResumeLlmEvaluation(id) { return request.post(`/recruitment/admin/candidates/${id}/retry-resume-llm`) },
   deleteCandidate(id) { return request.delete(`/recruitment/admin/candidates/${id}`) },
   listOpenJobs(params) { return request.get('/recruitment/jobs', { params }) },
   apply(payload) { return request.post('/recruitment/candidates', payload) },

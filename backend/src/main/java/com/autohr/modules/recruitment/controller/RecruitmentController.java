@@ -85,11 +85,20 @@ public class RecruitmentController {
 
     @PostMapping("/admin/candidates/{id}/reject-resume")
     public ApiResponse<CandidateVO> rejectCandidateResume(Authentication authentication,
-                                                          @PathVariable Long id) {
+                                                           @PathVariable Long id) {
         CandidateVO rejected = recruitmentService.rejectCandidateResume(id);
         SessionUserVO current = currentUser(authentication);
         auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "RECRUITMENT", "REJECT_RESUME", "RECRUITMENT_CANDIDATE", String.valueOf(id), rejected.getFullName() + " 简历面试拒绝");
         return ApiResponse.success(rejected);
+    }
+
+    @PostMapping("/admin/candidates/{id}/retry-resume-llm")
+    public ApiResponse<CandidateVO> retryResumeLlmEvaluation(Authentication authentication,
+                                                             @PathVariable Long id) {
+        CandidateVO candidate = recruitmentService.retryResumeLlmEvaluation(id);
+        SessionUserVO current = currentUser(authentication);
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "RECRUITMENT", "RETRY_RESUME_LLM", "RECRUITMENT_CANDIDATE", String.valueOf(id), candidate.getFullName() + " 重试LLM简历评分");
+        return ApiResponse.success(candidate);
     }
 
     @DeleteMapping("/admin/candidates/{id}")
