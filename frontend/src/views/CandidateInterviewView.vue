@@ -95,6 +95,7 @@ let recordedChunks = []
 let addedHrIce = new Set()
 let remoteStream = null
 let pendingHrIce = []
+let recordingStopInProgress = false
 
 const aiStatusText = computed(() => {
   if (aiSubmitState.submitting) return aiSubmitState.message || 'AI正在处理你的回答'
@@ -398,8 +399,14 @@ async function joinVideo() {
         startRecordingIfNeeded()
       }
       if (state.sessionStatus === 'END_REQUESTED') {
-        await stopAndUploadRecording()
-        disconnectVideo()
+        clearInterval(pollTimer)
+        pollTimer = null
+        try {
+          await stopAndUploadRecording()
+          disconnectVideo()
+        } catch (error) {
+          fail(error)
+        }
       }
     }, 1000)
     ElMessage.success('已加入视频面，等待HR就绪后同步开始录制')
@@ -407,6 +414,8 @@ async function joinVideo() {
 }
 async function stopRecording() {
   try {
+    clearInterval(pollTimer)
+    pollTimer = null
     await interviewApi.completeIntervieweeVideo(sessionForm.processId)
     await stopAndUploadRecording()
     disconnectVideo()
@@ -423,13 +432,24 @@ function startRecordingIfNeeded() {
 }
 
 async function stopAndUploadRecording() {
-  if (!recorder || recorder.state === 'inactive') return
-  await new Promise((resolve) => { recorder.onstop = resolve; recorder.stop() })
-  const blob = new Blob(recordedChunks, { type: 'video/webm' })
-  if (blob.size > 0) {
-    const file = new File([blob], `interviewee-${sessionForm.processId}.webm`, { type: 'video/webm' })
-    await interviewApi.uploadVideoRecording(sessionForm.processId, file)
-    ElMessage.success('面试者录制已上传')
+  if (recordingStopInProgress) return
+  if ((!recorder || recorder.state === 'inactive') && recordedChunks.length === 0) return
+  recordingStopInProgress = true
+  try {
+    if (recorder && recorder.state !== 'inactive') {
+      const currentRecorder = recorder
+      await new Promise((resolve) => { currentRecorder.onstop = resolve; currentRecorder.stop() })
+      recorder = null
+    }
+    const blob = new Blob(recordedChunks, { type: 'video/webm' })
+    if (blob.size > 0) {
+      const file = new File([blob], `interviewee-${sessionForm.processId}.webm`, { type: 'video/webm' })
+      await interviewApi.uploadVideoRecording(sessionForm.processId, file)
+      recordedChunks = []
+      ElMessage.success('面试者录制已上传')
+    }
+  } finally {
+    recordingStopInProgress = false
   }
 }
 
@@ -441,6 +461,7 @@ function disconnectVideo() {
   peer = null
   recorder = null
   recordedChunks = []
+  recordingStopInProgress = false
   localStream?.getTracks().forEach((track) => track.stop())
   localStream = null
   remoteStream = null

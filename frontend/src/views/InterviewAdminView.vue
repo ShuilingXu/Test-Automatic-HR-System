@@ -234,6 +234,7 @@ let hrRecordedChunks = []
 let addedIntervieweeIce = new Set()
 let hrRemoteStream = null
 let pendingIntervieweeIce = []
+let hrRecordingStopInProgress = false
 
 const kbForm = reactive({ id: null, knowledgeBaseName: '', techCategory: '', jobCategory: '', status: 1 })
 const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '', knowledgeContent: '', status: 1 })
@@ -382,9 +383,15 @@ async function startHrVideoCall() {
         startHrRecordingIfNeeded()
       }
       if (state.sessionStatus === 'END_REQUESTED') {
-        await stopAndUploadHrRecording()
-        disconnectHrVideo()
-        await loadAll()
+        clearInterval(hrPollTimer)
+        hrPollTimer = null
+        try {
+          await stopAndUploadHrRecording()
+          disconnectHrVideo()
+          await loadAll()
+        } catch (error) {
+          fail(error)
+        }
       }
     }, 1000)
     ElMessage.success('HR视频已就绪，等待面试者加入后同步开始录制')
@@ -393,6 +400,8 @@ async function startHrVideoCall() {
 
 async function stopHrRecording() {
   try {
+    clearInterval(hrPollTimer)
+    hrPollTimer = null
     await interviewApi.completeVideo(selectedProcess.value.id)
     await stopAndUploadHrRecording()
     disconnectHrVideo()
@@ -410,16 +419,27 @@ function startHrRecordingIfNeeded() {
 }
 
 async function stopAndUploadHrRecording() {
-  if (!hrRecorder || hrRecorder.state === 'inactive') return
-  await new Promise((resolve) => {
-    hrRecorder.onstop = resolve
-    hrRecorder.stop()
-  })
-  const blob = new Blob(hrRecordedChunks, { type: 'video/webm' })
-  if (blob.size > 0) {
-    const file = new File([blob], `hr-${selectedProcess.value.id}.webm`, { type: 'video/webm' })
-    await interviewApi.uploadHrVideoRecording(selectedProcess.value.id, file)
-    ElMessage.success('HR录制已上传')
+  if (hrRecordingStopInProgress) return
+  if ((!hrRecorder || hrRecorder.state === 'inactive') && hrRecordedChunks.length === 0) return
+  hrRecordingStopInProgress = true
+  try {
+    if (hrRecorder && hrRecorder.state !== 'inactive') {
+      const currentRecorder = hrRecorder
+      await new Promise((resolve) => {
+        currentRecorder.onstop = resolve
+        currentRecorder.stop()
+      })
+      hrRecorder = null
+    }
+    const blob = new Blob(hrRecordedChunks, { type: 'video/webm' })
+    if (blob.size > 0) {
+      const file = new File([blob], `hr-${selectedProcess.value.id}.webm`, { type: 'video/webm' })
+      await interviewApi.uploadHrVideoRecording(selectedProcess.value.id, file)
+      hrRecordedChunks = []
+      ElMessage.success('HR录制已上传')
+    }
+  } finally {
+    hrRecordingStopInProgress = false
   }
 }
 
@@ -431,6 +451,7 @@ function disconnectHrVideo() {
   hrPeer = null
   hrRecorder = null
   hrRecordedChunks = []
+  hrRecordingStopInProgress = false
   hrLocalStream?.getTracks().forEach((track) => track.stop())
   hrLocalStream = null
   hrRemoteStream = null

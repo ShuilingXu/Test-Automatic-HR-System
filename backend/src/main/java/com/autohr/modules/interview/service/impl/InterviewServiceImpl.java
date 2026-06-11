@@ -450,8 +450,9 @@ public class InterviewServiceImpl implements InterviewService {
         }
         record.setAnswerContent(request.getAnswerContent());
         String materials = loadKnowledgeMaterials(record.getKnowledgeBaseId());
-        LlmEvaluation interviewerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, "INTERVIEWER", true);
-        LlmEvaluation scorerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, "SCORER", false);
+        String jobRequirements = loadJobRequirements(process);
+        LlmEvaluation interviewerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "INTERVIEWER", true);
+        LlmEvaluation scorerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "SCORER", false);
         int interviewerScore = interviewerEvaluation.score();
         int scorerScore = scorerEvaluation.score();
         int averageScore = Math.round((interviewerScore + scorerScore) / 2.0f);
@@ -571,7 +572,13 @@ public class InterviewServiceImpl implements InterviewService {
         }
         InterviewProcess process = requireProcess(processId);
         if (StrUtil.equals(process.getCurrentStage(), "VIDEO") && StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
-            if (hasAnyRecording(session)) {
+            if (videoMergeService.canMerge(session)) {
+                try {
+                    videoMergeService.mergeRecordings(session);
+                } catch (BusinessException ignored) {
+                    session.setSessionStatus("RECORDED");
+                    videoSessionMapper.updateById(session);
+                }
                 session.setSessionStatus("RECORDED");
                 videoSessionMapper.updateById(session);
                 process.setStageStatus("WAITING_APPROVAL");
@@ -731,6 +738,9 @@ public class InterviewServiceImpl implements InterviewService {
             return toVideoSignalVO(session);
         }
         session.setIntervieweeAnswerSdp(request.getAnswerSdp());
+        if (session.getIntervieweeJoinTime() == null) {
+            session.setIntervieweeJoinTime(LocalDateTime.now());
+        }
         session.setIntervieweeIceCandidates(null);
         session.setSessionStatus(canStartSynchronizedRecording(session) ? "RECORDING" : "ANSWER_SUBMITTED");
         videoSessionMapper.updateById(session);
@@ -820,10 +830,19 @@ public class InterviewServiceImpl implements InterviewService {
             session.setRecordingPath(storedFile.toString());
             session.setRecordingFileName(storedName);
             if (videoMergeService.canMerge(session)) {
-                videoMergeService.mergeRecordings(session);
+                try {
+                    videoMergeService.mergeRecordings(session);
+                } catch (BusinessException ex) {
+                    session.setSessionStatus("RECORDED");
+                    videoSessionMapper.updateById(session);
+                    markVideoWaitingApproval(session.getProcessId());
+                    return toVideoSignalVO(session);
+                }
+                session.setSessionStatus("RECORDED");
+                markVideoWaitingApproval(session.getProcessId());
+            } else if (!StrUtil.equals(session.getSessionStatus(), "END_REQUESTED")) {
+                session.setSessionStatus("END_REQUESTED");
             }
-            session.setSessionStatus("RECORDED");
-            markVideoWaitingApproval(session.getProcessId());
             videoSessionMapper.updateById(session);
             return toVideoSignalVO(session);
         } catch (IOException ex) {
@@ -1102,7 +1121,7 @@ public class InterviewServiceImpl implements InterviewService {
         record.setProcessId(process.getId());
         record.setKnowledgeBaseId(weight == null ? null : weight.getKnowledgeBaseId());
         record.setKnowledgePoint(weight == null ? "通用沟通" : loadKnowledgeBaseName(weight.getKnowledgeBaseId()));
-        record.setQuestionContent(callLlmQuestion(record.getKnowledgePoint(), loadKnowledgeMaterials(weight == null ? null : weight.getKnowledgeBaseId())));
+        record.setQuestionContent(callLlmQuestion(record.getKnowledgePoint(), loadKnowledgeMaterials(weight == null ? null : weight.getKnowledgeBaseId()), loadJobRequirements(process)));
         record.setSequenceNo(nextSequence(process.getId()));
         aiRecordMapper.insert(record);
     }
@@ -1129,12 +1148,18 @@ public class InterviewServiceImpl implements InterviewService {
                 .orElse("");
     }
 
-    private String callLlmQuestion(String topic, String materials) {
+    private String loadJobRequirements(InterviewProcess process) {
+        RecruitmentJob job = process == null || process.getJobId() == null ? null : recruitmentJobMapper.selectById(process.getJobId());
+        return job == null ? "" : StrUtil.blankToDefault(job.getRequirements(), "");
+    }
+
+    private String callLlmQuestion(String topic, String materials, String jobRequirements) {
         InterviewLlmConfig config = requireActiveLlmConfig("INTERVIEWER");
         String prompt = "你是一名AI面试官，请根据用户提供的材料生成一道中文面试题。只输出题目内容，不要评分，不要评价，不要输出答案。";
         String userPrompt = "知识库主题：" + topic + "\n\n知识库材料：\n" + StrUtil.blankToDefault(materials, "无补充材料")
                 + "\n\n请只基于上述知识库材料生成一道面试题。题目必须能从材料中找到考察依据，可以对知识点原句做自然、清晰的语义改写，但不要引入材料外的知识点，不要输出解释。";
-        String question = callOpenAiChat(config, prompt + "\n你必须根据用户提供的知识库材料出题，允许自然表达和语义修饰，但考察依据必须来自材料。本指令优先于模型配置中的打分、评价或只返回分数类要求。", userPrompt)
+        String question = callOpenAiChat(config, prompt + "\n岗位要求：\n" + StrUtil.blankToDefault(jobRequirements, "未填写")
+                        + "\n你必须根据用户提供的知识库材料出题，并结合岗位要求判断考察重点。允许自然表达和语义修饰，但考察依据必须来自材料和岗位要求。本指令优先于模型配置中的打分、评价或只返回分数类要求。", userPrompt)
                 .replace("\n", " ")
                 .trim();
         if (StrUtil.isBlank(question)) {
@@ -1159,7 +1184,7 @@ public class InterviewServiceImpl implements InterviewService {
         aiRecordMapper.insert(record);
     }
 
-    private LlmEvaluation callLlmEvaluation(String question, String answer, String topic, String materials, String role, boolean needNextQuestion) {
+    private LlmEvaluation callLlmEvaluation(String question, String answer, String topic, String materials, String jobRequirements, String role, boolean needNextQuestion) {
         InterviewLlmConfig config = requireActiveLlmConfig(role);
         String basePrompt = StrUtil.blankToDefault(config.getScoringRulePrompt(), config.getPromptTemplate())
                 .replace("{topic}", StrUtil.blankToDefault(topic, "通用沟通"));
@@ -1172,14 +1197,16 @@ public class InterviewServiceImpl implements InterviewService {
                 + "\n\n面试者回答：\n" + StrUtil.blankToDefault(answer, "");
 
         if (!needNextQuestion) {
-            String scorerPrompt = basePrompt + "\n请严格基于上述知识库材料、当前问题和面试者回答评分。只返回一个整数分数，不输出解释。";
+            String scorerPrompt = basePrompt + "\n岗位要求：\n" + StrUtil.blankToDefault(jobRequirements, "未填写")
+                    + "\n请严格基于上述知识库材料、岗位要求、当前问题和面试者回答评分。只返回一个整数分数，不输出解释。";
             String response = callOpenAiChat(config, scorerPrompt, userPrompt);
             return new LlmEvaluation(parseScore(response), "", "");
         }
 
-        String systemPrompt = basePrompt + "\n请严格基于上述知识库材料、当前问题和面试者回答完成评价。"
+        String systemPrompt = basePrompt + "\n岗位要求：\n" + StrUtil.blankToDefault(jobRequirements, "未填写")
+                + "\n请严格基于上述知识库材料、岗位要求、当前问题和面试者回答完成评价。"
                 + "\n输出必须包含三部分：第一行只写整数分数；第二行写不少于20字的中文评价，评价要反馈回答是否完整、哪里正确或遗漏；第三行写下一道面试题。"
-                + "\n下一题必须基于知识库材料，可以自然改写和语义修饰，不必与知识点原句一模一样，但不能引入材料外知识点。"
+                + "\n下一题必须基于知识库材料并结合岗位要求，可以自然改写和语义修饰，不必与知识点原句一模一样，但不能引入材料和岗位要求外的知识点。"
                 + "\n本格式要求优先于旧配置中的'只返回整数'类要求，不能只输出分数，也不能只输出问题。";
         String response = callOpenAiChat(config, systemPrompt, userPrompt);
         return parseEvaluation(response);
