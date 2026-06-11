@@ -7,68 +7,136 @@
         <div class="surface">
           <h3>流程入口</h3>
           <div class="summary-box">
-            <p>绑定状态：{{ sessionForm.processId ? '已绑定面试流程' : '未选择报名记录' }}</p>
+            <p>
+              绑定状态：{{
+                sessionForm.processId ? "已绑定面试流程" : "未选择报名记录"
+              }}
+            </p>
           </div>
           <div class="link-row">
-            <el-button type="primary" @click="loadProcessRecords">加载流程</el-button>
+            <el-button type="primary" @click="loadProcessRecords"
+              >加载流程</el-button
+            >
             <RouterLink class="link-chip" to="/user">返回我的报名</RouterLink>
-            <el-button type="primary" @click="enterAiExamMode">进入AI答题全屏</el-button>
+            <el-button type="primary" @click="enterAiExamMode"
+              >进入AI答题全屏</el-button
+            >
             <el-button @click="joinVideo">加入视频面</el-button>
             <el-button @click="stopRecording">结束并上传录制</el-button>
           </div>
           <div v-if="processSummary" class="summary-box">
             <p>当前阶段：{{ processSummary.currentStage }}</p>
             <p>状态：{{ processSummary.processStatusView }}</p>
-            <p>AI均分：{{ processSummary.aiAverageScore ?? '-' }}</p>
-            <p>AI最少轮数：{{ processSummary.aiMinQuestionRounds || '-' }}</p>
-            <p>AI最多轮数：{{ processSummary.aiMaxQuestionRounds || '-' }}</p>
-            <p>反作弊：{{ antiCheat.fullscreen ? '全屏中' : '未全屏' }} / 切屏 {{ antiCheat.switchCount }} / {{ processSummary.antiCheatSwitchLimit || 5 }} 次</p>
-            <p v-if="refreshState.retryCount > 0">自动重试：第 {{ refreshState.retryCount }} 次，{{ refreshState.lastError }}</p>
+            <p>AI均分：{{ processSummary.aiAverageScore ?? "-" }}</p>
+            <p>AI最少轮数：{{ processSummary.aiMinQuestionRounds || "-" }}</p>
+            <p>AI最多轮数：{{ processSummary.aiMaxQuestionRounds || "-" }}</p>
+            <p>
+              反作弊：{{ antiCheat.fullscreen ? "全屏中" : "未全屏" }} / 切屏
+              {{ antiCheat.switchCount }} /
+              {{ processSummary.antiCheatSwitchLimit || 5 }} 次
+            </p>
+            <p v-if="refreshState.retryCount > 0">
+              自动重试：第 {{ refreshState.retryCount }} 次，{{
+                refreshState.lastError
+              }}
+            </p>
           </div>
           <div class="video-grid" v-if="processSummary?.currentStage !== 'AI'">
-            <div class="video-box"><span>本地视频</span><video ref="localVideo" autoplay muted playsinline></video></div>
-            <div class="video-box"><span>远端视频</span><video ref="remoteVideo" autoplay playsinline></video></div>
+            <div class="video-box">
+              <span>本地视频</span
+              ><video ref="localVideo" autoplay muted playsinline></video>
+            </div>
+            <div class="video-box">
+              <span>远端视频</span
+              ><video ref="remoteVideo" autoplay playsinline></video>
+            </div>
           </div>
         </div>
 
-        <div class="surface ai-panel" :class="{ 'ai-exam-active': isAiExamActive() }">
+        <div
+          class="surface ai-panel"
+          :class="{ 'ai-exam-active': isAiExamActive() }"
+        >
           <h3>AI 面试</h3>
-          <div v-if="aiRecording.active && processSummary?.currentStage === 'AI'" class="ai-recording-indicator">
+          <div
+            v-if="aiRecording.active && processSummary?.currentStage === 'AI'"
+            class="ai-recording-indicator"
+          >
             <span class="recording-dot"></span>
             <span>录像中</span>
-            <video ref="aiCameraPreview" class="ai-camera-preview" autoplay muted playsinline></video>
+            <video
+              ref="aiCameraPreview"
+              class="ai-camera-preview"
+              autoplay
+              muted
+              playsinline
+            ></video>
           </div>
-          <div v-if="aiStatusText" class="ai-status-card" :class="{ busy: aiSubmitState.submitting }">
+          <div
+            v-if="aiStatusText"
+            class="ai-status-card"
+            :class="{ busy: aiSubmitState.submitting }"
+          >
             <span class="status-dot"></span>
             <strong>{{ aiStatusText }}</strong>
             <small>{{ aiStatusHint }}</small>
           </div>
-          <div v-if="currentQuestion" class="question-card highlighted-question">
+          <div
+            v-if="currentQuestion"
+            class="question-card highlighted-question"
+          >
             <strong>当前问题 {{ currentQuestion.sequenceNo }}</strong>
             <p>{{ currentQuestion.questionContent }}</p>
             <small>知识域：{{ currentQuestion.knowledgePoint }}</small>
           </div>
-          <div v-else-if="processSummary?.currentStage === 'AI'" class="empty-box">题目生成中</div>
+          <div
+            v-else-if="processSummary?.currentStage === 'AI'"
+            class="empty-box"
+          >
+            题目生成中
+          </div>
           <div v-if="aiStreaming.active" class="ai-stream-box">
             <div class="ai-stream-header">
               <span class="status-dot"></span>
               <strong>{{ aiStreaming.status }}</strong>
             </div>
-            <div class="ai-stream-text">{{ aiStreaming.text }}<span class="stream-cursor"></span></div>
+            <div class="ai-stream-text">
+              {{ aiStreaming.text }}<span class="stream-cursor"></span>
+            </div>
           </div>
           <div v-if="aiRecords.length === 0" class="empty-box">暂无题目</div>
           <div v-for="item in aiRecords" :key="item.id" class="question-card">
             <strong>Q{{ item.sequenceNo }} {{ item.knowledgePoint }}</strong>
             <p>{{ item.questionContent }}</p>
-            <small>单题均分：{{ item.averageScore ?? '-' }}</small>
-            <p>你的回答：{{ item.answerContent || '待回答' }}</p>
-            <p v-if="item.interviewerComment">面试官反馈：{{ item.interviewerComment }}</p>
+            <small>单题均分：{{ item.averageScore ?? "-" }}</small>
+            <p>你的回答：{{ item.answerContent || "待回答" }}</p>
+            <p v-if="item.interviewerComment">
+              面试官反馈：{{ item.interviewerComment }}
+            </p>
           </div>
           <div class="ai-input-area">
-            <el-input v-model="aiAnswer.answerContent" type="textarea" :rows="4" placeholder="回答当前 AI 问题" :disabled="aiSubmitState.submitting || !currentQuestion" />
-            <div class="link-row"><el-button type="primary" :loading="aiSubmitState.submitting" :disabled="aiSubmitState.submitting || !currentQuestion" @click="submitAiAnswer">{{ aiSubmitState.submitting ? 'AI处理中' : '提交 AI 回答' }}</el-button></div>
+            <el-input
+              v-model="aiAnswer.answerContent"
+              type="textarea"
+              :rows="4"
+              placeholder="回答当前 AI 问题"
+              :disabled="aiSubmitState.submitting || !currentQuestion"
+            />
+            <div class="link-row">
+              <el-button
+                type="primary"
+                :loading="aiSubmitState.submitting"
+                :disabled="aiSubmitState.submitting || !currentQuestion"
+                @click="submitAiAnswer"
+                >{{
+                  aiSubmitState.submitting ? "AI处理中" : "提交 AI 回答"
+                }}</el-button
+              >
+            </div>
             <div v-if="aiSubmitState.submitting" class="ai-input-overlay">
-              <div class="ai-orbit"><span></span><span></span><span></span></div>
+              <div class="ai-orbit">
+                <span></span><span></span><span></span>
+              </div>
               <strong>{{ aiSubmitState.message }}</strong>
             </div>
           </div>
@@ -79,654 +147,1046 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { interviewApi, streamAiAnswer } from '../services/api'
-import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, isRelayIceCandidate, playVideo, requestCameraAndMicrophone } from '../utils/media'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { RouterLink, useRoute, useRouter } from "vue-router";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { interviewApi, streamAiAnswer } from "../services/api";
+import {
+  attachRemoteTrack,
+  buildMediaErrorMessage,
+  createPeerConnection,
+  defaultIceServers,
+  isRelayIceCandidate,
+  playVideo,
+  requestCameraAndMicrophone,
+} from "../utils/media";
 
-const route = useRoute()
-const router = useRouter()
-const sessionForm = reactive({ processId: route.params.processId ? Number(route.params.processId) : route.query.processId ? Number(route.query.processId) : null })
-const aiAnswer = reactive({ answerContent: '' })
-const aiRecords = ref([])
-const processSummary = ref(null)
-const currentQuestion = ref(null)
-const refreshState = reactive({ loading: false, retryCount: 0, lastError: '' })
-const aiSubmitState = reactive({ submitting: false, message: '' })
-const aiPendingRefresh = reactive({ active: false, attempts: 0, questionId: null })
-const aiStreaming = reactive({ active: false, text: '', status: '' })
-let aiStreamController = null
-const runtimeConfig = reactive({ disableDevtoolsShortcuts: true })
-const antiCheat = reactive({ fullscreen: false, switchCount: 0, hasEnteredFullscreen: false, aiEndNotified: false })
-const aiRecording = reactive({ active: false, uploading: false })
-const aiCameraPreview = ref(null)
-const localVideo = ref(null)
-const remoteVideo = ref(null)
-let localStream = null
-let peer = null
-let pollTimer = null
-let aiRefreshTimer = null
-let recorder = null
-let recordedChunks = []
-let aiRecorder = null
-let aiRecordedChunks = []
-let aiRecordingStream = null
-let addedHrIce = new Set()
-let remoteStream = null
-let pendingHrIce = []
-let recordingStopInProgress = false
-let handledRecordingEndSignal = ''
-let recordingEndTimer = null
+const route = useRoute();
+const router = useRouter();
+const sessionForm = reactive({
+  processId: route.params.processId
+    ? Number(route.params.processId)
+    : route.query.processId
+      ? Number(route.query.processId)
+      : null,
+});
+const aiAnswer = reactive({ answerContent: "" });
+const aiRecords = ref([]);
+const processSummary = ref(null);
+const currentQuestion = ref(null);
+const refreshState = reactive({ loading: false, retryCount: 0, lastError: "" });
+const aiSubmitState = reactive({ submitting: false, message: "" });
+const aiPendingRefresh = reactive({
+  active: false,
+  attempts: 0,
+  questionId: null,
+});
+const aiStreaming = reactive({ active: false, text: "", status: "" });
+let aiStreamController = null;
+const runtimeConfig = reactive({ disableDevtoolsShortcuts: true });
+const antiCheat = reactive({
+  fullscreen: false,
+  switchCount: 0,
+  hasEnteredFullscreen: false,
+  aiEndNotified: false,
+});
+const aiRecording = reactive({ active: false, uploading: false });
+const aiCameraPreview = ref(null);
+const localVideo = ref(null);
+const remoteVideo = ref(null);
+let localStream = null;
+let peer = null;
+let pollTimer = null;
+let aiRefreshTimer = null;
+let recorder = null;
+let recordedChunks = [];
+let aiRecorder = null;
+let aiRecordedChunks = [];
+let aiRecordingStream = null;
+let addedHrIce = new Set();
+let remoteStream = null;
+let pendingHrIce = [];
+let recordingStopInProgress = false;
+let handledRecordingEndSignal = "";
+let recordingEndTimer = null;
 
 const aiStatusText = computed(() => {
-  if (aiSubmitState.submitting) return aiSubmitState.message || 'AI正在处理你的回答'
-  if (aiPendingRefresh.active) return 'AI仍在后台处理中'
-  if (processSummary.value?.currentStage !== 'AI') return ''
-  if (processSummary.value?.stageStatus === 'WAITING_APPROVAL') return 'AI面试已完成，等待HR审批'
-  if (processSummary.value?.stageStatus === 'REJECTED' || processSummary.value?.overallStatus === 'REJECTED') return 'AI面试已结束'
-  if (refreshState.loading) return '正在同步面试状态'
-  if (!currentQuestion.value) return '正在生成下一道题'
-  return '请阅读当前问题并作答'
-})
+  if (aiSubmitState.submitting)
+    return aiSubmitState.message || "AI正在处理你的回答";
+  if (aiPendingRefresh.active) return "AI仍在后台处理中";
+  if (processSummary.value?.currentStage !== "AI") return "";
+  if (processSummary.value?.stageStatus === "WAITING_APPROVAL")
+    return "AI面试已完成，等待HR审批";
+  if (
+    processSummary.value?.stageStatus === "REJECTED" ||
+    processSummary.value?.overallStatus === "REJECTED"
+  )
+    return "AI面试已结束";
+  if (refreshState.loading) return "正在同步面试状态";
+  if (!currentQuestion.value) return "正在生成下一道题";
+  return "请阅读当前问题并作答";
+});
 
 const aiStatusHint = computed(() => {
-  if (aiSubmitState.submitting) return '评分、评价和下一题生成可能需要几十秒'
-  if (aiPendingRefresh.active) return '请求已超时但不代表失败，系统会自动刷新最新面试状态'
-  if (processSummary.value?.stageStatus === 'WAITING_APPROVAL') return '请保持关注流程状态，HR审批后会进入下一阶段'
-  if (!currentQuestion.value && processSummary.value?.currentStage === 'AI') return '系统会自动刷新题目，请不要重复提交'
-  return '提交后按钮会锁定，避免重复提交'
-})
+  if (aiSubmitState.submitting) return "评分、评价和下一题生成可能需要几十秒";
+  if (aiPendingRefresh.active)
+    return "请求已超时但不代表失败，系统会自动刷新最新面试状态";
+  if (processSummary.value?.stageStatus === "WAITING_APPROVAL")
+    return "请保持关注流程状态，HR审批后会进入下一阶段";
+  if (!currentQuestion.value && processSummary.value?.currentStage === "AI")
+    return "系统会自动刷新题目，请不要重复提交";
+  return "提交后按钮会锁定，避免重复提交";
+});
 
-function fail(error) { ElMessage.error(error.message || '操作失败') }
+function fail(error) {
+  ElMessage.error(error.message || "操作失败");
+}
 async function loadProcessRecords(options = {}) {
   if (refreshState.loading) {
-    return
+    return;
   }
-  refreshState.loading = true
+  refreshState.loading = true;
   try {
     if (!sessionForm.processId) {
-      ElMessage.warning('请从面试者首页的报名记录进入面试')
-      router.push('/user')
-      return
+      ElMessage.warning("请从面试者首页的报名记录进入面试");
+      router.push("/user");
+      return;
     }
-    const [processResponse, questionResponse, recordsResponse] = await Promise.all([
-      interviewApi.getIntervieweeProcess(sessionForm.processId),
-      interviewApi.getNextAiQuestion(sessionForm.processId),
-      interviewApi.listIntervieweeAiRecords({ processId: sessionForm.processId }),
-    ])
-    processSummary.value = processResponse.data
-    antiCheat.switchCount = processSummary.value?.antiCheatSwitchCount || 0
-    currentQuestion.value = questionResponse.data
-    aiRecords.value = recordsResponse.data
-    refreshState.retryCount = 0
-    refreshState.lastError = ''
-    cacheInterviewSession()
-    notifyAiFinishedIfNeeded()
-    syncAiAutoRefresh()
+    const [processResponse, questionResponse, recordsResponse] =
+      await Promise.all([
+        interviewApi.getIntervieweeProcess(sessionForm.processId),
+        interviewApi.getNextAiQuestion(sessionForm.processId),
+        interviewApi.listIntervieweeAiRecords({
+          processId: sessionForm.processId,
+        }),
+      ]);
+    processSummary.value = processResponse.data;
+    antiCheat.switchCount = processSummary.value?.antiCheatSwitchCount || 0;
+    currentQuestion.value = questionResponse.data;
+    aiRecords.value = recordsResponse.data;
+    refreshState.retryCount = 0;
+    refreshState.lastError = "";
+    cacheInterviewSession();
+    notifyAiFinishedIfNeeded();
+    syncAiAutoRefresh();
   } catch (error) {
-    refreshState.retryCount += 1
-    refreshState.lastError = error.message || '刷新失败'
+    refreshState.retryCount += 1;
+    refreshState.lastError = error.message || "刷新失败";
     if (!options.silent) {
-      fail(error)
+      fail(error);
     }
-    scheduleAiRefresh(nextRefreshDelay())
+    scheduleAiRefresh(nextRefreshDelay());
   } finally {
-    refreshState.loading = false
+    refreshState.loading = false;
   }
 }
 
-function cacheInterviewSession() {
-}
+function cacheInterviewSession() {}
 
 function syncAiAutoRefresh() {
-  if (processSummary.value?.currentStage === 'AI' && processSummary.value?.stageStatus === 'IN_PROGRESS' && !currentQuestion.value) {
-    scheduleAiRefresh(3000)
+  if (
+    processSummary.value?.currentStage === "AI" &&
+    processSummary.value?.stageStatus === "IN_PROGRESS" &&
+    !currentQuestion.value
+  ) {
+    scheduleAiRefresh(3000);
   } else {
-    clearAiRefresh()
+    clearAiRefresh();
   }
 }
 
 function scheduleAiRefresh(delay) {
-  clearAiRefresh()
-  aiRefreshTimer = setTimeout(() => loadProcessRecords({ silent: true }), delay)
+  clearAiRefresh();
+  aiRefreshTimer = setTimeout(
+    () => loadProcessRecords({ silent: true }),
+    delay,
+  );
 }
 
 function clearAiRefresh() {
-  clearTimeout(aiRefreshTimer)
-  aiRefreshTimer = null
+  clearTimeout(aiRefreshTimer);
+  aiRefreshTimer = null;
 }
 
 function isTimeoutError(error) {
-  return error?.code === 'ECONNABORTED' || /timeout|exceeded/i.test(error?.message || '')
+  return (
+    error?.code === "ECONNABORTED" ||
+    /timeout|exceeded/i.test(error?.message || "")
+  );
 }
 
 function nextRefreshDelay() {
-  return Math.min(3000 + refreshState.retryCount * 1000, 10000)
+  return Math.min(3000 + refreshState.retryCount * 1000, 10000);
 }
 async function submitAiAnswer() {
   if (aiSubmitState.submitting) {
-    ElMessage.info('AI正在处理上一轮回答，请稍候')
-    return
+    ElMessage.info("AI正在处理上一轮回答，请稍候");
+    return;
   }
   if (!currentQuestion.value) {
-    ElMessage.warning('当前没有可提交的问题，请等待题目生成')
-    return
+    ElMessage.warning("当前没有可提交的问题，请等待题目生成");
+    return;
   }
   if (!aiAnswer.answerContent.trim()) {
-    ElMessage.warning('请先填写回答内容')
-    return
+    ElMessage.warning("请先填写回答内容");
+    return;
   }
   if (!antiCheat.fullscreen) {
-    ElMessage.warning('请先进入全屏答题模式')
-    await enterAiExamMode()
-    return
+    ElMessage.warning("请先进入全屏答题模式");
+    await enterAiExamMode();
+    return;
   }
-  aiSubmitState.submitting = true
-  aiSubmitState.message = 'AI正在评分并生成下一步'
-  aiStreaming.active = true
-  aiStreaming.text = ''
-  aiStreaming.status = '连接中...'
-  clearAiRefresh()
+  aiSubmitState.submitting = true;
+  aiSubmitState.message = "AI正在评分并生成下一步";
+  aiStreaming.active = true;
+  aiStreaming.text = "";
+  aiStreaming.status = "连接中...";
+  clearAiRefresh();
 
   aiStreamController = streamAiAnswer(
     { processId: sessionForm.processId, answerContent: aiAnswer.answerContent },
     {
       onText(chunk) {
-        aiStreaming.text += chunk
-        aiStreaming.status = 'AI正在回答...'
+        aiStreaming.text += chunk;
+        aiStreaming.status = "AI正在回答...";
       },
       onStatus(message) {
-        aiStreaming.status = message
+        aiStreaming.status = message;
       },
       async onComplete(data) {
-        aiStreaming.status = '处理完成'
-        aiAnswer.answerContent = ''
-        ElMessage.success('AI 回答已提交')
-        aiSubmitState.submitting = false
-        aiSubmitState.message = ''
-        aiStreaming.active = false
-        aiStreaming.text = ''
-        aiStreaming.status = ''
-        aiStreamController = null
-        await loadProcessRecords()
+        aiStreaming.status = "处理完成";
+        aiAnswer.answerContent = "";
+        ElMessage.success("AI 回答已提交");
+        aiSubmitState.submitting = false;
+        aiSubmitState.message = "";
+        aiStreaming.active = false;
+        aiStreaming.text = "";
+        aiStreaming.status = "";
+        aiStreamController = null;
+        await loadProcessRecords();
       },
       onError(err) {
-        ElMessage.error(err.message || 'AI处理失败')
-        aiSubmitState.submitting = false
-        aiSubmitState.message = ''
-        aiStreaming.active = false
-        aiStreaming.text = ''
-        aiStreaming.status = ''
-        aiStreamController = null
-        scheduleAiRefresh(nextRefreshDelay())
+        ElMessage.error(err.message || "AI处理失败");
+        aiSubmitState.submitting = false;
+        aiSubmitState.message = "";
+        aiStreaming.active = false;
+        aiStreaming.text = "";
+        aiStreaming.status = "";
+        aiStreamController = null;
+        scheduleAiRefresh(nextRefreshDelay());
       },
     },
-  )
+  );
 }
 
 function schedulePendingAiRefresh() {
-  clearAiRefresh()
-  aiRefreshTimer = setTimeout(refreshPendingAiState, Math.min(3000 + aiPendingRefresh.attempts * 1000, 10000))
+  clearAiRefresh();
+  aiRefreshTimer = setTimeout(
+    refreshPendingAiState,
+    Math.min(3000 + aiPendingRefresh.attempts * 1000, 10000),
+  );
 }
 
 async function refreshPendingAiState() {
-  aiPendingRefresh.attempts += 1
-  aiSubmitState.message = `AI仍在后台处理，正在第 ${aiPendingRefresh.attempts} 次同步状态`
+  aiPendingRefresh.attempts += 1;
+  aiSubmitState.message = `AI仍在后台处理，正在第 ${aiPendingRefresh.attempts} 次同步状态`;
   try {
-    await loadProcessRecords({ silent: true })
+    await loadProcessRecords({ silent: true });
     if (!isPendingAiResolved()) {
-      schedulePendingAiRefresh()
-      return
+      schedulePendingAiRefresh();
+      return;
     }
-    aiPendingRefresh.active = false
-    aiPendingRefresh.attempts = 0
-    aiPendingRefresh.questionId = null
-    aiSubmitState.submitting = false
-    aiSubmitState.message = ''
-    aiAnswer.answerContent = ''
-    ElMessage.success('AI处理已完成，状态已更新')
+    aiPendingRefresh.active = false;
+    aiPendingRefresh.attempts = 0;
+    aiPendingRefresh.questionId = null;
+    aiSubmitState.submitting = false;
+    aiSubmitState.message = "";
+    aiAnswer.answerContent = "";
+    ElMessage.success("AI处理已完成，状态已更新");
   } catch {
-    schedulePendingAiRefresh()
+    schedulePendingAiRefresh();
   }
 }
 
 function isPendingAiResolved() {
-  if (processSummary.value?.currentStage !== 'AI' || processSummary.value?.stageStatus === 'WAITING_APPROVAL' || processSummary.value?.overallStatus !== 'IN_PROGRESS') {
-    return true
+  if (
+    processSummary.value?.currentStage !== "AI" ||
+    processSummary.value?.stageStatus === "WAITING_APPROVAL" ||
+    processSummary.value?.overallStatus !== "IN_PROGRESS"
+  ) {
+    return true;
   }
-  const pendingRecord = aiRecords.value.find((item) => item.id === aiPendingRefresh.questionId)
+  const pendingRecord = aiRecords.value.find(
+    (item) => item.id === aiPendingRefresh.questionId,
+  );
   if (pendingRecord?.answerContent) {
-    return true
+    return true;
   }
-  return currentQuestion.value && currentQuestion.value.id !== aiPendingRefresh.questionId
+  return (
+    currentQuestion.value &&
+    currentQuestion.value.id !== aiPendingRefresh.questionId
+  );
 }
 
 async function enterAiExamMode() {
   if (document.fullscreenElement !== document.documentElement) {
     try {
-      await document.documentElement.requestFullscreen()
-      antiCheat.hasEnteredFullscreen = true
+      await document.documentElement.requestFullscreen();
+      antiCheat.hasEnteredFullscreen = true;
     } catch (error) {
-      await reportAntiCheat('FULLSCREEN_DENIED', error.message || '全屏授权失败')
-      ElMessage.warning('浏览器未允许全屏，请允许后继续答题')
-      return
+      await reportAntiCheat(
+        "FULLSCREEN_DENIED",
+        error.message || "全屏授权失败",
+      );
+      ElMessage.warning("浏览器未允许全屏，请允许后继续答题");
+      return;
     }
   } else {
-    antiCheat.hasEnteredFullscreen = true
+    antiCheat.hasEnteredFullscreen = true;
   }
-  await startAiRecording()
+  await startAiRecording();
 }
 
 async function startAiRecording() {
-  if (aiRecording.active) return
+  if (aiRecording.active) return;
   try {
-    aiRecordingStream = await requestCameraAndMicrophone()
+    aiRecordingStream = await requestCameraAndMicrophone();
     if (aiCameraPreview.value) {
-      aiCameraPreview.value.srcObject = aiRecordingStream
-      playVideo(aiCameraPreview.value)
+      aiCameraPreview.value.srcObject = aiRecordingStream;
+      playVideo(aiCameraPreview.value);
     }
-    aiRecorder = new MediaRecorder(aiRecordingStream)
-    aiRecordedChunks = []
-    aiRecorder.ondataavailable = (event) => { if (event.data.size > 0) aiRecordedChunks.push(event.data) }
-    aiRecorder.start(1000)
-    aiRecording.active = true
-    ElMessage.success('摄像头已开启，AI面试录像已开始')
+    aiRecorder = new MediaRecorder(aiRecordingStream);
+    aiRecordedChunks = [];
+    aiRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) aiRecordedChunks.push(event.data);
+    };
+    aiRecorder.start(1000);
+    aiRecording.active = true;
+    ElMessage.success("摄像头已开启，AI面试录像已开始");
   } catch (error) {
-    ElMessage.error(buildMediaErrorMessage(error))
+    ElMessage.error(buildMediaErrorMessage(error));
   }
 }
 
 async function stopAndUploadAiRecording() {
-  if (aiRecording.uploading) return
-  if ((!aiRecorder || aiRecorder.state === 'inactive') && aiRecordedChunks.length === 0) return
-  aiRecording.uploading = true
+  if (aiRecording.uploading) return;
+  if (
+    (!aiRecorder || aiRecorder.state === "inactive") &&
+    aiRecordedChunks.length === 0
+  )
+    return;
+  aiRecording.uploading = true;
   try {
-    if (aiRecorder && aiRecorder.state !== 'inactive') {
-      const currentRecorder = aiRecorder
-      await new Promise((resolve) => { currentRecorder.onstop = resolve; currentRecorder.stop() })
-      aiRecorder = null
+    if (aiRecorder && aiRecorder.state !== "inactive") {
+      const currentRecorder = aiRecorder;
+      await new Promise((resolve) => {
+        currentRecorder.onstop = resolve;
+        currentRecorder.stop();
+      });
+      aiRecorder = null;
     }
-    aiRecordingStream?.getTracks().forEach((track) => track.stop())
-    aiRecordingStream = null
-    if (aiCameraPreview.value) aiCameraPreview.value.srcObject = null
-    const blob = new Blob(aiRecordedChunks, { type: 'video/webm' })
+    aiRecordingStream?.getTracks().forEach((track) => track.stop());
+    aiRecordingStream = null;
+    if (aiCameraPreview.value) aiCameraPreview.value.srcObject = null;
+    const blob = new Blob(aiRecordedChunks, { type: "video/webm" });
     if (blob.size > 0) {
-      const file = new File([blob], `ai-exam-${sessionForm.processId}.webm`, { type: 'video/webm' })
-      await interviewApi.uploadAiRecording(sessionForm.processId, file)
-      aiRecordedChunks = []
-      ElMessage.success('AI面试录像已上传')
+      const file = new File([blob], `ai-exam-${sessionForm.processId}.webm`, {
+        type: "video/webm",
+      });
+      await interviewApi.uploadAiRecording(sessionForm.processId, file);
+      aiRecordedChunks = [];
+      ElMessage.success("AI面试录像已上传");
     }
   } catch (error) {
-    fail(error)
+    fail(error);
   } finally {
-    aiRecording.uploading = false
-    aiRecording.active = false
+    aiRecording.uploading = false;
+    aiRecording.active = false;
   }
 }
 
 async function reportAntiCheat(eventType, detail) {
-  if (!sessionForm.processId) return null
+  if (!sessionForm.processId) return null;
   try {
-    const response = await interviewApi.reportAntiCheatEvent({ processId: sessionForm.processId, eventType, detail })
+    const response = await interviewApi.reportAntiCheatEvent({
+      processId: sessionForm.processId,
+      eventType,
+      detail,
+    });
     if (response.data) {
-      processSummary.value = response.data
-      antiCheat.switchCount = response.data.antiCheatSwitchCount || antiCheat.switchCount
-      notifyAiFinishedIfNeeded()
-      if (response.data.stageStatus === 'WAITING_APPROVAL') {
-        currentQuestion.value = null
-        clearAiRefresh()
+      processSummary.value = response.data;
+      antiCheat.switchCount =
+        response.data.antiCheatSwitchCount || antiCheat.switchCount;
+      notifyAiFinishedIfNeeded();
+      if (response.data.stageStatus === "WAITING_APPROVAL") {
+        currentQuestion.value = null;
+        clearAiRefresh();
       }
     }
-    return response.data
-  } catch { return null }
+    return response.data;
+  } catch {
+    return null;
+  }
 }
 
 function handleFullscreenChange() {
-  antiCheat.fullscreen = document.fullscreenElement === document.documentElement
+  antiCheat.fullscreen =
+    document.fullscreenElement === document.documentElement;
   if (antiCheat.fullscreen) {
-    antiCheat.hasEnteredFullscreen = true
-    return
+    antiCheat.hasEnteredFullscreen = true;
+    return;
   }
   if (shouldReportSwitch()) {
-    reportAntiCheat('FULLSCREEN_EXIT', `退出全屏，当前本地累计${antiCheat.switchCount + 1}次`)
+    reportAntiCheat(
+      "FULLSCREEN_EXIT",
+      `退出全屏，当前本地累计${antiCheat.switchCount + 1}次`,
+    );
   }
 }
 
 function handleVisibilityChange() {
   if (document.hidden && shouldReportSwitch()) {
-    reportAntiCheat('TAB_HIDDEN', `页面隐藏/切屏，当前本地累计${antiCheat.switchCount + 1}次`)
+    reportAntiCheat(
+      "TAB_HIDDEN",
+      `页面隐藏/切屏，当前本地累计${antiCheat.switchCount + 1}次`,
+    );
   }
 }
 
 function handleWindowBlur() {
   if (shouldReportSwitch()) {
-    reportAntiCheat('WINDOW_BLUR', `窗口失焦/切屏，当前本地累计${antiCheat.switchCount + 1}次`)
+    reportAntiCheat(
+      "WINDOW_BLUR",
+      `窗口失焦/切屏，当前本地累计${antiCheat.switchCount + 1}次`,
+    );
   }
 }
 
 function handleRestrictedShortcut(event) {
-  const key = event.key?.toLowerCase()
-  if (isAiExamActive() && event.ctrlKey && ['c', 'v', 'x', 'a'].includes(key)) {
-    event.preventDefault()
-    event.stopPropagation()
-    ElMessage.warning('AI面试期间禁止复制、剪切和粘贴')
-    return
+  const key = event.key?.toLowerCase();
+  if (isAiExamActive() && event.ctrlKey && ["c", "v", "x", "a"].includes(key)) {
+    event.preventDefault();
+    event.stopPropagation();
+    ElMessage.warning("AI面试期间禁止复制、剪切和粘贴");
+    return;
   }
-  if (!runtimeConfig.disableDevtoolsShortcuts) return
-  const blocked = event.key === 'F12'
-    || (event.ctrlKey && event.shiftKey && ['i', 'j', 'c'].includes(key))
-    || (event.metaKey && event.altKey && ['i', 'j', 'c'].includes(key))
-    || (event.ctrlKey && key === 'u')
-  if (!blocked) return
-  event.preventDefault()
-  event.stopPropagation()
-  ElMessage.warning('面试期间已禁用开发者工具快捷键')
+  if (!runtimeConfig.disableDevtoolsShortcuts) return;
+  const blocked =
+    event.key === "F12" ||
+    (event.ctrlKey && event.shiftKey && ["i", "j", "c"].includes(key)) ||
+    (event.metaKey && event.altKey && ["i", "j", "c"].includes(key)) ||
+    (event.ctrlKey && key === "u");
+  if (!blocked) return;
+  event.preventDefault();
+  event.stopPropagation();
+  ElMessage.warning("面试期间已禁用开发者工具快捷键");
 }
 
 function handleCopyBlock(event) {
-  if (!isAiExamActive()) return
-  event.preventDefault()
-  event.stopPropagation()
-  ElMessage.warning('AI面试期间禁止复制、剪切和粘贴')
+  if (!isAiExamActive()) return;
+  event.preventDefault();
+  event.stopPropagation();
+  ElMessage.warning("AI面试期间禁止复制、剪切和粘贴");
 }
 
 function handleSelectBlock(event) {
-  if (!isAiExamActive()) return
-  const selection = window.getSelection()
+  if (!isAiExamActive()) return;
+  const selection = window.getSelection();
   if (selection && selection.toString().length > 0) {
-    event.preventDefault()
+    event.preventDefault();
   }
 }
 
 function isAiExamActive() {
-  return antiCheat.hasEnteredFullscreen && processSummary.value?.currentStage === 'AI' && processSummary.value?.stageStatus === 'IN_PROGRESS' && processSummary.value?.overallStatus === 'IN_PROGRESS'
+  return (
+    antiCheat.hasEnteredFullscreen &&
+    processSummary.value?.currentStage === "AI" &&
+    processSummary.value?.stageStatus === "IN_PROGRESS" &&
+    processSummary.value?.overallStatus === "IN_PROGRESS"
+  );
 }
 
 function handleContextMenu(event) {
-  if (!runtimeConfig.disableDevtoolsShortcuts) return
-  event.preventDefault()
+  if (!runtimeConfig.disableDevtoolsShortcuts) return;
+  event.preventDefault();
 }
 
 function handleBeforeUnload() {
-  if (aiRecorder && aiRecorder.state !== 'inactive') {
-    aiRecorder.stop()
-    aiRecordingStream?.getTracks().forEach((track) => track.stop())
+  if (aiRecorder && aiRecorder.state !== "inactive") {
+    aiRecorder.stop();
+    aiRecordingStream?.getTracks().forEach((track) => track.stop());
   }
 }
 
 function shouldReportSwitch() {
-  return antiCheat.hasEnteredFullscreen && processSummary.value?.currentStage === 'AI' && processSummary.value?.stageStatus === 'IN_PROGRESS' && processSummary.value?.overallStatus === 'IN_PROGRESS'
+  return (
+    antiCheat.hasEnteredFullscreen &&
+    processSummary.value?.currentStage === "AI" &&
+    processSummary.value?.stageStatus === "IN_PROGRESS" &&
+    processSummary.value?.overallStatus === "IN_PROGRESS"
+  );
 }
 
 function notifyAiFinishedIfNeeded() {
-  if (processSummary.value?.currentStage === 'AI' && processSummary.value?.stageStatus === 'WAITING_APPROVAL' && !antiCheat.aiEndNotified) {
-    antiCheat.aiEndNotified = true
-    currentQuestion.value = null
-    clearAiRefresh()
-    if (aiStreamController) { aiStreamController.abort(); aiStreamController = null }
-    aiStreaming.active = false
-    aiStreaming.text = ''
-    aiStreaming.status = ''
-    aiSubmitState.submitting = false
-    aiSubmitState.message = ''
-    stopAndUploadAiRecording()
-    ElMessageBox.alert(processSummary.value.processStatusView || 'AI面试已结束，请等待HR人工审批。', '面试结束', { confirmButtonText: '知道了' })
+  if (
+    processSummary.value?.currentStage === "AI" &&
+    processSummary.value?.stageStatus === "WAITING_APPROVAL" &&
+    !antiCheat.aiEndNotified
+  ) {
+    antiCheat.aiEndNotified = true;
+    currentQuestion.value = null;
+    clearAiRefresh();
+    if (aiStreamController) {
+      aiStreamController.abort();
+      aiStreamController = null;
+    }
+    aiStreaming.active = false;
+    aiStreaming.text = "";
+    aiStreaming.status = "";
+    aiSubmitState.submitting = false;
+    aiSubmitState.message = "";
+    stopAndUploadAiRecording();
+    ElMessageBox.alert(
+      processSummary.value.processStatusView ||
+        "AI面试已结束，请等待HR人工审批。",
+      "面试结束",
+      { confirmButtonText: "知道了" },
+    );
   }
 }
 async function joinVideo() {
   try {
-    disconnectVideo()
-    await interviewApi.intervieweeJoin(sessionForm.processId)
-    localStream = await requestCameraAndMicrophone()
-    localVideo.value.srcObject = localStream
-    playVideo(localVideo.value)
-    peer = createPeerConnection(await loadIceServers())
-    addedHrIce = new Set()
-    pendingHrIce = []
-    localStream.getTracks().forEach((track) => peer.addTrack(track, localStream))
-    remoteStream = null
-    peer.ontrack = (event) => { remoteStream = attachRemoteTrack(remoteVideo.value, event, remoteStream) }
+    disconnectVideo();
+    await interviewApi.intervieweeJoin(sessionForm.processId);
+    localStream = await requestCameraAndMicrophone();
+    localVideo.value.srcObject = localStream;
+    playVideo(localVideo.value);
+    peer = createPeerConnection(await loadIceServers());
+    addedHrIce = new Set();
+    pendingHrIce = [];
+    localStream
+      .getTracks()
+      .forEach((track) => peer.addTrack(track, localStream));
+    remoteStream = null;
+    peer.ontrack = (event) => {
+      remoteStream = attachRemoteTrack(remoteVideo.value, event, remoteStream);
+    };
     peer.onconnectionstatechange = () => {
-      if (['failed', 'disconnected'].includes(peer.connectionState)) {
-        ElMessage.warning('远端视频连接不稳定，请双方保持页面打开，必要时重新加入视频面')
+      if (["failed", "disconnected"].includes(peer.connectionState)) {
+        ElMessage.warning(
+          "远端视频连接不稳定，请双方保持页面打开，必要时重新加入视频面",
+        );
       }
-    }
+    };
     peer.onicecandidate = async (event) => {
       if (isRelayIceCandidate(event.candidate)) {
-        await interviewApi.addIntervieweeIce(sessionForm.processId, { iceCandidate: JSON.stringify(event.candidate) })
+        await interviewApi.addIntervieweeIce(sessionForm.processId, {
+          iceCandidate: JSON.stringify(event.candidate),
+        });
       }
-    }
+    };
     pollTimer = setInterval(async () => {
-      const state = (await interviewApi.getVideoState(sessionForm.processId)).data
+      const state = (await interviewApi.getVideoState(sessionForm.processId))
+        .data;
       if (state.offerSdp && !peer.currentRemoteDescription) {
-        await peer.setRemoteDescription(JSON.parse(state.offerSdp))
-        await flushPendingHrIce()
-        const answer = await peer.createAnswer()
-        await peer.setLocalDescription(answer)
-        await interviewApi.submitVideoAnswer(sessionForm.processId, { answerSdp: JSON.stringify(answer) })
+        await peer.setRemoteDescription(JSON.parse(state.offerSdp));
+        await flushPendingHrIce();
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        await interviewApi.submitVideoAnswer(sessionForm.processId, {
+          answerSdp: JSON.stringify(answer),
+        });
       }
       if (state.hrIceCandidates) {
-        const candidates = state.hrIceCandidates.split('\n').filter(Boolean)
+        const candidates = state.hrIceCandidates.split("\n").filter(Boolean);
         for (const item of candidates) {
           if (!addedHrIce.has(item)) {
-            addedHrIce.add(item)
-            await addHrIceCandidate(item)
+            addedHrIce.add(item);
+            await addHrIceCandidate(item);
           }
         }
       }
-      if (state.sessionStatus === 'RECORDING') {
-        startRecordingIfNeeded()
+      if (state.sessionStatus === "RECORDING") {
+        startRecordingIfNeeded();
       }
       if (shouldHandleRecordingEnd(state)) {
-        handledRecordingEndSignal = recordingEndSignalKey(state)
-        clearInterval(pollTimer)
-        pollTimer = null
-        scheduleRecordingStop(state.recordingEndRequestedAt)
+        handledRecordingEndSignal = recordingEndSignalKey(state);
+        clearInterval(pollTimer);
+        pollTimer = null;
+        scheduleRecordingStop(state.recordingEndRequestedAt);
       }
-    }, 1000)
-    ElMessage.success('已加入视频面，等待HR就绪后同步开始录制')
-  } catch (error) { ElMessage.error(buildMediaErrorMessage(error)) }
+    }, 1000);
+    ElMessage.success("已加入视频面，等待HR就绪后同步开始录制");
+  } catch (error) {
+    ElMessage.error(buildMediaErrorMessage(error));
+  }
 }
 async function stopRecording() {
   try {
-    clearInterval(pollTimer)
-    pollTimer = null
-    const response = await interviewApi.completeIntervieweeVideo(sessionForm.processId)
-    handledRecordingEndSignal = recordingEndSignalKey(response.data || {})
-    scheduleRecordingStop(response.data?.recordingEndRequestedAt)
-  } catch (error) { fail(error) }
+    clearInterval(pollTimer);
+    pollTimer = null;
+    const response = await interviewApi.completeIntervieweeVideo(
+      sessionForm.processId,
+    );
+    handledRecordingEndSignal = recordingEndSignalKey(response.data || {});
+    scheduleRecordingStop(response.data?.recordingEndRequestedAt);
+  } catch (error) {
+    fail(error);
+  }
 }
 
 function recordingEndSignalKey(state) {
-  return state.recordingEndRequestedAt || (state.sessionStatus === 'END_REQUESTED' ? 'END_REQUESTED' : '')
+  return (
+    state.recordingEndRequestedAt ||
+    (state.sessionStatus === "END_REQUESTED" ? "END_REQUESTED" : "")
+  );
 }
 
 function shouldHandleRecordingEnd(state) {
-  const signal = recordingEndSignalKey(state)
-  return signal && signal !== handledRecordingEndSignal
+  const signal = recordingEndSignalKey(state);
+  return signal && signal !== handledRecordingEndSignal;
 }
 
 function scheduleRecordingStop(endAt) {
-  clearTimeout(recordingEndTimer)
-  const delay = Math.max(new Date(endAt || Date.now()).getTime() - Date.now(), 0)
+  clearTimeout(recordingEndTimer);
+  const delay = Math.max(
+    new Date(endAt || Date.now()).getTime() - Date.now(),
+    0,
+  );
   recordingEndTimer = setTimeout(async () => {
     try {
-      await stopAndUploadRecording()
-      disconnectVideo()
+      await stopAndUploadRecording();
+      disconnectVideo();
     } catch (error) {
-      fail(error)
+      fail(error);
     }
-  }, delay)
+  }, delay);
 }
 
 function startRecordingIfNeeded() {
-  if (!localStream || (recorder && recorder.state !== 'inactive')) return
-  recorder = new MediaRecorder(localStream)
-  recordedChunks = []
-  recorder.ondataavailable = (event) => { if (event.data.size > 0) recordedChunks.push(event.data) }
-  recorder.start(1000)
-  ElMessage.success('双方已进入视频面，录制已同步开始')
+  if (!localStream || (recorder && recorder.state !== "inactive")) return;
+  recorder = new MediaRecorder(localStream);
+  recordedChunks = [];
+  recorder.ondataavailable = (event) => {
+    if (event.data.size > 0) recordedChunks.push(event.data);
+  };
+  recorder.start(1000);
+  ElMessage.success("双方已进入视频面，录制已同步开始");
 }
 
 async function stopAndUploadRecording() {
-  if (recordingStopInProgress) return
-  if ((!recorder || recorder.state === 'inactive') && recordedChunks.length === 0) return
-  recordingStopInProgress = true
+  if (recordingStopInProgress) return;
+  if (
+    (!recorder || recorder.state === "inactive") &&
+    recordedChunks.length === 0
+  )
+    return;
+  recordingStopInProgress = true;
   try {
-    if (recorder && recorder.state !== 'inactive') {
-      const currentRecorder = recorder
-      await new Promise((resolve) => { currentRecorder.onstop = resolve; currentRecorder.stop() })
-      recorder = null
+    if (recorder && recorder.state !== "inactive") {
+      const currentRecorder = recorder;
+      await new Promise((resolve) => {
+        currentRecorder.onstop = resolve;
+        currentRecorder.stop();
+      });
+      recorder = null;
     }
-    const blob = new Blob(recordedChunks, { type: 'video/webm' })
+    const blob = new Blob(recordedChunks, { type: "video/webm" });
     if (blob.size > 0) {
-      const file = new File([blob], `interviewee-${sessionForm.processId}.webm`, { type: 'video/webm' })
-      await interviewApi.uploadVideoRecording(sessionForm.processId, file)
-      recordedChunks = []
-      ElMessage.success('面试者录制已上传')
+      const file = new File(
+        [blob],
+        `interviewee-${sessionForm.processId}.webm`,
+        { type: "video/webm" },
+      );
+      await interviewApi.uploadVideoRecording(sessionForm.processId, file);
+      recordedChunks = [];
+      ElMessage.success("面试者录制已上传");
     }
   } finally {
-    recordingStopInProgress = false
+    recordingStopInProgress = false;
   }
 }
 
 function disconnectVideo() {
-  clearInterval(pollTimer)
-  clearTimeout(recordingEndTimer)
-  pollTimer = null
-  recordingEndTimer = null
-  peer?.getSenders?.().forEach((sender) => sender.track?.stop())
-  peer?.close()
-  peer = null
-  recorder = null
-  recordedChunks = []
-  recordingStopInProgress = false
-  handledRecordingEndSignal = ''
-  localStream?.getTracks().forEach((track) => track.stop())
-  localStream = null
-  remoteStream = null
-  pendingHrIce = []
-  if (localVideo.value) localVideo.value.srcObject = null
-  if (remoteVideo.value) remoteVideo.value.srcObject = null
+  clearInterval(pollTimer);
+  clearTimeout(recordingEndTimer);
+  pollTimer = null;
+  recordingEndTimer = null;
+  peer?.getSenders?.().forEach((sender) => sender.track?.stop());
+  peer?.close();
+  peer = null;
+  recorder = null;
+  recordedChunks = [];
+  recordingStopInProgress = false;
+  handledRecordingEndSignal = "";
+  localStream?.getTracks().forEach((track) => track.stop());
+  localStream = null;
+  remoteStream = null;
+  pendingHrIce = [];
+  if (localVideo.value) localVideo.value.srcObject = null;
+  if (remoteVideo.value) remoteVideo.value.srcObject = null;
 }
 
 async function addHrIceCandidate(item) {
   if (!peer?.remoteDescription) {
-    pendingHrIce.push(item)
-    return
+    pendingHrIce.push(item);
+    return;
   }
   try {
-    await peer.addIceCandidate(JSON.parse(item))
+    await peer.addIceCandidate(JSON.parse(item));
   } catch (error) {
-    console.warn('添加HR ICE失败', error)
+    console.warn("添加HR ICE失败", error);
   }
 }
 
 async function flushPendingHrIce() {
-  const items = pendingHrIce
-  pendingHrIce = []
+  const items = pendingHrIce;
+  pendingHrIce = [];
   for (const item of items) {
-    await addHrIceCandidate(item)
+    await addHrIceCandidate(item);
   }
 }
 
 async function loadIceServers() {
   try {
-    const response = await interviewApi.getIceServers()
-    return response.data?.length ? response.data : defaultIceServers()
+    const response = await interviewApi.getIceServers();
+    return response.data?.length ? response.data : defaultIceServers();
   } catch {
-    return defaultIceServers()
+    return defaultIceServers();
   }
 }
 
 async function loadRuntimeConfig() {
   try {
-    const response = await interviewApi.getRuntimeConfig()
-    runtimeConfig.disableDevtoolsShortcuts = response.data?.disableDevtoolsShortcuts !== false
+    const response = await interviewApi.getRuntimeConfig();
+    runtimeConfig.disableDevtoolsShortcuts =
+      response.data?.disableDevtoolsShortcuts !== false;
   } catch {
-    runtimeConfig.disableDevtoolsShortcuts = true
+    runtimeConfig.disableDevtoolsShortcuts = true;
   }
 }
 
 onBeforeUnmount(() => {
-  clearAiRefresh()
-  if (aiStreamController) { aiStreamController.abort(); aiStreamController = null }
-  document.removeEventListener('keydown', handleRestrictedShortcut, true)
-  document.removeEventListener('contextmenu', handleContextMenu, true)
-  document.removeEventListener('copy', handleCopyBlock, true)
-  document.removeEventListener('cut', handleCopyBlock, true)
-  document.removeEventListener('paste', handleCopyBlock, true)
-  document.removeEventListener('selectstart', handleSelectBlock, true)
-  document.removeEventListener('fullscreenchange', handleFullscreenChange)
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-  window.removeEventListener('blur', handleWindowBlur)
-  window.removeEventListener('beforeunload', handleBeforeUnload)
-  disconnectVideo()
-  stopAndUploadAiRecording()
-})
+  clearAiRefresh();
+  if (aiStreamController) {
+    aiStreamController.abort();
+    aiStreamController = null;
+  }
+  document.removeEventListener("keydown", handleRestrictedShortcut, true);
+  document.removeEventListener("contextmenu", handleContextMenu, true);
+  document.removeEventListener("copy", handleCopyBlock, true);
+  document.removeEventListener("cut", handleCopyBlock, true);
+  document.removeEventListener("paste", handleCopyBlock, true);
+  document.removeEventListener("selectstart", handleSelectBlock, true);
+  document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
+  window.removeEventListener("blur", handleWindowBlur);
+  window.removeEventListener("beforeunload", handleBeforeUnload);
+  disconnectVideo();
+  stopAndUploadAiRecording();
+});
 
 onMounted(async () => {
-  await loadRuntimeConfig()
-  document.addEventListener('keydown', handleRestrictedShortcut, true)
-  document.addEventListener('contextmenu', handleContextMenu, true)
-  document.addEventListener('copy', handleCopyBlock, true)
-  document.addEventListener('cut', handleCopyBlock, true)
-  document.addEventListener('paste', handleCopyBlock, true)
-  document.addEventListener('selectstart', handleSelectBlock, true)
-  document.addEventListener('fullscreenchange', handleFullscreenChange)
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-  window.addEventListener('blur', handleWindowBlur)
-  window.addEventListener('beforeunload', handleBeforeUnload)
+  await loadRuntimeConfig();
+  document.addEventListener("keydown", handleRestrictedShortcut, true);
+  document.addEventListener("contextmenu", handleContextMenu, true);
+  document.addEventListener("copy", handleCopyBlock, true);
+  document.addEventListener("cut", handleCopyBlock, true);
+  document.addEventListener("paste", handleCopyBlock, true);
+  document.addEventListener("selectstart", handleSelectBlock, true);
+  document.addEventListener("fullscreenchange", handleFullscreenChange);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("blur", handleWindowBlur);
+  window.addEventListener("beforeunload", handleBeforeUnload);
   if (!sessionForm.processId) {
-    ElMessage.warning('请从面试者首页选择报名记录进入面试')
-    router.push('/user')
-    return
+    ElMessage.warning("请从面试者首页选择报名记录进入面试");
+    router.push("/user");
+    return;
   }
-  await loadProcessRecords()
-  syncAiAutoRefresh()
-  if (processSummary.value?.currentStage === 'AI' && processSummary.value?.overallStatus === 'IN_PROGRESS') {
-    ElMessage.info('AI面试需要全屏答题，切屏操作会被记录')
+  await loadProcessRecords();
+  syncAiAutoRefresh();
+  if (
+    processSummary.value?.currentStage === "AI" &&
+    processSummary.value?.overallStatus === "IN_PROGRESS"
+  ) {
+    ElMessage.info("AI面试需要全屏答题，切屏操作会被记录");
   }
-})
+});
 </script>
 
 <style scoped>
-.summary-box { margin-top: 16px; padding: 14px; border-radius: 16px; background: rgba(255,255,255,0.82); }
-.summary-box p { margin: 6px 0; }
-.ai-panel { position: relative; overflow: hidden; }
-.ai-panel.ai-exam-active { user-select: none; -webkit-user-select: none; }
-.ai-recording-indicator { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 8px 14px; border-radius: 12px; background: rgba(220, 53, 69, 0.1); border: 1px solid rgba(220, 53, 69, 0.25); }
-.recording-dot { width: 10px; height: 10px; border-radius: 999px; background: #dc3545; animation: pulse 1.2s ease-in-out infinite; }
-.ai-camera-preview { width: 240px; height: 180px; border-radius: 10px; object-fit: cover; margin-left: auto; background: #111; }
-.ai-status-card { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; margin-bottom: 14px; padding: 14px; border-radius: 16px; background: rgba(16, 37, 50, 0.06); border: 1px solid rgba(16, 37, 50, 0.08); }
-.ai-status-card small { grid-column: 2; color: #6d7a83; }
-.ai-status-card.busy { background: rgba(15, 108, 143, 0.1); border-color: rgba(15, 108, 143, 0.22); }
-.status-dot { width: 10px; height: 10px; border-radius: 999px; background: #0f6c8f; box-shadow: 0 0 0 6px rgba(15, 108, 143, 0.12); }
-.ai-status-card.busy .status-dot { animation: pulse 1.2s ease-in-out infinite; }
-.ai-input-area { position: relative; }
-.ai-input-overlay { position: absolute; inset: 0; z-index: 5; display: grid; place-content: center; justify-items: center; gap: 10px; border-radius: 16px; background: rgba(248, 245, 239, 0.88); backdrop-filter: blur(8px); }
-.ai-input-overlay strong { font-size: 14px; color: #0f6c8f; }
-.ai-stream-box { margin-bottom: 14px; padding: 14px; border-radius: 16px; background: rgba(15, 108, 143, 0.06); border: 1px solid rgba(15, 108, 143, 0.15); }
-.ai-stream-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.ai-stream-header strong { font-size: 13px; color: #0f6c8f; }
-.ai-stream-text { font-size: 14px; line-height: 1.8; color: #1a2a32; white-space: pre-wrap; word-break: break-word; }
-.stream-cursor { display: inline-block; width: 2px; height: 1em; background: #0f6c8f; margin-left: 2px; vertical-align: text-bottom; animation: blink 0.8s step-end infinite; }
-@keyframes blink { 50% { opacity: 0; } }
-.ai-orbit { position: relative; width: 64px; height: 64px; border-radius: 999px; border: 2px solid rgba(15, 108, 143, 0.18); animation: spin 1.4s linear infinite; }
-.ai-orbit span { position: absolute; width: 12px; height: 12px; border-radius: 999px; background: #0f6c8f; }
-.ai-orbit span:nth-child(1) { top: -6px; left: 26px; }
-.ai-orbit span:nth-child(2) { right: 2px; bottom: 8px; background: #f0b66f; }
-.ai-orbit span:nth-child(3) { left: 2px; bottom: 8px; background: #102532; }
-.empty-box { padding: 18px; border-radius: 16px; background: rgba(255,255,255,0.75); color: #6d7a83; }
-.question-card { display: grid; gap: 8px; padding: 16px; border-radius: 18px; background: rgba(255,255,255,0.82); margin-bottom: 14px; }
-.question-card p { margin: 0; line-height: 1.7; }
-.question-card small { color: #6d7a83; }
-.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin-top: 18px; }
-.video-box { background: rgba(255,255,255,0.82); padding: 12px; border-radius: 16px; }
-.video-box span { display: block; margin-bottom: 8px; color: #6d7a83; }
-.video-box video { width: 100%; min-height: 220px; background: #111; border-radius: 12px; }
-@keyframes spin { to { transform: rotate(360deg); } }
-@keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.45); opacity: 0.55; } }
-@media (max-width: 900px) { .video-grid { grid-template-columns: 1fr; } }
+.summary-box {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(17, 49, 69, 0.06);
+}
+
+.summary-box p {
+  margin: 6px 0;
+  font-size: 14px;
+}
+
+.ai-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.ai-panel.ai-exam-active {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ai-recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(220, 53, 69, 0.1);
+  border: 1px solid rgba(220, 53, 69, 0.25);
+}
+
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #dc3545;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.ai-camera-preview {
+  width: 240px;
+  height: 180px;
+  border-radius: 10px;
+  object-fit: cover;
+  margin-left: auto;
+  background: #111;
+}
+
+.ai-status-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(16, 37, 50, 0.06);
+  border: 1px solid rgba(16, 37, 50, 0.08);
+}
+
+.ai-status-card small {
+  grid-column: 2;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.ai-status-card.busy {
+  background: rgba(15, 108, 143, 0.1);
+  border-color: rgba(15, 108, 143, 0.22);
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #0f6c8f;
+  box-shadow: 0 0 0 6px rgba(15, 108, 143, 0.12);
+}
+
+.ai-status-card.busy .status-dot {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.ai-input-area {
+  position: relative;
+}
+
+.ai-input-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  border-radius: 16px;
+  background: rgba(248, 245, 239, 0.88);
+  backdrop-filter: blur(8px);
+}
+
+.ai-input-overlay strong {
+  font-size: 14px;
+  color: #0f6c8f;
+}
+
+.ai-stream-box {
+  margin-bottom: 14px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(15, 108, 143, 0.06);
+  border: 1px solid rgba(15, 108, 143, 0.15);
+}
+
+.ai-stream-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ai-stream-header strong {
+  font-size: 13px;
+  color: #0f6c8f;
+}
+
+.ai-stream-text {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #1a2a32;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.stream-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: #0f6c8f;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 0.8s step-end infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.ai-orbit {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  border: 2px solid rgba(15, 108, 143, 0.18);
+  animation: spin 1.4s linear infinite;
+}
+
+.ai-orbit span {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #0f6c8f;
+}
+
+.ai-orbit span:nth-child(1) {
+  top: -6px;
+  left: 26px;
+}
+
+.ai-orbit span:nth-child(2) {
+  right: 2px;
+  bottom: 8px;
+  background: #f0b66f;
+}
+
+.ai-orbit span:nth-child(3) {
+  left: 2px;
+  bottom: 8px;
+  background: #102532;
+}
+
+.question-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+  margin-bottom: 14px;
+  border: 1px solid rgba(17, 49, 69, 0.06);
+  transition: box-shadow 0.2s ease;
+}
+
+.question-card:hover {
+  box-shadow: 0 4px 16px rgba(16, 37, 50, 0.06);
+}
+
+.question-card.highlighted-question {
+  border-color: rgba(15, 108, 143, 0.2);
+  background: rgba(15, 108, 143, 0.04);
+}
+
+.question-card p {
+  margin: 0;
+  line-height: 1.7;
+  font-size: 14px;
+}
+
+.question-card small {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.video-box {
+  background: rgba(255, 255, 255, 0.82);
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(17, 49, 69, 0.06);
+}
+
+.video-box span {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.video-box video {
+  width: 100%;
+  min-height: 220px;
+  background: #111;
+  border-radius: 12px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.45);
+    opacity: 0.55;
+  }
+}
+
+@media (max-width: 900px) {
+  .video-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-camera-preview {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 4/3;
+  }
+}
 </style>
