@@ -123,7 +123,7 @@
         </el-table>
       </section>
 
-      <section v-if="activeTab === 'process'" class="surface">
+      <section v-if="activeTab === 'process' && !isProcessDetail" class="surface">
         <h3>候选人面试流程</h3>
         <el-form :model="processSearch" label-position="top" class="form-grid">
           <el-form-item label="搜索候选人"><el-input v-model="processSearch.keyword" placeholder="候选人ID / 姓名 / 手机 / 邮箱 / 专业 / 学校" /></el-form-item>
@@ -160,7 +160,18 @@
           <el-table-column prop="processStatusView" label="状态展示" />
           <el-table-column prop="aiAverageScore" label="AI均分" />
           <el-table-column prop="overallStatus" label="总状态" />
+          <el-table-column label="操作" width="120"><template #default="scope"><el-button text @click.stop="openProcess(scope.row)">进入面试界面</el-button></template></el-table-column>
         </el-table>
+      </section>
+
+      <section v-if="activeTab === 'process' && isProcessDetail" class="surface">
+        <div class="detail-headline">
+          <div>
+            <p class="page-eyebrow">Interview Process</p>
+            <h3>{{ selectedProcess?.candidateName || '候选人' }} 的面试操作台</h3>
+          </div>
+          <RouterLink class="link-chip" to="/interview/hr/processes">返回流程列表</RouterLink>
+        </div>
         <div v-if="selectedProcess" class="surface inner-surface detail-surface">
           <h3>流程审批</h3>
           <p class="serial-line">流程流水号：{{ selectedProcess.id }}</p>
@@ -196,6 +207,7 @@
             <el-table-column prop="averageScore" label="均分" width="80" />
           </el-table>
         </div>
+        <div v-else class="empty-box">正在加载候选人面试流程...</div>
       </section>
     </section>
   </div>
@@ -213,6 +225,7 @@ const route = useRoute()
 const router = useRouter()
 const isItAdmin = computed(() => sessionUser.value?.roleCode === 'IT_ADMIN')
 const activeTab = computed(() => route.meta.interviewTab || 'process')
+const isProcessDetail = computed(() => route.name === 'interview-process-detail')
 const knowledgeBases = ref([])
 const knowledgeItems = ref([])
 const weights = ref([])
@@ -281,6 +294,9 @@ async function loadAll() {
     processes.value = (await interviewApi.listProcesses()).data
     if (selectedProcess.value) {
       selectedProcess.value = processes.value.find((item) => item.id === selectedProcess.value.id) || selectedProcess.value
+      if (isProcessDetail.value) {
+        aiRecords.value = (await interviewApi.listAiRecords({ processId: selectedProcess.value.id })).data
+      }
     }
     await syncRouteState()
   } catch (error) { fail(error) }
@@ -527,6 +543,8 @@ onMounted(loadAll)
 .wide { grid-column: 1 / -1; }
 .inner-surface { background: rgba(255,255,255,0.82); }
 .detail-surface { margin-top: 18px; }
+.detail-headline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+.detail-headline h3 { margin: 6px 0 0; }
 .csv-import-box { grid-column: 1 / -1; }
 .serial-line { margin: 8px 0 14px; color: #42515b; }
 .video-link { margin-left: 12px; color: #0f6c8f; font-weight: 700; text-decoration: none; }
