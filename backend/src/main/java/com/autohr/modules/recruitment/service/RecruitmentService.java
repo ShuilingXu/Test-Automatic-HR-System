@@ -30,7 +30,7 @@ public interface RecruitmentService {
 
     CandidateVO rejectCandidateResume(Long id);
 
-    CandidateVO retryResumeLlmEvaluation(Long id);
+    CandidateVO reevaluateResumeLlm(Long id);
 
     void deleteCandidate(Long id);
 

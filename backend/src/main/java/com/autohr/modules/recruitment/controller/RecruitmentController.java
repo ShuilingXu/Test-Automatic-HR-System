@@ -94,10 +94,19 @@ public class RecruitmentController {
 
     @PostMapping("/admin/candidates/{id}/retry-resume-llm")
     public ApiResponse<CandidateVO> retryResumeLlmEvaluation(Authentication authentication,
-                                                             @PathVariable Long id) {
-        CandidateVO candidate = recruitmentService.retryResumeLlmEvaluation(id);
+                                                              @PathVariable Long id) {
+        CandidateVO candidate = recruitmentService.reevaluateResumeLlm(id);
         SessionUserVO current = currentUser(authentication);
-        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "RECRUITMENT", "RETRY_RESUME_LLM", "RECRUITMENT_CANDIDATE", String.valueOf(id), candidate.getFullName() + " 重试LLM简历评分");
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "RECRUITMENT", "REEVALUATE_RESUME_LLM", "RECRUITMENT_CANDIDATE", String.valueOf(id), candidate.getFullName() + " AI简历重评");
+        return ApiResponse.success(candidate);
+    }
+
+    @PostMapping("/admin/candidates/{id}/reevaluate-resume-llm")
+    public ApiResponse<CandidateVO> reevaluateResumeLlm(Authentication authentication,
+                                                        @PathVariable Long id) {
+        CandidateVO candidate = recruitmentService.reevaluateResumeLlm(id);
+        SessionUserVO current = currentUser(authentication);
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "RECRUITMENT", "REEVALUATE_RESUME_LLM", "RECRUITMENT_CANDIDATE", String.valueOf(id), candidate.getFullName() + " AI简历重评");
         return ApiResponse.success(candidate);
     }
 

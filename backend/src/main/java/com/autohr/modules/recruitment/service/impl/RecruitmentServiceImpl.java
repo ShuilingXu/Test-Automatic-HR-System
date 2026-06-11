@@ -197,13 +197,13 @@ public class RecruitmentServiceImpl implements RecruitmentService {
 
     @Override
     @Transactional
-    public CandidateVO retryResumeLlmEvaluation(Long id) {
+    public CandidateVO reevaluateResumeLlm(Long id) {
         RecruitmentCandidate candidate = requireCandidate(id);
         if (StrUtil.equals(candidate.getResumeLlmStatus(), "PENDING")) {
             throw new BusinessException("简历评分正在进行中，请稍后再试");
         }
         candidate.setResumeLlmScore(null);
-        candidate.setResumeLlmComment("LLM简历评分已重新提交，请稍后刷新查看结果");
+        candidate.setResumeLlmComment("AI简历重评已提交，请稍后刷新查看结果");
         candidate.setResumeLlmStatus("PENDING");
         candidate.setResumeLlmEvaluatedAt(null);
         candidateMapper.updateById(candidate);

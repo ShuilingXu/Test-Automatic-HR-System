@@ -53,7 +53,7 @@
           </div>
           <div class="action-row">
             <a v-if="candidate.resumeFileId" class="link-chip" :href="resumeUrl(candidate.resumeFileId)" target="_blank">打开简历文件</a>
-            <el-button v-if="canRetryResumeLlm" :loading="retrying" @click="retryResumeLlmEvaluation">重试AI简历评分</el-button>
+            <el-button :disabled="!canReevaluateResumeLlm" :loading="reevaluating" @click="reevaluateResumeLlm">{{ resumeLlmReevaluateLabel }}</el-button>
             <RouterLink v-if="candidate.interviewProcessId" class="link-chip" :to="`/interview/hr/processes/${candidate.interviewProcessId}`">查看面试流程</RouterLink>
           </div>
         </section>
@@ -71,8 +71,9 @@ import { recruitmentApi } from '../services/api'
 const route = useRoute()
 const loading = ref(false)
 const candidate = ref(null)
-const retrying = ref(false)
-const canRetryResumeLlm = computed(() => candidate.value?.resumeLlmStatus !== 'PENDING')
+const reevaluating = ref(false)
+const canReevaluateResumeLlm = computed(() => candidate.value?.resumeLlmStatus !== 'PENDING')
+const resumeLlmReevaluateLabel = computed(() => canReevaluateResumeLlm.value ? 'AI简历重评' : '评分中不可重评')
 
 function resumeUrl(id) { return recruitmentApi.getResumeUrl(id) }
 function resumeLlmStatusLabel(status) { return ({ PENDING: '评分中', COMPLETED: '已完成', FAILED: '评分失败' })[status] || '-' }
@@ -89,15 +90,15 @@ async function loadCandidate() {
   }
 }
 
-async function retryResumeLlmEvaluation() {
-  retrying.value = true
+async function reevaluateResumeLlm() {
+  reevaluating.value = true
   try {
-    candidate.value = (await recruitmentApi.retryResumeLlmEvaluation(candidate.value.id)).data
-    ElMessage.success('已重新提交简历评分')
+    candidate.value = (await recruitmentApi.reevaluateResumeLlm(candidate.value.id)).data
+    ElMessage.success('已提交AI简历重评')
   } catch (error) {
-    ElMessage.error(error.message || '重试评分失败')
+    ElMessage.error(error.message || 'AI简历重评失败')
   } finally {
-    retrying.value = false
+    reevaluating.value = false
   }
 }
 
