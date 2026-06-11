@@ -48,20 +48,6 @@ interview:
     video-codec: ${INTERVIEW_VIDEO_VIDEO_CODEC:libvpx-vp9}
     audio-codec: ${INTERVIEW_VIDEO_AUDIO_CODEC:libopus}
 
-aliyun:
-  access-key-id: ${ALIYUN_ACCESS_KEY_ID:}
-  access-key-secret: ${ALIYUN_ACCESS_KEY_SECRET:}
-  sms:
-    sign-name: ${ALIYUN_SMS_SIGN_NAME:}
-    template-code: ${ALIYUN_SMS_TEMPLATE_CODE:}
-  stt:
-    app-key: ${ALIYUN_STT_APP_KEY:}
-    endpoint: ${ALIYUN_STT_ENDPOINT:nls-gateway-cn-shanghai.aliyuncs.com}
-    token-url: ${ALIYUN_STT_TOKEN_URL:}
-  oss:
-    bucket-name: ${ALIYUN_OSS_BUCKET_NAME:}
-    endpoint: ${ALIYUN_OSS_ENDPOINT:}
-
 resume:
   ocr:
     enabled: ${RESUME_OCR_ENABLED:true}

@@ -32,8 +32,6 @@ public class InterviewProcess {
     private String approvedHrName;
     private String processStatusView;
     private String remark;
-    private String aiRecordingPath;
-    private String aiRecordingFileName;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE)

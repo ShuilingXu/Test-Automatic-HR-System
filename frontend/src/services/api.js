@@ -1,414 +1,156 @@
-import axios from "axios";
+import axios from 'axios'
 
 const request = axios.create({
-  baseURL: "/api",
+  baseURL: '/api',
   timeout: 10000,
-});
+})
 
 request.interceptors.request.use((config) => {
-  const token = window.localStorage.getItem("demo-token");
+  const token = window.localStorage.getItem('demo-token')
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+    config.headers.Authorization = `Bearer ${token}`
   }
-  return config;
-});
+  return config
+})
 
 request.interceptors.response.use(
   (response) => response.data,
   (error) => {
     if (error.response?.status === 401) {
-      window.localStorage.removeItem("demo-token");
-      window.localStorage.removeItem("session-user");
+      window.localStorage.removeItem('demo-token')
+      window.localStorage.removeItem('session-user')
     }
-    const message =
-      error.response?.data?.message || error.message || "请求失败";
-    const wrapped = new Error(message);
-    wrapped.code = error.code;
-    wrapped.status = error.response?.status;
-    return Promise.reject(wrapped);
+    const message = error.response?.data?.message || error.message || '请求失败'
+    const wrapped = new Error(message)
+    wrapped.code = error.code
+    wrapped.status = error.response?.status
+    return Promise.reject(wrapped)
   },
-);
+)
 
 function authenticatedFileUrl(path) {
-  const token = window.localStorage.getItem("demo-token");
-  return token
-    ? `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`
-    : path;
+  const token = window.localStorage.getItem('demo-token')
+  return token ? `${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : path
 }
 
 export const hrApi = {
-  getDashboard() {
-    return request.get("/hr/dashboard");
-  },
-  listDepartments(params) {
-    return request.get("/hr/departments", { params });
-  },
-  getDepartmentTree() {
-    return request.get("/hr/departments/tree");
-  },
-  getDepartmentDetail(id) {
-    return request.get(`/hr/departments/${id}`);
-  },
-  saveDepartment(payload) {
-    return request.post("/hr/departments", payload);
-  },
-  deleteDepartment(id) {
-    return request.delete(`/hr/departments/${id}`);
-  },
-  listEmployees(params) {
-    return request.get("/hr/employees", { params });
-  },
-  getEmployeeDetail(id) {
-    return request.get(`/hr/employees/${id}`);
-  },
-  saveEmployee(payload) {
-    return request.post("/hr/employees", payload);
-  },
-  deleteEmployee(id) {
-    return request.delete(`/hr/employees/${id}`);
-  },
-  listBindings(params) {
-    return request.get("/hr/bindings", { params });
-  },
-  saveBinding(payload) {
-    return request.post("/hr/bindings", payload);
-  },
-};
+  getDashboard() { return request.get('/hr/dashboard') },
+  listDepartments(params) { return request.get('/hr/departments', { params }) },
+  getDepartmentTree() { return request.get('/hr/departments/tree') },
+  getDepartmentDetail(id) { return request.get(`/hr/departments/${id}`) },
+  saveDepartment(payload) { return request.post('/hr/departments', payload) },
+  deleteDepartment(id) { return request.delete(`/hr/departments/${id}`) },
+  listEmployees(params) { return request.get('/hr/employees', { params }) },
+  getEmployeeDetail(id) { return request.get(`/hr/employees/${id}`) },
+  saveEmployee(payload) { return request.post('/hr/employees', payload) },
+  deleteEmployee(id) { return request.delete(`/hr/employees/${id}`) },
+  listBindings(params) { return request.get('/hr/bindings', { params }) },
+  saveBinding(payload) { return request.post('/hr/bindings', payload) },
+}
 
 export const recruitmentApi = {
-  saveJob(payload) {
-    return request.post("/recruitment/admin/jobs", payload);
-  },
-  listAdminJobs(params) {
-    return request.get("/recruitment/admin/jobs", { params });
-  },
-  getAdminJob(id) {
-    return request.get(`/recruitment/admin/jobs/${id}`);
-  },
-  deleteJob(id) {
-    return request.delete(`/recruitment/admin/jobs/${id}`);
-  },
-  listCandidates(params) {
-    return request.get("/recruitment/admin/candidates", { params });
-  },
-  getCandidate(id) {
-    return request.get(`/recruitment/admin/candidates/${id}`);
-  },
-  rejectCandidateResume(id) {
-    return request.post(`/recruitment/admin/candidates/${id}/reject-resume`);
-  },
-  reevaluateResumeLlm(id) {
-    return request.post(
-      `/recruitment/admin/candidates/${id}/reevaluate-resume-llm`,
-    );
-  },
-  deleteCandidate(id) {
-    return request.delete(`/recruitment/admin/candidates/${id}`);
-  },
-  listOpenJobs(params) {
-    return request.get("/recruitment/jobs", { params });
-  },
-  apply(payload) {
-    return request.post("/recruitment/candidates", payload);
-  },
-  listMyCandidates() {
-    return request.get("/recruitment/candidates/mine");
-  },
+  saveJob(payload) { return request.post('/recruitment/admin/jobs', payload) },
+  listAdminJobs(params) { return request.get('/recruitment/admin/jobs', { params }) },
+  getAdminJob(id) { return request.get(`/recruitment/admin/jobs/${id}`) },
+  deleteJob(id) { return request.delete(`/recruitment/admin/jobs/${id}`) },
+  listCandidates(params) { return request.get('/recruitment/admin/candidates', { params }) },
+  getCandidate(id) { return request.get(`/recruitment/admin/candidates/${id}`) },
+  rejectCandidateResume(id) { return request.post(`/recruitment/admin/candidates/${id}/reject-resume`) },
+  reevaluateResumeLlm(id) { return request.post(`/recruitment/admin/candidates/${id}/reevaluate-resume-llm`) },
+  deleteCandidate(id) { return request.delete(`/recruitment/admin/candidates/${id}`) },
+  listOpenJobs(params) { return request.get('/recruitment/jobs', { params }) },
+  apply(payload) { return request.post('/recruitment/candidates', payload) },
+  listMyCandidates() { return request.get('/recruitment/candidates/mine') },
   uploadResume(candidateId, file) {
-    const formData = new FormData();
-    formData.append("file", file);
-    return request.post(
-      `/recruitment/candidates/${candidateId}/resume`,
-      formData,
-      {
-        headers: { "Content-Type": "multipart/form-data" },
-      },
-    );
+    const formData = new FormData()
+    formData.append('file', file)
+    return request.post(`/recruitment/candidates/${candidateId}/resume`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
   },
-  getResumeUrl(id) {
-    return authenticatedFileUrl(`/api/recruitment/resumes/${id}`);
-  },
-};
+  getResumeUrl(id) { return authenticatedFileUrl(`/api/recruitment/resumes/${id}`) },
+}
 
 export const authApi = {
-  login(payload) {
-    return request.post("/auth/login", payload);
-  },
-  register(payload) {
-    return request.post("/auth/register", payload);
-  },
-  getSession() {
-    return request.get("/auth/me");
-  },
-  updateProfile(payload) {
-    return request.post("/auth/profile", payload);
-  },
-  listUsers(params) {
-    return request.get("/auth/admin/users", { params });
-  },
-  listAuditLogs(params) {
-    return request.get("/auth/admin/audit-logs", { params });
-  },
-  updateUser(id, payload) {
-    return request.post(`/auth/admin/users/${id}`, payload);
-  },
+  login(payload) { return request.post('/auth/login', payload) },
+  register(payload) { return request.post('/auth/register', payload) },
+  getSession() { return request.get('/auth/me') },
+  updateProfile(payload) { return request.post('/auth/profile', payload) },
+  listUsers(params) { return request.get('/auth/admin/users', { params }) },
+  listAuditLogs(params) { return request.get('/auth/admin/audit-logs', { params }) },
+  updateUser(id, payload) { return request.post(`/auth/admin/users/${id}`, payload) },
   logout() {
-    return request.post("/auth/logout").finally(() => {
-      window.localStorage.removeItem("demo-token");
-      window.localStorage.removeItem("session-user");
-    });
+    return request.post('/auth/logout').finally(() => {
+      window.localStorage.removeItem('demo-token')
+      window.localStorage.removeItem('session-user')
+    })
   },
-};
-
-export const systemApi = {
-  getConfig() {
-    return request.get("/system/config");
-  },
-  saveConfig(payload) {
-    return request.post("/system/config", payload);
-  },
-};
+}
 
 export const interviewApi = {
-  getRuntimeConfig() {
-    return request.get("/interview/runtime-config");
-  },
-  getIceServers() {
-    return request.get("/interview/ice-servers");
-  },
-  saveKnowledgeBase(payload) {
-    return request.post("/interview/hr/knowledge-bases", payload);
-  },
-  listKnowledgeBases(params) {
-    return request.get("/interview/hr/knowledge-bases", { params });
-  },
-  deleteKnowledgeBase(id) {
-    return request.post(`/interview/hr/knowledge-bases/${id}/delete`);
-  },
-  saveKnowledgeItem(payload) {
-    return request.post("/interview/hr/knowledge-items", payload);
-  },
+  getRuntimeConfig() { return request.get('/interview/runtime-config') },
+  getIceServers() { return request.get('/interview/ice-servers') },
+  saveKnowledgeBase(payload) { return request.post('/interview/hr/knowledge-bases', payload) },
+  listKnowledgeBases(params) { return request.get('/interview/hr/knowledge-bases', { params }) },
+  deleteKnowledgeBase(id) { return request.post(`/interview/hr/knowledge-bases/${id}/delete`) },
+  saveKnowledgeItem(payload) { return request.post('/interview/hr/knowledge-items', payload) },
   importKnowledgeItems(knowledgeBaseId, file) {
-    const formData = new FormData();
-    formData.append("knowledgeBaseId", knowledgeBaseId);
-    formData.append("file", file);
-    return request.post("/interview/hr/knowledge-items/import-csv", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
-  },
-  listKnowledgeItems(params) {
-    return request.get("/interview/hr/knowledge-items", { params });
-  },
-  deleteKnowledgeItem(id) {
-    return request.post(`/interview/hr/knowledge-items/${id}/delete`);
-  },
-  saveJobKnowledgeWeight(payload) {
-    return request.post("/interview/hr/job-knowledge-weights", payload);
-  },
-  listJobKnowledgeWeights(params) {
-    return request.get("/interview/hr/job-knowledge-weights", { params });
-  },
-  deleteJobKnowledgeWeight(id) {
-    return request.post(`/interview/hr/job-knowledge-weights/${id}/delete`);
-  },
-  saveLlmConfig(payload) {
-    return request.post("/interview/it/llm-configs", payload);
-  },
-  listLlmConfigs(params) {
-    return request.get("/interview/it/llm-configs", { params });
-  },
-  deleteLlmConfig(id) {
-    return request.post(`/interview/it/llm-configs/${id}/delete`);
-  },
-  startProcess(payload) {
-    return request.post("/interview/hr/processes", payload);
-  },
-  listProcesses(params) {
-    return request.get("/interview/hr/processes", { params });
-  },
-  getIntervieweeProcess(processId) {
-    return request.get(`/interview/interviewee/process/${processId}`);
-  },
-  getNextAiQuestion(processId) {
-    return request.get(`/interview/interviewee/next-question/${processId}`);
-  },
-  listAiRecords(params) {
-    return request.get("/interview/hr/ai-records", { params });
-  },
-  listIntervieweeAiRecords(params) {
-    return request.get("/interview/interviewee/ai-records", { params });
-  },
-  createVideoSession(processId, params) {
-    return request.post(`/interview/hr/video-session/${processId}`, null, {
-      params,
-    });
-  },
-  publishVideoOffer(processId, payload) {
-    return request.post(`/interview/hr/video-offer/${processId}`, payload);
-  },
-  getVideoState(processId) {
-    return request.get(`/interview/interviewee/video-state/${processId}`);
-  },
-  getHrVideoState(processId) {
-    return request.get(`/interview/hr/video-state/${processId}`);
-  },
-  submitVideoAnswer(processId, payload) {
-    return request.post(
-      `/interview/interviewee/video-answer/${processId}`,
-      payload,
-    );
-  },
-  addHrIce(processId, payload) {
-    return request.post(`/interview/hr/video-ice/${processId}`, payload);
-  },
-  addIntervieweeIce(processId, payload) {
-    return request.post(
-      `/interview/interviewee/video-ice/${processId}`,
-      payload,
-    );
-  },
-  uploadVideoRecording(processId, file) {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("originalFileName", file.name);
-    formData.append("contentType", file.type || "video/webm");
-    return request.post(
-      `/interview/interviewee/video-recording/${processId}`,
-      formData,
-      {
-        headers: { "Content-Type": "multipart/form-data" },
-      },
-    );
-  },
-  reportAntiCheatEvent(payload) {
-    return request.post("/interview/interviewee/anti-cheat-event", payload);
-  },
-  uploadAiRecording(processId, file) {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("originalFileName", file.name);
-    formData.append("contentType", file.type || "video/webm");
-    return request.post(
-      `/interview/interviewee/ai-recording/${processId}`,
-      formData,
-      {
-        headers: { "Content-Type": "multipart/form-data" },
-      },
-    );
-  },
-  getAiRecordingUrl(processId) {
-    return authenticatedFileUrl(`/api/interview/hr/ai-recording/${processId}`);
-  },
-  uploadHrVideoRecording(processId, file) {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("originalFileName", file.name);
-    formData.append("contentType", file.type || "video/webm");
-    return request.post(
-      `/interview/hr/video-recording/${processId}`,
-      formData,
-      {
-        headers: { "Content-Type": "multipart/form-data" },
-      },
-    );
-  },
-  getRecordingUrl(processId) {
-    return authenticatedFileUrl(
-      `/api/interview/hr/video-recording/${processId}`,
-    );
-  },
-  intervieweeJoin(processId) {
-    return request.post(`/interview/interviewee/video-join/${processId}`);
-  },
-  hrJoin(processId, params) {
-    return request.post(`/interview/hr/video-join/${processId}`, null, {
-      params,
-    });
-  },
-  completeVideo(processId, params) {
-    return request.post(`/interview/hr/video-complete/${processId}`, null, {
-      params,
-    });
-  },
-  completeIntervieweeVideo(processId) {
-    return request.post(`/interview/interviewee/video-complete/${processId}`);
-  },
-  approveAi(processId, payload) {
-    return request.post(`/interview/hr/approve-ai/${processId}`, payload);
-  },
-  approveVideo(processId, payload) {
-    return request.post(`/interview/hr/approve-video/${processId}`, payload);
-  },
-  approveOnsite(processId, payload) {
-    return request.post(`/interview/hr/approve-onsite/${processId}`, payload);
-  },
-  terminateProcess(processId, payload) {
-    return request.post(`/interview/hr/terminate/${processId}`, payload);
-  },
-  updateProcessRemark(processId, payload) {
-    return request.post(`/interview/hr/processes/${processId}/remark`, payload);
-  },
-  submitAiAnswer(payload) {
-    return request.post("/interview/interviewee/ai-answer", payload, {
-      timeout: 120000,
-    });
-  },
-};
-
-export function streamAiAnswer(payload, handlers) {
-  const token = window.localStorage.getItem("demo-token");
-  const controller = new AbortController();
-  fetch("/api/interview/interviewee/ai-answer-stream", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(payload),
-    signal: controller.signal,
-  })
-    .then(async (response) => {
-      if (!response.ok) {
-        const text = await response.text();
-        let msg = "流式请求失败";
-        try {
-          msg = JSON.parse(text).message || msg;
-        } catch {}
-        handlers.onError?.(new Error(msg));
-        return;
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        let eventType = "";
-        for (const line of lines) {
-          if (line.startsWith("event:")) {
-            eventType = line.slice(6).trim();
-          } else if (line.startsWith("data:")) {
-            const dataStr = line.slice(5).trim();
-            if (!dataStr) continue;
-            try {
-              const data = JSON.parse(dataStr);
-              if (eventType === "text") handlers.onText?.(data.content);
-              else if (eventType === "status")
-                handlers.onStatus?.(data.message);
-              else if (eventType === "complete") handlers.onComplete?.(data);
-              else if (eventType === "error")
-                handlers.onError?.(new Error(data.message));
-            } catch {}
-            eventType = "";
-          }
-        }
-      }
+    const formData = new FormData()
+    formData.append('knowledgeBaseId', knowledgeBaseId)
+    formData.append('file', file)
+    return request.post('/interview/hr/knowledge-items/import-csv', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
     })
-    .catch((err) => {
-      if (err.name !== "AbortError") handlers.onError?.(err);
-    });
-  return controller;
+  },
+  listKnowledgeItems(params) { return request.get('/interview/hr/knowledge-items', { params }) },
+  deleteKnowledgeItem(id) { return request.post(`/interview/hr/knowledge-items/${id}/delete`) },
+  saveJobKnowledgeWeight(payload) { return request.post('/interview/hr/job-knowledge-weights', payload) },
+  listJobKnowledgeWeights(params) { return request.get('/interview/hr/job-knowledge-weights', { params }) },
+  deleteJobKnowledgeWeight(id) { return request.post(`/interview/hr/job-knowledge-weights/${id}/delete`) },
+  saveLlmConfig(payload) { return request.post('/interview/it/llm-configs', payload) },
+  listLlmConfigs(params) { return request.get('/interview/it/llm-configs', { params }) },
+  deleteLlmConfig(id) { return request.post(`/interview/it/llm-configs/${id}/delete`) },
+  startProcess(payload) { return request.post('/interview/hr/processes', payload) },
+  listProcesses(params) { return request.get('/interview/hr/processes', { params }) },
+  getIntervieweeProcess(processId) { return request.get(`/interview/interviewee/process/${processId}`) },
+  getNextAiQuestion(processId) { return request.get(`/interview/interviewee/next-question/${processId}`) },
+  listAiRecords(params) { return request.get('/interview/hr/ai-records', { params }) },
+  listIntervieweeAiRecords(params) { return request.get('/interview/interviewee/ai-records', { params }) },
+  createVideoSession(processId, params) { return request.post(`/interview/hr/video-session/${processId}`, null, { params }) },
+  publishVideoOffer(processId, payload) { return request.post(`/interview/hr/video-offer/${processId}`, payload) },
+  getVideoState(processId) { return request.get(`/interview/interviewee/video-state/${processId}`) },
+  getHrVideoState(processId) { return request.get(`/interview/hr/video-state/${processId}`) },
+  submitVideoAnswer(processId, payload) { return request.post(`/interview/interviewee/video-answer/${processId}`, payload) },
+  addHrIce(processId, payload) { return request.post(`/interview/hr/video-ice/${processId}`, payload) },
+  addIntervieweeIce(processId, payload) { return request.post(`/interview/interviewee/video-ice/${processId}`, payload) },
+  uploadVideoRecording(processId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('originalFileName', file.name)
+    formData.append('contentType', file.type || 'video/webm')
+    return request.post(`/interview/interviewee/video-recording/${processId}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  reportAntiCheatEvent(payload) { return request.post('/interview/interviewee/anti-cheat-event', payload) },
+  uploadHrVideoRecording(processId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('originalFileName', file.name)
+    formData.append('contentType', file.type || 'video/webm')
+    return request.post(`/interview/hr/video-recording/${processId}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  getRecordingUrl(processId) { return authenticatedFileUrl(`/api/interview/hr/video-recording/${processId}`) },
+  intervieweeJoin(processId) { return request.post(`/interview/interviewee/video-join/${processId}`) },
+  hrJoin(processId, params) { return request.post(`/interview/hr/video-join/${processId}`, null, { params }) },
+  completeVideo(processId, params) { return request.post(`/interview/hr/video-complete/${processId}`, null, { params }) },
+  completeIntervieweeVideo(processId) { return request.post(`/interview/interviewee/video-complete/${processId}`) },
+  approveAi(processId, payload) { return request.post(`/interview/hr/approve-ai/${processId}`, payload) },
+  approveVideo(processId, payload) { return request.post(`/interview/hr/approve-video/${processId}`, payload) },
+  approveOnsite(processId, payload) { return request.post(`/interview/hr/approve-onsite/${processId}`, payload) },
+  terminateProcess(processId, payload) { return request.post(`/interview/hr/terminate/${processId}`, payload) },
+  updateProcessRemark(processId, payload) { return request.post(`/interview/hr/processes/${processId}/remark`, payload) },
+  submitAiAnswer(payload) { return request.post('/interview/interviewee/ai-answer', payload, { timeout: 120000 }) },
 }

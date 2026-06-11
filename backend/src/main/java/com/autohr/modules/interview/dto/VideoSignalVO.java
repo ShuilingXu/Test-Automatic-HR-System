@@ -2,8 +2,6 @@ package com.autohr.modules.interview.dto;
 
 import lombok.Data;
 
-import java.time.LocalDateTime;
-
 @Data
 public class VideoSignalVO {
     private Long sessionId;
@@ -17,9 +15,4 @@ public class VideoSignalVO {
     private String recordingPath;
     private String recordingFileName;
     private String sessionStatus;
-    private LocalDateTime recordingEndRequestedAt;
-    private String audioPath;
-    private String transcriptText;
-    private String summaryText;
-    private String summaryStatus;
 }

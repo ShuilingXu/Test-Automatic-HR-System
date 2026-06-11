@@ -38,7 +38,6 @@ public interface InterviewService {
     InterviewVO getIntervieweeNextAiQuestion(Long processId, Long intervieweeUserId);
     InterviewVO submitAiAnswer(AiAnswerRequest request);
     InterviewVO submitIntervieweeAiAnswer(AiAnswerRequest request, Long intervieweeUserId);
-    void submitAiAnswerStreaming(AiAnswerRequest request, Long intervieweeUserId, org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter);
     List<InterviewVO> listAiRecords(Long processId);
     List<InterviewVO> listIntervieweeAiRecords(Long processId, Long intervieweeUserId);
     InterviewVO createVideoSession(Long processId, Long approverUserId, String approverName);
@@ -54,7 +53,6 @@ public interface InterviewService {
     VideoSignalVO uploadHrRecording(Long processId, String originalFileName, String contentType, MultipartFile file);
     VideoSignalVO uploadIntervieweeRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file);
     InterviewVO reportAntiCheatEvent(AntiCheatEventRequest request, Long intervieweeUserId, String intervieweeName);
-    InterviewVO uploadAiRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file);
     InterviewVideoSession getVideoSession(Long processId);
     InterviewVideoSession getDownloadableVideoSession(Long processId);
     InterviewVO approveAiToVideo(Long processId, InterviewDecisionRequest request);

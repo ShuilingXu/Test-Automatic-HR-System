@@ -2,7 +2,6 @@ package com.autohr.modules.interview.service;
 
 import com.autohr.common.exception.BusinessException;
 import com.autohr.common.file.UploadPaths;
-import com.autohr.common.aliyun.AliyunSttService;
 import com.autohr.modules.interview.entity.InterviewVideoSession;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -11,17 +10,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 
 @Service
 public class VideoMergeService {
-
-    private final AliyunSttService aliyunSttService;
-
-    public VideoMergeService(AliyunSttService aliyunSttService) {
-        this.aliyunSttService = aliyunSttService;
-    }
 
     @Value("${interview.video.ffmpeg-path:ffmpeg}")
     private String ffmpegPath;
@@ -74,55 +66,22 @@ public class VideoMergeService {
         ), "横向拼接视频失败");
     }
 
-    public void extractAudio(InterviewVideoSession session) {
-        String source = session.getMergedRecordingPath() != null ? session.getMergedRecordingPath() : session.getRecordingPath();
-        if (!isReadableRecording(source)) {
-            throw new BusinessException("未找到可抽取音频的视频文件");
-        }
-        try {
-            Files.createDirectories(UploadPaths.RECORDING_DIR);
-            Path output = UploadPaths.RECORDING_DIR.resolve(session.getVideoSerialNo() + "-audio.wav").normalize().toAbsolutePath();
-            if (!output.startsWith(UploadPaths.RECORDING_DIR)) {
-                throw new BusinessException("音频文件路径非法");
-            }
-            runFfmpeg(List.of(ffmpegPath, "-y", "-i", source, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", output.toString()), "抽取视频音频失败");
-            session.setAudioPath(output.toString());
-        } catch (IOException ex) {
-            throw new BusinessException("抽取视频音频失败: " + ex.getMessage());
-        }
-    }
-
-    public String transcribeAudio(InterviewVideoSession session) {
-        if (!isReadableRecording(session.getAudioPath())) {
-            throw new BusinessException("未找到可转写的音频文件");
-        }
-        if (aliyunSttService.isConfigured()) {
-            return aliyunSttService.transcribe(session.getAudioPath());
-        }
-        throw new BusinessException("语音识别服务未配置，请设置阿里云STT相关环境变量(ALIYUN_ACCESS_KEY_ID, ALIYUN_ACCESS_KEY_SECRET, ALIYUN_STT_APP_KEY)");
-    }
-
     private void runFfmpeg(List<String> command, String errorMessage) {
-        runProcess(command, errorMessage, Duration.ofMinutes(5));
-    }
-
-    private String runProcess(List<String> command, String errorMessage, Duration timeout) {
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.redirectErrorStream(true);
         try {
             Process process = builder.start();
             String output = new String(process.getInputStream().readAllBytes());
-            boolean exited = process.waitFor(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+            boolean exited = process.waitFor(Duration.ofMinutes(5).toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
             if (!exited) {
                 process.destroyForcibly();
-                throw new BusinessException(errorMessage + ": 命令执行超时");
+                throw new BusinessException(errorMessage + ": ffmpeg执行超时");
             }
             if (process.exitValue() != 0) {
                 throw new BusinessException(errorMessage + ": " + abbreviate(output));
             }
-            return output;
         } catch (IOException ex) {
-            throw new BusinessException(errorMessage + ": 命令不可用，请检查配置: " + command.get(0));
+            throw new BusinessException(errorMessage + ": 未找到ffmpeg，请安装ffmpeg或配置INTERVIEW_VIDEO_FFMPEG_PATH/FFMPEG_PATH");
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new BusinessException(errorMessage + ": ffmpeg执行被中断");
