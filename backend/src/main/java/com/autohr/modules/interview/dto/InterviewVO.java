@@ -50,6 +50,8 @@ public class InterviewVO {
     private String approverName;
     private String processStatusView;
     private String remark;
+    private String aiRecordingPath;
+    private String aiRecordingFileName;
 
     private String questionTitle;
     private String questionType;
@@ -80,9 +82,14 @@ public class InterviewVO {
     private String videoJoinLink;
     private LocalDateTime intervieweeJoinTime;
     private LocalDateTime hrJoinTime;
+    private LocalDateTime recordingEndRequestedAt;
     private String recordingPath;
     private String recordingFileName;
     private String sessionStatus;
+    private String audioPath;
+    private String transcriptText;
+    private String summaryText;
+    private String summaryStatus;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

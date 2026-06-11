@@ -276,6 +276,8 @@ CREATE TABLE IF NOT EXISTS interview_process (
     approved_hr_name VARCHAR(64),
     process_status_view VARCHAR(64) NOT NULL,
     remark VARCHAR(2000),
+    ai_recording_path VARCHAR(500),
+    ai_recording_file_name VARCHAR(255),
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -307,6 +309,7 @@ CREATE TABLE IF NOT EXISTS interview_video_session (
     hr_join_time DATETIME,
     start_time DATETIME,
     end_time DATETIME,
+    recording_end_requested_at DATETIME,
     recording_path VARCHAR(500),
     hr_recording_path VARCHAR(500),
     hr_recording_file_name VARCHAR(255),
@@ -314,6 +317,10 @@ CREATE TABLE IF NOT EXISTS interview_video_session (
     interviewee_recording_file_name VARCHAR(255),
     merged_recording_path VARCHAR(500),
     merged_recording_file_name VARCHAR(255),
+    audio_path VARCHAR(500),
+    transcript_text TEXT,
+    summary_text TEXT,
+    summary_status VARCHAR(32),
     hr_offer_sdp TEXT,
     interviewee_answer_sdp TEXT,
     hr_ice_candidates TEXT,

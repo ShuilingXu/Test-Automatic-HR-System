@@ -118,6 +118,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "interview_video_session", "hr_join_time", dateTimeType());
         addColumnIfMissing(connection, statement, "interview_video_session", "start_time", dateTimeType());
         addColumnIfMissing(connection, statement, "interview_video_session", "end_time", dateTimeType());
+        addColumnIfMissing(connection, statement, "interview_video_session", "recording_end_requested_at", dateTimeType());
         addColumnIfMissing(connection, statement, "interview_video_session", "recording_path", "VARCHAR(500)");
         addColumnIfMissing(connection, statement, "interview_video_session", "hr_recording_path", "VARCHAR(500)");
         addColumnIfMissing(connection, statement, "interview_video_session", "hr_recording_file_name", "VARCHAR(255)");
@@ -125,6 +126,10 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_recording_file_name", "VARCHAR(255)");
         addColumnIfMissing(connection, statement, "interview_video_session", "merged_recording_path", "VARCHAR(500)");
         addColumnIfMissing(connection, statement, "interview_video_session", "merged_recording_file_name", "VARCHAR(255)");
+        addColumnIfMissing(connection, statement, "interview_video_session", "audio_path", "VARCHAR(500)");
+        addColumnIfMissing(connection, statement, "interview_video_session", "transcript_text", "TEXT");
+        addColumnIfMissing(connection, statement, "interview_video_session", "summary_text", "TEXT");
+        addColumnIfMissing(connection, statement, "interview_video_session", "summary_status", "VARCHAR(32)");
         addColumnIfMissing(connection, statement, "interview_video_session", "hr_offer_sdp", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_answer_sdp", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "hr_ice_candidates", "TEXT");

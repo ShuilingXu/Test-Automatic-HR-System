@@ -32,6 +32,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
@@ -184,11 +185,48 @@ public class InterviewController {
         return ApiResponse.success(interviewService.submitIntervieweeAiAnswer(request, current.getId()));
     }
 
+    @PostMapping("/interviewee/ai-answer-stream")
+    public SseEmitter submitAiAnswerStream(Authentication authentication,
+                                           @Valid @RequestBody AiAnswerRequest request) {
+        SessionUserVO current = currentUser(authentication);
+        SseEmitter emitter = new SseEmitter(180000L);
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                interviewService.submitAiAnswerStreaming(request, current.getId(), emitter);
+            } catch (Exception ex) {
+                try {
+                    emitter.send(SseEmitter.event().name("error").data(java.util.Map.of("message", ex.getMessage() == null ? "处理失败" : ex.getMessage())));
+                } catch (Exception ignored) {}
+                emitter.completeWithError(ex);
+            }
+        });
+        return emitter;
+    }
+
     @PostMapping("/interviewee/anti-cheat-event")
     public ApiResponse<InterviewVO> reportAntiCheatEvent(Authentication authentication,
                                                          @Valid @RequestBody AntiCheatEventRequest request) {
         SessionUserVO current = currentUser(authentication);
         return ApiResponse.success(interviewService.reportAntiCheatEvent(request, current.getId(), current.getDisplayName()));
+    }
+
+    @PostMapping("/interviewee/ai-recording/{processId}")
+    public ApiResponse<InterviewVO> uploadAiRecording(Authentication authentication,
+                                                      @PathVariable Long processId,
+                                                      @RequestParam String originalFileName,
+                                                      @RequestParam(required = false) String contentType,
+                                                      @RequestParam("file") MultipartFile file) {
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.uploadAiRecording(processId, current.getId(), current.getDisplayName(), originalFileName, contentType, file));
+    }
+
+    @GetMapping("/hr/ai-recording/{processId}")
+    public ResponseEntity<Resource> downloadAiRecording(@PathVariable Long processId) {
+        var vo = interviewService.getProcess(processId);
+        if (vo.getAiRecordingPath() == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return FileDownloadSupport.buildInlineResponse(vo.getAiRecordingPath(), UploadPaths.RECORDING_DIR, vo.getAiRecordingFileName(), "video/webm", "AI面试录制文件不可访问");
     }
 
     @GetMapping("/hr/ai-records")

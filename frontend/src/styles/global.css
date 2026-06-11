@@ -1,21 +1,25 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap");
 
 :root {
   color: #1d2a33;
   background: linear-gradient(135deg, #f3efe7 0%, #dce7ec 45%, #f7f9fb 100%);
-  font-family: 'Outfit', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: "Outfit", "PingFang SC", "Microsoft YaHei", sans-serif;
   --brand-ink: #102532;
   --brand-cream: #f4efe7;
   --brand-surface: #f8f5ef;
   --brand-accent: #d78b33;
   --brand-accent-dark: #b86d1f;
   --brand-danger: #b84343;
+  --text-secondary: #6d7a83;
   --button-bg: rgba(255, 255, 255, 0.92);
   --button-bg-hover: #f8f5ef;
   --button-border: rgba(16, 37, 50, 0.16);
   --button-border-active: rgba(16, 37, 50, 0.34);
   --button-radius: 16px;
   --button-shadow: 0 8px 18px rgba(16, 37, 50, 0.06);
+  --card-radius: 28px;
+  --surface-radius: 22px;
+  --input-radius: 12px;
 }
 
 * {
@@ -60,7 +64,12 @@ button:not(:disabled),
   letter-spacing: 0.01em;
   text-decoration: none;
   box-shadow: var(--button-shadow);
-  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 }
 
 .el-button {
@@ -172,9 +181,54 @@ button:not(:disabled),
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(17, 49, 69, 0.08);
   box-shadow: 0 18px 50px rgba(25, 53, 73, 0.08);
-  border-radius: 28px;
+  border-radius: var(--card-radius);
   padding: 28px;
   backdrop-filter: blur(10px);
+}
+
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner {
+  border-radius: var(--input-radius) !important;
+}
+
+.data-table {
+  margin-top: 18px;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.data-table .el-table__header-wrapper {
+  border-radius: 16px 16px 0 0;
+}
+
+.empty-box {
+  padding: 24px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--text-secondary);
+  text-align: center;
+  font-size: 14px;
+}
+
+.action-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
 }
 
 .page-eyebrow {
@@ -246,9 +300,57 @@ button:not(:disabled),
   justify-content: center;
 }
 
+.surface {
+  background: var(--brand-surface);
+  border-radius: var(--surface-radius);
+  padding: 20px;
+}
+
+.surface h3 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  color: var(--brand-ink);
+}
+
+.topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.topline h2 {
+  margin: 6px 0 0;
+}
+
+.sub-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1200px) {
+  .page-card {
+    padding: 24px;
+  }
+}
+
 @media (max-width: 900px) {
   .page-grid,
-  .kv-grid {
+  .kv-grid,
+  .form-grid {
     grid-template-columns: 1fr;
   }
 
@@ -256,7 +358,46 @@ button:not(:disabled),
     padding: 16px;
   }
 
+  .page-card {
+    padding: 20px;
+    border-radius: 22px;
+  }
+
   .page-title {
     font-size: 28px;
+  }
+
+  .topline {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .sub-tabs {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 600px) {
+  .page-shell {
+    padding: 12px;
+  }
+
+  .page-card {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .page-title {
+    font-size: 24px;
+  }
+
+  .surface {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .el-button {
+    min-height: 36px;
+    padding: 8px 14px;
   }
 }

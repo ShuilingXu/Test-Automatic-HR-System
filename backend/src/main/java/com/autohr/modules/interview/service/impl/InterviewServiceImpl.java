@@ -58,10 +58,14 @@ import java.nio.file.StandardOpenOption;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -91,6 +95,11 @@ public class InterviewServiceImpl implements InterviewService {
 
     private static final long MAX_RECORDING_SIZE = 100 * 1024 * 1024;
     private static final Set<String> ALLOWED_RECORDING_CONTENT_TYPES = Set.of("video/webm", "application/octet-stream");
+    private final ConcurrentMap<Long, Object> processLocks = new ConcurrentHashMap<>();
+
+    private Object getProcessLock(Long processId) {
+        return processLocks.computeIfAbsent(processId, k -> new Object());
+    }
 
     @Override
     @Transactional
@@ -497,6 +506,192 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     @Override
+    public void submitAiAnswerStreaming(AiAnswerRequest request, Long intervieweeUserId, org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter) {
+        requireIntervieweeProcess(request.getProcessId(), intervieweeUserId);
+        synchronized (getProcessLock(request.getProcessId())) {
+            try {
+                doSubmitAiAnswerStreaming(request, emitter);
+            } catch (Exception ex) {
+                try {
+                    emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                            .name("error").data(Map.of("message", ex.getMessage() == null ? "处理失败" : ex.getMessage())));
+                } catch (Exception ignored) {}
+                emitter.completeWithError(ex);
+            }
+        }
+    }
+
+    private void doSubmitAiAnswerStreaming(AiAnswerRequest request, org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter) throws Exception {
+        InterviewProcess process = requireProcess(request.getProcessId());
+        ensureInProgress(process);
+        if (!StrUtil.equals(process.getCurrentStage(), "AI")) {
+            throw new BusinessException("当前流程不在AI面试阶段");
+        }
+        InterviewAiRecord record = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
+                .eq(InterviewAiRecord::getProcessId, process.getId())
+                .isNull(InterviewAiRecord::getAnswerContent)
+                .orderByAsc(InterviewAiRecord::getSequenceNo)
+                .last("LIMIT 1"));
+        if (record == null) {
+            throw new BusinessException("当前没有待回答的问题");
+        }
+        record.setAnswerContent(request.getAnswerContent());
+        String materials = loadKnowledgeMaterials(record.getKnowledgeBaseId());
+        String jobRequirements = loadJobRequirements(process);
+
+        sendSse(emitter, "status", Map.of("message", "AI正在评价中..."));
+
+        StringBuilder streamedText = new StringBuilder();
+        InterviewLlmConfig interviewerConfig = requireActiveLlmConfig("INTERVIEWER");
+        String basePrompt = StrUtil.blankToDefault(interviewerConfig.getScoringRulePrompt(), interviewerConfig.getPromptTemplate())
+                .replace("{topic}", StrUtil.blankToDefault(record.getKnowledgePoint(), "通用沟通"));
+        if (StrUtil.isBlank(basePrompt)) {
+            basePrompt = "请作为面试评分模型，基于知识库材料评价面试者回答。";
+        }
+        String interviewerSystemPrompt = basePrompt + "\n岗位要求：\n" + StrUtil.blankToDefault(jobRequirements, "未填写")
+                + "\n请严格基于上述知识库材料、岗位要求、当前问题和面试者回答完成评价。"
+                + "\n输出必须包含三部分：第一行只写整数分数；第二行写不少于20字的中文评价，评价要反馈回答是否完整、哪里正确或遗漏；第三行写下一道面试题。"
+                + "\n下一题必须基于知识库材料并结合岗位要求，可以自然改写和语义修饰，不必与知识点原句一模一样，但不能引入材料和岗位要求外的知识点。"
+                + "\n本格式要求优先于旧配置中的'只返回整数'类要求，不能只输出分数，也不能只输出问题。";
+        String interviewerUserPrompt = "知识库主题：" + StrUtil.blankToDefault(record.getKnowledgePoint(), "通用沟通")
+                + "\n\n知识库材料：\n" + StrUtil.blankToDefault(materials, "无补充材料")
+                + "\n\n当前问题：" + StrUtil.blankToDefault(record.getQuestionContent(), "未提供")
+                + "\n\n面试者回答：\n" + StrUtil.blankToDefault(request.getAnswerContent(), "");
+
+        callOpenAiChatStreaming(interviewerConfig, interviewerSystemPrompt, interviewerUserPrompt, chunk -> {
+            streamedText.append(chunk);
+            sendSse(emitter, "text", Map.of("content", chunk));
+        });
+
+        LlmEvaluation evaluation = parseEvaluation(streamedText.toString());
+        int interviewerScore = evaluation.score();
+        record.setInterviewerScore(interviewerScore);
+        record.setInterviewerComment(evaluation.comment());
+
+        sendSse(emitter, "status", Map.of("message", "AI正在打分..."));
+
+        InterviewLlmConfig scorerConfig = requireActiveLlmConfig("SCORER");
+        String scorerBasePrompt = StrUtil.blankToDefault(scorerConfig.getScoringRulePrompt(), scorerConfig.getPromptTemplate())
+                .replace("{topic}", StrUtil.blankToDefault(record.getKnowledgePoint(), "通用沟通"));
+        if (StrUtil.isBlank(scorerBasePrompt)) {
+            scorerBasePrompt = "请作为面试评分模型，基于知识库材料评价面试者回答。";
+        }
+        String scorerSystemPrompt = scorerBasePrompt + "\n岗位要求：\n" + StrUtil.blankToDefault(jobRequirements, "未填写")
+                + "\n请严格基于上述知识库材料、岗位要求、当前问题和面试者回答评分。只返回一个整数分数，不输出解释。";
+        String scorerUserPrompt = "知识库主题：" + StrUtil.blankToDefault(record.getKnowledgePoint(), "通用沟通")
+                + "\n\n知识库材料：\n" + StrUtil.blankToDefault(materials, "无补充材料")
+                + "\n\n当前问题：" + StrUtil.blankToDefault(record.getQuestionContent(), "未提供")
+                + "\n\n面试者回答：\n" + StrUtil.blankToDefault(request.getAnswerContent(), "");
+        String scorerResponse = callOpenAiChat(scorerConfig, scorerSystemPrompt, scorerUserPrompt);
+        int scorerScore = parseScore(scorerResponse);
+
+        int averageScore = Math.round((interviewerScore + scorerScore) / 2.0f);
+        record.setScorerScore(scorerScore);
+        record.setAverageScore(averageScore);
+        aiRecordMapper.updateById(record);
+
+        int total = aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>()
+                .eq(InterviewAiRecord::getProcessId, process.getId())
+                .isNotNull(InterviewAiRecord::getAverageScore))
+                .stream().mapToInt(InterviewAiRecord::getAverageScore).sum();
+        int count = Math.max(aiRecordMapper.selectCount(new LambdaQueryWrapper<InterviewAiRecord>()
+                .eq(InterviewAiRecord::getProcessId, process.getId())
+                .isNotNull(InterviewAiRecord::getAverageScore)).intValue(), 1);
+        int currentAverage = Math.round(total / (float) count);
+        process.setAiAverageScore(currentAverage);
+        int answeredRounds = count;
+        int minQuestionRounds = Math.max(Objects.requireNonNullElse(process.getAiMinQuestionRounds(), 1), 1);
+
+        boolean examEnded = false;
+        if (answeredRounds >= minQuestionRounds && currentAverage >= process.getAiThresholdScore()) {
+            process.setStageStatus("WAITING_APPROVAL");
+            process.setProcessStatusView("AI待审批");
+            examEnded = true;
+        } else if (answeredRounds >= Math.max(Objects.requireNonNullElse(process.getAiMaxQuestionRounds(), 10), 1)) {
+            process.setOverallStatus("REJECTED");
+            process.setStageStatus("REJECTED");
+            process.setProcessStatusView("AI未达标自动结束");
+            examEnded = true;
+            auditLogService.log(process.getIntervieweeUserId(), "面试者", "INTERVIEWEE", "INTERVIEW", "AI_MAX_ROUNDS_REJECT", "INTERVIEW_PROCESS", String.valueOf(process.getId()), "AI均分" + currentAverage + "未达到阈值" + process.getAiThresholdScore() + "，已答" + answeredRounds + "轮达到最大轮数" + process.getAiMaxQuestionRounds());
+        } else {
+            sendSse(emitter, "status", Map.of("message", "正在生成下一题..."));
+            generateNextQuestion(process);
+        }
+        processMapper.updateById(process);
+        updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+
+        InterviewVO result = toAiRecordVO(record, process);
+        sendSse(emitter, "complete", Map.of(
+                "record", result,
+                "examEnded", examEnded,
+                "nextQuestion", evaluation.nextQuestion()
+        ));
+        emitter.complete();
+    }
+
+    private void sendSse(org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter, String name, Object data) {
+        try {
+            emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event().name(name).data(data));
+        } catch (Exception ex) {
+            throw new BusinessException("SSE发送失败: " + ex.getMessage());
+        }
+    }
+
+    private void callOpenAiChatStreaming(InterviewLlmConfig config, String systemPrompt, String userPrompt, Consumer<String> onChunk) {
+        String url = resolveChatCompletionsUrl(config.getBaseUrl());
+        cn.hutool.json.JSONObject payload = new cn.hutool.json.JSONObject();
+        payload.set("model", config.getModelName());
+        payload.set("stream", true);
+        payload.set("messages", cn.hutool.json.JSONUtil.parseArray(List.of(
+                new cn.hutool.json.JSONObject().set("role", "system").set("content", systemPrompt),
+                new cn.hutool.json.JSONObject().set("role", "user").set("content", userPrompt)
+        )));
+        debugLlm("STREAM_REQUEST", config, systemPrompt, userPrompt, null, null);
+        java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+        java.net.http.HttpRequest httpRequest = java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create(url))
+                .header("Authorization", "Bearer " + config.getApiKey())
+                .header("Content-Type", "application/json")
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(payload.toString()))
+                .timeout(java.time.Duration.ofSeconds(120))
+                .build();
+        try {
+            java.net.http.HttpResponse<java.util.stream.Stream<String>> response = client.send(httpRequest,
+                    java.net.http.HttpResponse.BodyHandlers.ofLines());
+            if (response.statusCode() != 200) {
+                String body = response.body().collect(java.util.stream.Collectors.joining("\n"));
+                throw new BusinessException("LLM流式接口调用失败，HTTP " + response.statusCode() + ": " + abbreviate(body));
+            }
+            response.body().forEach(line -> {
+                if (line.startsWith("data: ") && !line.contains("[DONE]")) {
+                    try {
+                        cn.hutool.json.JSONObject json = cn.hutool.json.JSONUtil.parseObj(line.substring(6));
+                        cn.hutool.json.JSONArray choices = json.getJSONArray("choices");
+                        if (choices != null && !choices.isEmpty()) {
+                            cn.hutool.json.JSONObject choice = choices.getJSONObject(0);
+                            if (choice != null) {
+                                cn.hutool.json.JSONObject delta = choice.getJSONObject("delta");
+                                if (delta != null) {
+                                    String content = delta.getStr("content");
+                                    if (content != null) {
+                                        onChunk.accept(content);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            });
+        } catch (java.io.IOException ex) {
+            throw new BusinessException("LLM流式接口调用失败: " + abbreviate(ex.getMessage()));
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException("LLM流式接口调用被中断");
+        }
+    }
+
+    @Override
     public List<InterviewVO> listAiRecords(Long processId) {
         return aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>()
                 .eq(processId != null, InterviewAiRecord::getProcessId, processId)
@@ -567,6 +762,7 @@ public class InterviewServiceImpl implements InterviewService {
         }
         if (!isTerminalVideoSessionStatus(session.getSessionStatus()) && !StrUtil.equals(session.getSessionStatus(), "END_REQUESTED")) {
             session.setEndTime(session.getEndTime() == null ? LocalDateTime.now() : session.getEndTime());
+            session.setRecordingEndRequestedAt(session.getRecordingEndRequestedAt() == null ? LocalDateTime.now().plusSeconds(3) : session.getRecordingEndRequestedAt());
             session.setSessionStatus("END_REQUESTED");
             videoSessionMapper.updateById(session);
         }
@@ -849,6 +1045,7 @@ public class InterviewServiceImpl implements InterviewService {
                     return toVideoSignalVO(session);
                 }
                 session.setSessionStatus("RECORDED");
+                generateVideoSummarySafely(session);
                 markVideoWaitingApproval(session.getProcessId());
             } else if (!StrUtil.equals(session.getSessionStatus(), "END_REQUESTED")) {
                 session.setSessionStatus("END_REQUESTED");
@@ -886,6 +1083,42 @@ public class InterviewServiceImpl implements InterviewService {
         return vo;
     }
 
+    private void generateVideoSummarySafely(InterviewVideoSession session) {
+        try {
+            if (StrUtil.isBlank(session.getAudioPath())) {
+                videoMergeService.extractAudio(session);
+            }
+            String transcript = StrUtil.blankToDefault(session.getTranscriptText(), "");
+            if (StrUtil.isBlank(transcript)) {
+                transcript = videoMergeService.transcribeAudio(session);
+                session.setTranscriptText(abbreviate(transcript, 12000));
+            }
+            if (StrUtil.isBlank(session.getSummaryText())) {
+                session.setSummaryText(generateVideoSummary(session, transcript));
+            }
+            session.setSummaryStatus("COMPLETED");
+        } catch (Exception ex) {
+            session.setSummaryStatus("FAILED: " + abbreviate(ex.getMessage(), 300));
+        }
+    }
+
+    private String generateVideoSummary(InterviewVideoSession session, String transcript) {
+        InterviewLlmConfig config = requireActiveLlmConfig("VIDEO_SUMMARY");
+        InterviewProcess process = requireProcess(session.getProcessId());
+        RecruitmentCandidate candidate = requireRecruitmentCandidate(process.getRecruitmentCandidateId());
+        RecruitmentJob job = requireRecruitmentJob(process.getJobId());
+        String basePrompt = StrUtil.blankToDefault(config.getScoringRulePrompt(), config.getPromptTemplate());
+        if (StrUtil.isBlank(basePrompt)) {
+            basePrompt = "请作为HR面试纪要助手，根据视频面试转写文本总结会议概要、候选人优势、风险点和后续建议。";
+        }
+        String systemPrompt = basePrompt + "\n请输出中文结构化概要，包含：会议概要、关键回答、胜任力判断、风险点、后续建议。";
+        String userPrompt = "候选人：" + StrUtil.blankToDefault(candidate.getFullName(), "未填写")
+                + "\n岗位：" + StrUtil.blankToDefault(job.getJobTitle(), "未填写")
+                + "\n岗位要求：" + StrUtil.blankToDefault(job.getRequirements(), "未填写")
+                + "\n\n视频面试转写文本：\n" + StrUtil.blankToDefault(transcript, "无转写文本");
+        return abbreviate(callOpenAiChat(config, systemPrompt, userPrompt), 4000);
+    }
+
     @Override
     @Transactional
     public InterviewVO reportAntiCheatEvent(AntiCheatEventRequest request, Long intervieweeUserId, String intervieweeName) {
@@ -906,6 +1139,30 @@ public class InterviewServiceImpl implements InterviewService {
         String detail = StrUtil.blankToDefault(request.getDetail(), "") + " eventType=" + request.getEventType();
         auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "ANTI_CHEAT_" + request.getEventType(), "INTERVIEW_PROCESS", String.valueOf(request.getProcessId()), abbreviate(detail));
         return toProcessVO(process);
+    }
+
+    @Override
+    @Transactional
+    public InterviewVO uploadAiRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file) {
+        InterviewProcess process = requireIntervieweeProcess(processId, intervieweeUserId);
+        validateRecordingFile(originalFileName, contentType, file);
+        try {
+            Files.createDirectories(UploadPaths.RECORDING_DIR);
+            String ext = ".webm";
+            String storedName = "AI-" + processId + "-" + intervieweeUserId + ext;
+            Path storedFile = UploadPaths.RECORDING_DIR.resolve(storedName).normalize().toAbsolutePath();
+            if (!storedFile.startsWith(UploadPaths.RECORDING_DIR)) {
+                throw new BusinessException("录制文件路径非法");
+            }
+            file.transferTo(storedFile.toFile());
+            process.setAiRecordingPath(storedFile.toString());
+            process.setAiRecordingFileName(storedName);
+            processMapper.updateById(process);
+            auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "UPLOAD_AI_RECORDING", "INTERVIEW_PROCESS", String.valueOf(processId), storedName);
+            return toProcessVO(process);
+        } catch (IOException ex) {
+            throw new BusinessException("AI面试录制文件上传失败: " + ex.getMessage());
+        }
     }
 
     private boolean isSwitchEvent(String eventType) {
@@ -1027,6 +1284,7 @@ public class InterviewServiceImpl implements InterviewService {
         session.setHrJoinTime(null);
         session.setStartTime(null);
         session.setEndTime(null);
+        session.setRecordingEndRequestedAt(null);
         session.setRecordingPath(null);
         session.setRecordingFileName(null);
         session.setHrRecordingPath(null);
@@ -1458,6 +1716,8 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setApprovedHrName(entity.getApprovedHrName());
         vo.setProcessStatusView(entity.getProcessStatusView());
         vo.setRemark(entity.getRemark());
+        vo.setAiRecordingPath(entity.getAiRecordingPath());
+        vo.setAiRecordingFileName(entity.getAiRecordingFileName());
         fillVideoSessionSummary(vo, entity.getId());
         vo.setCreatedAt(entity.getCreatedAt());
         vo.setUpdatedAt(entity.getUpdatedAt());
@@ -1501,6 +1761,11 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setRecordingPath(StrUtil.blankToDefault(entity.getMergedRecordingPath(), entity.getRecordingPath()));
         vo.setRecordingFileName(StrUtil.blankToDefault(entity.getMergedRecordingFileName(), entity.getRecordingFileName()));
         vo.setSessionStatus(entity.getSessionStatus());
+        vo.setRecordingEndRequestedAt(entity.getRecordingEndRequestedAt());
+        vo.setAudioPath(entity.getAudioPath());
+        vo.setTranscriptText(entity.getTranscriptText());
+        vo.setSummaryText(entity.getSummaryText());
+        vo.setSummaryStatus(entity.getSummaryStatus());
         return vo;
     }
 
@@ -1518,6 +1783,11 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setRecordingPath(StrUtil.blankToDefault(session.getMergedRecordingPath(), session.getRecordingPath()));
         vo.setRecordingFileName(StrUtil.blankToDefault(session.getMergedRecordingFileName(), session.getRecordingFileName()));
         vo.setSessionStatus(session.getSessionStatus());
+        vo.setRecordingEndRequestedAt(session.getRecordingEndRequestedAt());
+        vo.setAudioPath(session.getAudioPath());
+        vo.setTranscriptText(session.getTranscriptText());
+        vo.setSummaryText(session.getSummaryText());
+        vo.setSummaryStatus(session.getSummaryStatus());
     }
 
     private VideoSignalVO toVideoSignalVO(InterviewVideoSession entity) {
@@ -1533,6 +1803,11 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setRecordingPath(StrUtil.blankToDefault(entity.getMergedRecordingPath(), entity.getRecordingPath()));
         vo.setRecordingFileName(StrUtil.blankToDefault(entity.getMergedRecordingFileName(), entity.getRecordingFileName()));
         vo.setSessionStatus(entity.getSessionStatus());
+        vo.setRecordingEndRequestedAt(entity.getRecordingEndRequestedAt());
+        vo.setAudioPath(entity.getAudioPath());
+        vo.setTranscriptText(entity.getTranscriptText());
+        vo.setSummaryText(entity.getSummaryText());
+        vo.setSummaryStatus(entity.getSummaryStatus());
         return vo;
     }
 
