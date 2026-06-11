@@ -275,6 +275,7 @@ CREATE TABLE IF NOT EXISTS interview_process (
     approved_hr_user_id INTEGER,
     approved_hr_name VARCHAR(64),
     process_status_view VARCHAR(64) NOT NULL,
+    remark VARCHAR(2000),
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

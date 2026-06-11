@@ -338,10 +338,18 @@ public class InterviewController {
 
     @PostMapping("/hr/terminate/{processId}")
     public ApiResponse<InterviewVO> terminate(Authentication authentication,
-                                              @PathVariable Long processId,
-                                              @Valid @RequestBody InterviewDecisionRequest request) {
+                                               @PathVariable Long processId,
+                                               @Valid @RequestBody InterviewDecisionRequest request) {
         fillApprover(authentication, request);
         return ApiResponse.success(interviewService.terminateProcess(processId, request));
+    }
+
+    @PostMapping("/hr/processes/{processId}/remark")
+    public ApiResponse<InterviewVO> updateProcessRemark(Authentication authentication,
+                                                        @PathVariable Long processId,
+                                                        @RequestBody InterviewDecisionRequest request) {
+        fillApprover(authentication, request);
+        return ApiResponse.success(interviewService.updateProcessRemark(processId, request));
     }
 
     private SessionUserVO currentUser(Authentication authentication) {

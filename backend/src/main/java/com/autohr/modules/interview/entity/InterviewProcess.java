@@ -31,6 +31,7 @@ public class InterviewProcess {
     private Long approvedHrUserId;
     private String approvedHrName;
     private String processStatusView;
+    private String remark;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE)

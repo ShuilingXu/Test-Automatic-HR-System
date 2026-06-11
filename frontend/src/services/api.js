@@ -151,5 +151,6 @@ export const interviewApi = {
   approveVideo(processId, payload) { return request.post(`/interview/hr/approve-video/${processId}`, payload) },
   approveOnsite(processId, payload) { return request.post(`/interview/hr/approve-onsite/${processId}`, payload) },
   terminateProcess(processId, payload) { return request.post(`/interview/hr/terminate/${processId}`, payload) },
+  updateProcessRemark(processId, payload) { return request.post(`/interview/hr/processes/${processId}/remark`, payload) },
   submitAiAnswer(payload) { return request.post('/interview/interviewee/ai-answer', payload, { timeout: 120000 }) },
 }

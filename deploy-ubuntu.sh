@@ -20,6 +20,11 @@ TURN_MAX_PORT="${TURN_MAX_PORT:-}"
 INTERVIEW_VIDEO_FFMPEG_PATH="${INTERVIEW_VIDEO_FFMPEG_PATH:-}"
 INTERVIEW_VIDEO_VIDEO_CODEC="${INTERVIEW_VIDEO_VIDEO_CODEC:-}"
 INTERVIEW_VIDEO_AUDIO_CODEC="${INTERVIEW_VIDEO_AUDIO_CODEC:-}"
+RESUME_OCR_ENABLED="${RESUME_OCR_ENABLED:-}"
+RESUME_OCR_TESSERACT_PATH="${RESUME_OCR_TESSERACT_PATH:-}"
+RESUME_OCR_LANGUAGE="${RESUME_OCR_LANGUAGE:-}"
+RESUME_OCR_DPI="${RESUME_OCR_DPI:-}"
+RESUME_OCR_MAX_PAGES="${RESUME_OCR_MAX_PAGES:-}"
 
 install_package() {
   local package_name="$1"
@@ -40,6 +45,9 @@ ensure_dependencies() {
   install_package coturn
   install_package curl
   install_package ffmpeg
+  install_package tesseract-ocr
+  install_package tesseract-ocr-eng
+  install_package tesseract-ocr-chi-sim
 
   local node_major=0
   if command -v node >/dev/null 2>&1; then
@@ -52,6 +60,34 @@ ensure_dependencies() {
     sudo apt-get install -y nodejs
   fi
 
+}
+
+ensure_resume_ocr() {
+  local tesseract_bin="${RESUME_OCR_TESSERACT_PATH:-tesseract}"
+
+  if ! command -v "$tesseract_bin" >/dev/null 2>&1; then
+    echo "tesseract was not found. Install tesseract-ocr or set RESUME_OCR_TESSERACT_PATH."
+    exit 1
+  fi
+
+  if [ -z "$RESUME_OCR_LANGUAGE" ]; then
+    if "$tesseract_bin" --list-langs 2>/dev/null | grep -Fxq "chi_sim"; then
+      RESUME_OCR_LANGUAGE="chi_sim+eng"
+    else
+      RESUME_OCR_LANGUAGE="eng"
+      echo "Warning: Tesseract language chi_sim was not found. Resume OCR will use eng only."
+    fi
+  fi
+
+  RESUME_OCR_ENABLED="${RESUME_OCR_ENABLED:-true}"
+  RESUME_OCR_DPI="${RESUME_OCR_DPI:-200}"
+  RESUME_OCR_MAX_PAGES="${RESUME_OCR_MAX_PAGES:-5}"
+
+  set_env_value RESUME_OCR_ENABLED "$RESUME_OCR_ENABLED"
+  set_env_value RESUME_OCR_TESSERACT_PATH "$tesseract_bin"
+  set_env_value RESUME_OCR_LANGUAGE "$RESUME_OCR_LANGUAGE"
+  set_env_value RESUME_OCR_DPI "$RESUME_OCR_DPI"
+  set_env_value RESUME_OCR_MAX_PAGES "$RESUME_OCR_MAX_PAGES"
 }
 
 ensure_video_codecs() {
@@ -185,6 +221,12 @@ prepare_env() {
   INTERVIEW_VIDEO_FFMPEG_PATH="${INTERVIEW_VIDEO_FFMPEG_PATH:-ffmpeg}"
   INTERVIEW_VIDEO_VIDEO_CODEC="${INTERVIEW_VIDEO_VIDEO_CODEC:-$(get_env_value INTERVIEW_VIDEO_VIDEO_CODEC)}"
   INTERVIEW_VIDEO_AUDIO_CODEC="${INTERVIEW_VIDEO_AUDIO_CODEC:-$(get_env_value INTERVIEW_VIDEO_AUDIO_CODEC)}"
+  RESUME_OCR_ENABLED="${RESUME_OCR_ENABLED:-$(get_env_value RESUME_OCR_ENABLED)}"
+  RESUME_OCR_TESSERACT_PATH="${RESUME_OCR_TESSERACT_PATH:-$(get_env_value RESUME_OCR_TESSERACT_PATH)}"
+  RESUME_OCR_TESSERACT_PATH="${RESUME_OCR_TESSERACT_PATH:-tesseract}"
+  RESUME_OCR_LANGUAGE="${RESUME_OCR_LANGUAGE:-$(get_env_value RESUME_OCR_LANGUAGE)}"
+  RESUME_OCR_DPI="${RESUME_OCR_DPI:-$(get_env_value RESUME_OCR_DPI)}"
+  RESUME_OCR_MAX_PAGES="${RESUME_OCR_MAX_PAGES:-$(get_env_value RESUME_OCR_MAX_PAGES)}"
 
   if [ -z "$TURN_HOST" ]; then
     echo "TURN_HOST is empty. Set TURN_HOST to this server's public IP or domain."
@@ -304,6 +346,7 @@ main() {
   ensure_dependencies
   prepare_env
   ensure_video_codecs
+  ensure_resume_ocr
   configure_coturn
   configure_firewall
   stop_existing_processes

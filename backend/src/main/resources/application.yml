@@ -48,6 +48,14 @@ interview:
     video-codec: ${INTERVIEW_VIDEO_VIDEO_CODEC:libvpx-vp9}
     audio-codec: ${INTERVIEW_VIDEO_AUDIO_CODEC:libopus}
 
+resume:
+  ocr:
+    enabled: ${RESUME_OCR_ENABLED:true}
+    tesseract-path: ${RESUME_OCR_TESSERACT_PATH:${TESSERACT_PATH:tesseract}}
+    language: ${RESUME_OCR_LANGUAGE:chi_sim+eng}
+    dpi: ${RESUME_OCR_DPI:200}
+    max-pages: ${RESUME_OCR_MAX_PAGES:5}
+
 app:
   database:
     type: ${DB_TYPE:sqlite}

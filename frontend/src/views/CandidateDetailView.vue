@@ -54,6 +54,8 @@
           <div class="action-row">
             <a v-if="candidate.resumeFileId" class="link-chip" :href="resumeUrl(candidate.resumeFileId)" target="_blank">打开简历文件</a>
             <el-button :disabled="!canReevaluateResumeLlm" :loading="reevaluating" @click="reevaluateResumeLlm">{{ resumeLlmReevaluateLabel }}</el-button>
+            <el-button v-if="!candidate.interviewProcessId" :loading="startingInterview" @click="startCandidateInterview">发起面试</el-button>
+            <el-button v-if="!candidate.interviewProcessId" type="danger" :loading="rejectingResume" @click="rejectCandidateResume">面试拒绝</el-button>
             <RouterLink v-if="candidate.interviewProcessId" class="link-chip" :to="`/interview/hr/processes/${candidate.interviewProcessId}`">查看面试流程</RouterLink>
           </div>
         </section>
@@ -66,12 +68,14 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { recruitmentApi } from '../services/api'
+import { authApi, interviewApi, recruitmentApi } from '../services/api'
 
 const route = useRoute()
 const loading = ref(false)
 const candidate = ref(null)
 const reevaluating = ref(false)
+const startingInterview = ref(false)
+const rejectingResume = ref(false)
 const canReevaluateResumeLlm = computed(() => candidate.value?.resumeLlmStatus !== 'PENDING')
 const resumeLlmReevaluateLabel = computed(() => canReevaluateResumeLlm.value ? 'AI简历重评' : '评分中不可重评')
 
@@ -99,6 +103,38 @@ async function reevaluateResumeLlm() {
     ElMessage.error(error.message || 'AI简历重评失败')
   } finally {
     reevaluating.value = false
+  }
+}
+
+async function startCandidateInterview() {
+  startingInterview.value = true
+  try {
+    const userList = (await authApi.listUsers({ roleCode: 'INTERVIEWEE', keyword: candidate.value.mobilePhone })).data
+    const interviewee = userList.find((item) => item.mobilePhone === candidate.value.mobilePhone)
+    if (!interviewee) {
+      ElMessage.warning('未找到对应面试者账号，请先注册并完善资料')
+      return
+    }
+    const process = (await interviewApi.startProcess({ recruitmentCandidateId: candidate.value.id, intervieweeUserId: interviewee.id, jobId: candidate.value.jobId, aiThresholdScore: 70, aiMinQuestionRounds: 1, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })).data
+    ElMessage.success('面试流程已发起')
+    candidate.value = (await recruitmentApi.getCandidate(candidate.value.id)).data
+    if (process?.id) candidate.value.interviewProcessId = process.id
+  } catch (error) {
+    ElMessage.error(error.message || '发起面试失败')
+  } finally {
+    startingInterview.value = false
+  }
+}
+
+async function rejectCandidateResume() {
+  rejectingResume.value = true
+  try {
+    candidate.value = (await recruitmentApi.rejectCandidateResume(candidate.value.id)).data
+    ElMessage.success('已拒绝该报名者简历面试')
+  } catch (error) {
+    ElMessage.error(error.message || '面试拒绝失败')
+  } finally {
+    rejectingResume.value = false
   }
 }
 

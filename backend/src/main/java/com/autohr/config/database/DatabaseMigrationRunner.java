@@ -108,6 +108,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "interview_process", "ai_max_question_rounds", "INTEGER NOT NULL DEFAULT 10");
         addColumnIfMissing(connection, statement, "interview_process", "anti_cheat_switch_limit", "INTEGER NOT NULL DEFAULT 5");
         addColumnIfMissing(connection, statement, "interview_process", "anti_cheat_switch_count", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, statement, "interview_process", "remark", "VARCHAR(2000)");
     }
 
     private void migrateInterviewVideoSessionColumns(Connection connection, Statement statement) throws SQLException {

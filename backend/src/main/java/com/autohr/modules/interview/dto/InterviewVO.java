@@ -49,6 +49,7 @@ public class InterviewVO {
     private Long approverUserId;
     private String approverName;
     private String processStatusView;
+    private String remark;
 
     private String questionTitle;
     private String questionType;

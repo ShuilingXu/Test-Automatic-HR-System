@@ -703,6 +703,16 @@ public class InterviewServiceImpl implements InterviewService {
 
     @Override
     @Transactional
+    public InterviewVO updateProcessRemark(Long processId, InterviewDecisionRequest request) {
+        InterviewProcess process = requireProcess(processId);
+        process.setRemark(abbreviate(StrUtil.blankToDefault(request.getComment(), ""), 2000));
+        processMapper.updateById(process);
+        auditLogService.log(request.getApproverUserId(), displayName(request.getApproverName(), "HR"), "HR_ADMIN", "INTERVIEW", "UPDATE_PROCESS_REMARK", "INTERVIEW_PROCESS", String.valueOf(processId), "更新面试备注");
+        return toProcessVO(process);
+    }
+
+    @Override
+    @Transactional
     public VideoSignalVO publishHrOffer(Long processId, VideoSignalRequest request) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
         if (StrUtil.equals(session.getHrOfferSdp(), request.getOfferSdp())
@@ -1346,6 +1356,13 @@ public class InterviewServiceImpl implements InterviewService {
         return text.length() > 500 ? text.substring(0, 500) + "..." : text;
     }
 
+    private String abbreviate(String text, int maxLength) {
+        if (StrUtil.isBlank(text)) {
+            return "";
+        }
+        return text.length() > maxLength ? text.substring(0, maxLength) : text;
+    }
+
     private String resolveChatCompletionsUrl(String baseUrl) {
         String url = StrUtil.trim(baseUrl);
         if (StrUtil.endWithIgnoreCase(url, "/chat/completions")) {
@@ -1440,6 +1457,7 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setApprovedHrUserId(entity.getApprovedHrUserId());
         vo.setApprovedHrName(entity.getApprovedHrName());
         vo.setProcessStatusView(entity.getProcessStatusView());
+        vo.setRemark(entity.getRemark());
         fillVideoSessionSummary(vo, entity.getId());
         vo.setCreatedAt(entity.getCreatedAt());
         vo.setUpdatedAt(entity.getUpdatedAt());

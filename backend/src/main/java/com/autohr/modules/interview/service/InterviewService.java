@@ -59,4 +59,5 @@ public interface InterviewService {
     InterviewVO approveVideoToOnsite(Long processId, InterviewDecisionRequest request);
     InterviewVO decideOnsite(Long processId, InterviewDecisionRequest request);
     InterviewVO terminateProcess(Long processId, InterviewDecisionRequest request);
+    InterviewVO updateProcessRemark(Long processId, InterviewDecisionRequest request);
 }

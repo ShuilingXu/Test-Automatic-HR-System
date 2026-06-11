@@ -29,10 +29,13 @@ import com.autohr.modules.recruitment.service.RecruitmentService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.rendering.ImageType;
+import org.apache.pdfbox.rendering.PDFRenderer;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -41,6 +44,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
+import javax.imageio.ImageIO;
 import java.util.Set;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -53,6 +57,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -75,6 +80,21 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     private final InterviewAiRecordMapper interviewAiRecordMapper;
     private final InterviewVideoSessionMapper interviewVideoSessionMapper;
     private final InterviewLlmConfigMapper llmConfigMapper;
+
+    @Value("${resume.ocr.enabled:true}")
+    private boolean resumeOcrEnabled;
+
+    @Value("${resume.ocr.tesseract-path:tesseract}")
+    private String tesseractPath;
+
+    @Value("${resume.ocr.language:chi_sim+eng}")
+    private String resumeOcrLanguage;
+
+    @Value("${resume.ocr.dpi:200}")
+    private int resumeOcrDpi;
+
+    @Value("${resume.ocr.max-pages:5}")
+    private int resumeOcrMaxPages;
 
     @Override
     @Transactional
@@ -327,6 +347,9 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         if (fileName.endsWith(".pdf")) {
             try (PDDocument document = PDDocument.load(path.toFile())) {
                 text = new PDFTextStripper().getText(document);
+                if (isBlankResumeText(text)) {
+                    text = extractPdfTextByOcr(document, path);
+                }
             }
         } else if (fileName.endsWith(".docx")) {
             try (InputStream inputStream = Files.newInputStream(path); XWPFDocument document = new XWPFDocument(inputStream)) {
@@ -336,6 +359,65 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             text = "简历文件类型不支持文本提取: " + fileName;
         }
         return abbreviate(StrUtil.blankToDefault(text, "简历文本为空"), 12000);
+    }
+
+    private boolean isBlankResumeText(String text) {
+        return StrUtil.blankToDefault(text, "").replaceAll("\\s+", "").length() < 20;
+    }
+
+    private String extractPdfTextByOcr(PDDocument document, Path sourcePath) throws IOException {
+        if (!resumeOcrEnabled) {
+            return "PDF常规文本提取为空，OCR未启用";
+        }
+        Path tempDir = Files.createTempDirectory("resume-ocr-");
+        try {
+            PDFRenderer renderer = new PDFRenderer(document);
+            StringBuilder text = new StringBuilder();
+            int pageCount = Math.min(document.getNumberOfPages(), Math.max(resumeOcrMaxPages, 1));
+            for (int i = 0; i < pageCount; i++) {
+                Path imagePath = tempDir.resolve("page-" + (i + 1) + ".png");
+                ImageIO.write(renderer.renderImageWithDPI(i, Math.max(resumeOcrDpi, 72), ImageType.RGB), "png", imagePath.toFile());
+                text.append(runTesseract(imagePath)).append("\n");
+            }
+            return StrUtil.blankToDefault(text.toString(), "PDF常规文本提取为空，OCR未识别到文本: " + sourcePath.getFileName());
+        } finally {
+            deleteDirectoryQuietly(tempDir);
+        }
+    }
+
+    private String runTesseract(Path imagePath) {
+        ProcessBuilder builder = new ProcessBuilder(tesseractPath, imagePath.toString(), "stdout", "-l", resumeOcrLanguage);
+        builder.redirectErrorStream(true);
+        try {
+            Process process = builder.start();
+            boolean exited = process.waitFor(60, TimeUnit.SECONDS);
+            String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            if (!exited) {
+                process.destroyForcibly();
+                throw new BusinessException("OCR识别超时，请降低RESUME_OCR_MAX_PAGES或检查Tesseract性能");
+            }
+            if (process.exitValue() != 0) {
+                throw new BusinessException("OCR识别失败: " + abbreviate(output, 500));
+            }
+            return output;
+        } catch (IOException ex) {
+            throw new BusinessException("OCR不可用，请安装Tesseract并配置RESUME_OCR_TESSERACT_PATH/TESSERACT_PATH: " + ex.getMessage());
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException("OCR识别被中断");
+        }
+    }
+
+    private void deleteDirectoryQuietly(Path directory) {
+        try (java.util.stream.Stream<Path> paths = Files.walk(directory)) {
+            paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException ignored) {
+                }
+            });
+        } catch (IOException ignored) {
+        }
     }
 
     private ResumeLlmEvaluation callResumeReviewLlm(RecruitmentJob job, RecruitmentCandidate candidate, RecruitmentResumeFile resumeFile, String resumeText) {
