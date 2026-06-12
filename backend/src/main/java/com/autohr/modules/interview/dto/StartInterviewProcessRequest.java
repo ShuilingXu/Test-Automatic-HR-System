@@ -15,4 +15,5 @@ public class StartInterviewProcessRequest {
     private Integer aiMinQuestionRounds;
     private Integer aiMaxQuestionRounds;
     private Integer antiCheatSwitchLimit;
+    private String aiOutputMode;
 }

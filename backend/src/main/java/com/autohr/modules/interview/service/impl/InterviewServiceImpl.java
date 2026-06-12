@@ -69,6 +69,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -375,6 +376,7 @@ public class InterviewServiceImpl implements InterviewService {
         process.setAiMaxQuestionRounds(maxQuestionRounds);
         process.setAntiCheatSwitchLimit(Math.max(Objects.requireNonNullElse(request.getAntiCheatSwitchLimit(), 5), 1));
         process.setAntiCheatSwitchCount(0);
+        process.setAiOutputMode(normalizeAiOutputMode(request.getAiOutputMode()));
         process.setVideoApproved(0);
         process.setOnsiteApproved(0);
         process.setProcessStatusView("AI面");
@@ -442,6 +444,10 @@ public class InterviewServiceImpl implements InterviewService {
     @Override
     @Transactional
     public synchronized InterviewVO submitAiAnswer(AiAnswerRequest request) {
+        return submitAiAnswer(request, null);
+    }
+
+    private synchronized InterviewVO submitAiAnswer(AiAnswerRequest request, Consumer<String> interviewerChunkConsumer) {
         InterviewProcess process = requireProcess(request.getProcessId());
         ensureInProgress(process);
         if (!StrUtil.equals(process.getCurrentStage(), "AI")) {
@@ -458,7 +464,7 @@ public class InterviewServiceImpl implements InterviewService {
         record.setAnswerContent(request.getAnswerContent());
         String materials = loadKnowledgeMaterials(record.getKnowledgeBaseId());
         String jobRequirements = loadJobRequirements(process);
-        LlmEvaluation interviewerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "INTERVIEWER", true);
+        LlmEvaluation interviewerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "INTERVIEWER", true, interviewerChunkConsumer);
         LlmEvaluation scorerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "SCORER", false);
         int interviewerScore = interviewerEvaluation.score();
         int scorerScore = scorerEvaluation.score();
@@ -509,10 +515,13 @@ public class InterviewServiceImpl implements InterviewService {
         SseEmitter emitter = new SseEmitter(180000L);
         CompletableFuture.runAsync(() -> {
             try {
-                sendSse(emitter, "message", "已收到回答，开始AI评分");
-                sendSse(emitter, "message", "正在调用面试官模型生成评价和下一题");
-                InterviewVO result = submitAiAnswer(request);
-                sendSse(emitter, "message", "正在同步AI面试状态");
+                InterviewVO result = submitAiAnswer(request, chunk -> {
+                    try {
+                        sendSse(emitter, "token", chunk);
+                    } catch (IOException ex) {
+                        throw new BusinessException("流式输出失败: " + abbreviate(ex.getMessage()));
+                    }
+                });
                 sendSse(emitter, "done", result);
                 emitter.complete();
             } catch (Exception ex) {
@@ -1262,6 +1271,10 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     private LlmEvaluation callLlmEvaluation(String question, String answer, String topic, String materials, String jobRequirements, String role, boolean needNextQuestion) {
+        return callLlmEvaluation(question, answer, topic, materials, jobRequirements, role, needNextQuestion, null);
+    }
+
+    private LlmEvaluation callLlmEvaluation(String question, String answer, String topic, String materials, String jobRequirements, String role, boolean needNextQuestion, Consumer<String> chunkConsumer) {
         InterviewLlmConfig config = requireActiveLlmConfig(role);
         String basePrompt = StrUtil.blankToDefault(config.getScoringRulePrompt(), config.getPromptTemplate())
                 .replace("{topic}", StrUtil.blankToDefault(topic, "通用沟通"));
@@ -1285,7 +1298,7 @@ public class InterviewServiceImpl implements InterviewService {
                 + "\n输出必须包含三部分：第一行只写整数分数；第二行写不少于20字的中文评价，评价要反馈回答是否完整、哪里正确或遗漏；第三行写下一道面试题。"
                 + "\n下一题必须基于知识库材料并结合岗位要求，可以自然改写和语义修饰，不必与知识点原句一模一样，但不能引入材料和岗位要求外的知识点。"
                 + "\n本格式要求优先于旧配置中的'只返回整数'类要求，不能只输出分数，也不能只输出问题。";
-        String response = callOpenAiChat(config, systemPrompt, userPrompt);
+        String response = chunkConsumer == null ? callOpenAiChat(config, systemPrompt, userPrompt) : callOpenAiChatStream(config, systemPrompt, userPrompt, chunkConsumer);
         return parseEvaluation(response);
     }
 
@@ -1448,12 +1461,7 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     private String callOpenAiChat(InterviewLlmConfig config, String systemPrompt, String userPrompt) {
-        cn.hutool.json.JSONObject payload = new cn.hutool.json.JSONObject();
-        payload.set("model", config.getModelName());
-        payload.set("messages", cn.hutool.json.JSONUtil.parseArray(List.of(
-                new cn.hutool.json.JSONObject().set("role", "system").set("content", systemPrompt),
-                new cn.hutool.json.JSONObject().set("role", "user").set("content", userPrompt)
-        )));
+        cn.hutool.json.JSONObject payload = buildChatPayload(config, systemPrompt, userPrompt, false);
         debugLlm("REQUEST", config, systemPrompt, userPrompt, null, null);
         cn.hutool.http.HttpResponse httpResponse;
         try {
@@ -1491,6 +1499,78 @@ public class InterviewServiceImpl implements InterviewService {
             throw new BusinessException("LLM接口返回缺少message.content: " + abbreviate(responseText));
         }
         return message.getStr("content", "");
+    }
+
+    private String callOpenAiChatStream(InterviewLlmConfig config, String systemPrompt, String userPrompt, Consumer<String> chunkConsumer) {
+        cn.hutool.json.JSONObject payload = buildChatPayload(config, systemPrompt, userPrompt, true);
+        debugLlm("STREAM_REQUEST", config, systemPrompt, userPrompt, null, null);
+        java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(resolveChatCompletionsUrl(config.getBaseUrl())))
+                .header("Authorization", "Bearer " + config.getApiKey())
+                .header("Content-Type", "application/json")
+                .timeout(java.time.Duration.ofSeconds(120))
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(payload.toString(), StandardCharsets.UTF_8))
+                .build();
+        java.net.http.HttpResponse<java.io.InputStream> response;
+        try {
+            response = java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.ofInputStream());
+        } catch (Exception ex) {
+            throw new BusinessException("LLM流式接口调用失败: " + abbreviate(ex.getMessage()));
+        }
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new BusinessException("LLM流式接口调用失败，HTTP " + response.statusCode());
+        }
+        StringBuilder fullText = new StringBuilder();
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.startsWith("data:")) {
+                    continue;
+                }
+                String data = line.substring(5).trim();
+                if ("[DONE]".equals(data)) {
+                    break;
+                }
+                String delta = extractStreamDelta(data);
+                if (StrUtil.isNotEmpty(delta)) {
+                    fullText.append(delta);
+                    chunkConsumer.accept(delta);
+                }
+            }
+        } catch (IOException ex) {
+            throw new BusinessException("读取LLM流式输出失败: " + abbreviate(ex.getMessage()));
+        }
+        debugLlm("STREAM_RESPONSE", config, systemPrompt, userPrompt, response.statusCode(), fullText.toString());
+        if (StrUtil.isBlank(fullText.toString())) {
+            throw new BusinessException("LLM流式接口未返回有效内容");
+        }
+        return fullText.toString();
+    }
+
+    private cn.hutool.json.JSONObject buildChatPayload(InterviewLlmConfig config, String systemPrompt, String userPrompt, boolean stream) {
+        cn.hutool.json.JSONObject payload = new cn.hutool.json.JSONObject();
+        payload.set("model", config.getModelName());
+        payload.set("messages", cn.hutool.json.JSONUtil.parseArray(List.of(
+                new cn.hutool.json.JSONObject().set("role", "system").set("content", systemPrompt),
+                new cn.hutool.json.JSONObject().set("role", "user").set("content", userPrompt)
+        )));
+        if (stream) {
+            payload.set("stream", true);
+        }
+        return payload;
+    }
+
+    private String extractStreamDelta(String data) {
+        try {
+            cn.hutool.json.JSONObject chunk = cn.hutool.json.JSONUtil.parseObj(data);
+            cn.hutool.json.JSONArray choices = chunk.getJSONArray("choices");
+            if (choices == null || choices.isEmpty()) {
+                return "";
+            }
+            cn.hutool.json.JSONObject delta = choices.getJSONObject(0).getJSONObject("delta");
+            return delta == null ? "" : StrUtil.blankToDefault(delta.getStr("content"), "");
+        } catch (Exception ex) {
+            return "";
+        }
     }
 
     private void debugLlm(String phase, InterviewLlmConfig config, String systemPrompt, String userPrompt, Integer httpStatus, String output) {
@@ -1536,6 +1616,10 @@ public class InterviewServiceImpl implements InterviewService {
             return url + "/chat/completions";
         }
         return StrUtil.removeSuffix(url, "/") + "/v1/chat/completions";
+    }
+
+    private String normalizeAiOutputMode(String mode) {
+        return StrUtil.equalsIgnoreCase(mode, "STREAM") ? "STREAM" : "NORMAL";
     }
 
     private int nextSequence(Long processId) {
@@ -1616,6 +1700,7 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setAiMaxQuestionRounds(entity.getAiMaxQuestionRounds());
         vo.setAntiCheatSwitchLimit(entity.getAntiCheatSwitchLimit());
         vo.setAntiCheatSwitchCount(entity.getAntiCheatSwitchCount());
+        vo.setAiOutputMode(entity.getAiOutputMode());
         vo.setVideoApproved(entity.getVideoApproved());
         vo.setOnsiteApproved(entity.getOnsiteApproved());
         vo.setApprovedHrUserId(entity.getApprovedHrUserId());

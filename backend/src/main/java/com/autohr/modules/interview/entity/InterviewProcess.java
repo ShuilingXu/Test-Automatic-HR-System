@@ -26,6 +26,7 @@ public class InterviewProcess {
     private Integer aiMaxQuestionRounds;
     private Integer antiCheatSwitchLimit;
     private Integer antiCheatSwitchCount;
+    private String aiOutputMode;
     private Integer videoApproved;
     private Integer onsiteApproved;
     private Long approvedHrUserId;

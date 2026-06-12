@@ -39,19 +39,12 @@
             <strong>{{ aiStatusText }}</strong>
             <small>{{ aiStatusHint }}</small>
           </div>
-          <div class="ai-output-mode">
-            <span>输出模式</span>
-            <el-radio-group v-model="aiOutputMode" :disabled="aiSubmitState.submitting">
-              <el-radio-button label="normal">普通输出</el-radio-button>
-              <el-radio-button label="stream">流式输出</el-radio-button>
-            </el-radio-group>
-          </div>
           <div v-if="aiSubmitState.submitting" class="ai-submit-overlay">
             <div class="ai-orbit"><span></span><span></span><span></span></div>
             <strong>{{ aiSubmitState.message }}</strong>
             <p>{{ aiSubmitOverlayHint }}</p>
-            <div v-if="aiOutputMode === 'stream' && aiStreamEvents.length" class="ai-stream-log">
-              <span v-for="item in aiStreamEvents" :key="item.id">{{ item.text }}</span>
+            <div v-if="isStreamMode && aiStreamText" class="ai-stream-log">
+              {{ aiStreamText }}
             </div>
           </div>
           <div v-if="processSummary?.currentStage === 'AI'" class="ai-recording-card" :class="{ active: aiExamRecording.active }">
@@ -99,8 +92,7 @@ const processSummary = ref(null)
 const currentQuestion = ref(null)
 const refreshState = reactive({ loading: false, retryCount: 0, lastError: '' })
 const aiSubmitState = reactive({ submitting: false, message: '' })
-const aiOutputMode = ref('normal')
-const aiStreamEvents = ref([])
+const aiStreamText = ref('')
 const aiPendingRefresh = reactive({ active: false, attempts: 0, questionId: null })
 const runtimeConfig = reactive({ disableDevtoolsShortcuts: true })
 const antiCheat = reactive({ fullscreen: false, switchCount: 0, hasEnteredFullscreen: false, aiEndNotified: false })
@@ -144,8 +136,10 @@ const aiStatusHint = computed(() => {
   return '提交后按钮会锁定，避免重复提交'
 })
 
-const aiSubmitOverlayHint = computed(() => aiOutputMode.value === 'stream'
-  ? '流式模式会持续显示AI评分、评价和下一题生成进度，请勿刷新页面。'
+const isStreamMode = computed(() => processSummary.value?.aiOutputMode === 'STREAM')
+
+const aiSubmitOverlayHint = computed(() => isStreamMode.value
+  ? 'AI输出会实时显示在这里，请勿刷新页面。'
   : '请勿重复点击或刷新页面，AI 正在评分并生成后续安排。')
 
 const aiAnswerDisabled = computed(() => isAiExamInProgress() && !aiExamRecording.active)
@@ -248,7 +242,7 @@ async function submitAiAnswer() {
     aiSubmitState.message = 'AI正在评分并生成下一步'
     aiPendingRefresh.questionId = currentQuestion.value.id
     clearAiRefresh()
-    if (aiOutputMode.value === 'stream') {
+    if (isStreamMode.value) {
       await submitAiAnswerStream()
     } else {
       await interviewApi.submitAiAnswer({ processId: sessionForm.processId, answerContent: aiAnswer.answerContent })
@@ -335,13 +329,13 @@ async function enterAiExamMode() {
 }
 
 async function submitAiAnswerStream() {
-  aiStreamEvents.value = []
+  aiStreamText.value = ''
   await interviewApi.submitAiAnswerStream({ processId: sessionForm.processId, answerContent: aiAnswer.answerContent }, ({ event, data }) => {
     const text = parseStreamData(data)
     if (event === 'error') throw new Error(text || '流式提交失败')
-    if (text) {
-      aiStreamEvents.value.push({ id: `${Date.now()}-${aiStreamEvents.value.length}`, text })
-      aiSubmitState.message = text
+    if (event === 'token' && text) {
+      aiStreamText.value += text
+      aiSubmitState.message = 'AI正在实时输出'
     }
   })
 }
@@ -739,16 +733,13 @@ onMounted(async () => {
 .ai-status-card.busy { background: rgba(15, 108, 143, 0.1); border-color: rgba(15, 108, 143, 0.22); }
 .status-dot { width: 10px; height: 10px; border-radius: 999px; background: #0f6c8f; box-shadow: 0 0 0 6px rgba(15, 108, 143, 0.12); }
 .ai-status-card.busy .status-dot { animation: pulse 1.2s ease-in-out infinite; }
-.ai-output-mode { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; color: #42515b; }
-.ai-output-mode span { font-weight: 700; }
 .ai-recording-card { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 160px); gap: 14px; align-items: center; margin-bottom: 14px; padding: 14px; border-radius: 16px; background: rgba(143, 15, 15, 0.08); border: 1px solid rgba(143, 15, 15, 0.18); }
 .ai-recording-card.active { background: rgba(28, 120, 74, 0.1); border-color: rgba(28, 120, 74, 0.25); }
 .ai-recording-card p { margin: 6px 0 0; color: #6d7a83; line-height: 1.6; }
 .ai-recording-card video { width: 160px; height: 100px; object-fit: cover; background: #111; border-radius: 12px; }
 .ai-submit-overlay { position: absolute; inset: 0; z-index: 5; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; background: rgba(248, 245, 239, 0.88); backdrop-filter: blur(8px); }
 .ai-submit-overlay p { max-width: 360px; margin: 0; color: #6d7a83; line-height: 1.7; }
-.ai-stream-log { display: grid; gap: 6px; width: min(420px, 100%); max-height: 180px; overflow: auto; padding: 12px; border-radius: 14px; background: rgba(255,255,255,0.72); color: #42515b; text-align: left; }
-.ai-stream-log span { line-height: 1.5; }
+.ai-stream-log { width: min(520px, 100%); max-height: 220px; overflow: auto; padding: 12px; border-radius: 14px; background: rgba(255,255,255,0.72); color: #42515b; text-align: left; line-height: 1.7; white-space: pre-wrap; }
 .ai-orbit { position: relative; width: 64px; height: 64px; border-radius: 999px; border: 2px solid rgba(15, 108, 143, 0.18); animation: spin 1.4s linear infinite; }
 .ai-orbit span { position: absolute; width: 12px; height: 12px; border-radius: 999px; background: #0f6c8f; }
 .ai-orbit span:nth-child(1) { top: -6px; left: 26px; }

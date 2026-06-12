@@ -61,12 +61,15 @@ public class CaptchaServiceImpl implements CaptchaService {
             graphics.setColor(randomSoftColor());
             graphics.drawLine(RandomUtil.randomInt(width), RandomUtil.randomInt(height), RandomUtil.randomInt(width), RandomUtil.randomInt(height));
         }
-        graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 28));
+        graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 26));
         for (int i = 0; i < code.length(); i++) {
             graphics.setColor(randomTextColor());
-            graphics.rotate(Math.toRadians(RandomUtil.randomInt(-18, 18)), 24 + i * 24, 28);
-            graphics.drawString(String.valueOf(code.charAt(i)), 16 + i * 26, 32);
-            graphics.rotate(Math.toRadians(RandomUtil.randomInt(-18, 18) * -1), 24 + i * 24, 28);
+            int pivotX = 24 + i * 25;
+            int pivotY = 26;
+            double angle = Math.toRadians(RandomUtil.randomInt(-12, 13));
+            graphics.rotate(angle, pivotX, pivotY);
+            graphics.drawString(String.valueOf(code.charAt(i)), 16 + i * 25, 31);
+            graphics.rotate(-angle, pivotX, pivotY);
         }
         graphics.dispose();
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {

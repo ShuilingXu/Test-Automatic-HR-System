@@ -41,6 +41,7 @@ public class InterviewVO {
     private Integer aiMaxQuestionRounds;
     private Integer antiCheatSwitchLimit;
     private Integer antiCheatSwitchCount;
+    private String aiOutputMode;
     private Integer videoApproved;
     private Integer onsiteApproved;
     private Long intervieweeUserId;

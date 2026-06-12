@@ -196,7 +196,7 @@ export const interviewApi = {
         const streamEvent = { event: 'message', data: '' }
         chunk.split('\n').forEach((line) => {
           if (line.startsWith('event:')) streamEvent.event = line.slice(6).trim()
-          if (line.startsWith('data:')) streamEvent.data += line.slice(5).trim()
+          if (line.startsWith('data:')) streamEvent.data += line.slice(5).replace(/^ /, '')
         })
         if (streamEvent.data) onEvent?.(streamEvent)
       })

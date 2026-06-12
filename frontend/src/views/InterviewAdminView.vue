@@ -185,6 +185,7 @@
           <el-form-item label="AI最少问答轮数"><el-input-number v-model="processForm.aiMinQuestionRounds" :min="1" /></el-form-item>
           <el-form-item label="AI最多问答轮数"><el-input-number v-model="processForm.aiMaxQuestionRounds" :min="1" /></el-form-item>
           <el-form-item label="切屏终止阈值"><el-input-number v-model="processForm.antiCheatSwitchLimit" :min="1" /></el-form-item>
+          <el-form-item label="AI输出模式"><el-select v-model="processForm.aiOutputMode"><el-option label="普通输出" value="NORMAL" /><el-option label="流式输出" value="STREAM" /></el-select></el-form-item>
         </el-form>
         <div v-if="processCandidatePreview" class="candidate-preview">
           <h4>候选人投递预览</h4>
@@ -356,7 +357,7 @@ const scorerLlmForm = reactive(createLlmForm('SCORER'))
 const resumeReviewLlmForm = reactive(createLlmForm('RESUME_REVIEW'))
 const videoTranscriberLlmForm = reactive(createLlmForm('VIDEO_TRANSCRIBER'))
 const videoSummaryLlmForm = reactive(createLlmForm('VIDEO_SUMMARY'))
-const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 70, aiMinQuestionRounds: 1, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })
+const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 70, aiMinQuestionRounds: 1, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5, aiOutputMode: 'NORMAL' })
 const processSearch = reactive({ keyword: '' })
 const systemConfig = reactive({
   ALIYUN_ACCESS_KEY_ID: '',
