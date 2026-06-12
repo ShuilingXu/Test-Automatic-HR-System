@@ -195,7 +195,6 @@ button:not(:disabled),
   background: var(--button-bg-hover);
   border-color: var(--button-border-active);
   color: var(--brand-ink);
-  transform: translateY(-1px);
   box-shadow: 0 10px 24px rgba(16, 37, 50, 0.1);
 }
 
