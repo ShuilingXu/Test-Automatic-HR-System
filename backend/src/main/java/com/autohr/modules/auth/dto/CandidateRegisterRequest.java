@@ -11,7 +11,12 @@ public class CandidateRegisterRequest {
     private String password;
     @NotBlank(message = "姓名必填")
     private String displayName;
-    @NotBlank(message = "手机号必填")
     private String mobilePhone;
     private String email;
+    @NotBlank(message = "验证码必填")
+    private String verificationCode;
+    @NotBlank(message = "图形验证码ID必填")
+    private String captchaId;
+    @NotBlank(message = "图形验证码必填")
+    private String captchaCode;
 }

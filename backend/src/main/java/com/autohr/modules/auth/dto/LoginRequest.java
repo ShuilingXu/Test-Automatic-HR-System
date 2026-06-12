@@ -9,4 +9,8 @@ public class LoginRequest {
     private String username;
     @NotBlank(message = "密码必填")
     private String password;
+    @NotBlank(message = "图形验证码ID必填")
+    private String captchaId;
+    @NotBlank(message = "图形验证码必填")
+    private String captchaCode;
 }

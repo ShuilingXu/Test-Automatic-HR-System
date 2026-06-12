@@ -3,13 +3,17 @@ package com.autohr.modules.auth.controller;
 import com.autohr.common.api.ApiResponse;
 import com.autohr.modules.auth.dto.CandidateProfileUpdateRequest;
 import com.autohr.modules.auth.dto.CandidateRegisterRequest;
+import com.autohr.modules.auth.dto.CaptchaVO;
 import com.autohr.modules.auth.dto.AuditLogVO;
 import com.autohr.modules.auth.dto.LoginRequest;
 import com.autohr.modules.auth.dto.LoginResponse;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.dto.UserAdminUpdateRequest;
+import com.autohr.modules.auth.dto.VerificationCodeRequest;
 import com.autohr.modules.auth.service.AuthService;
 import com.autohr.modules.auth.service.AuditLogService;
+import com.autohr.modules.auth.service.CaptchaService;
+import com.autohr.modules.auth.service.VerificationCodeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -30,6 +34,13 @@ public class AuthController {
 
     private final AuthService authService;
     private final AuditLogService auditLogService;
+    private final VerificationCodeService verificationCodeService;
+    private final CaptchaService captchaService;
+
+    @GetMapping("/captcha")
+    public ApiResponse<CaptchaVO> captcha() {
+        return ApiResponse.success(captchaService.createCaptcha());
+    }
 
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
@@ -39,6 +50,12 @@ public class AuthController {
     @PostMapping("/register")
     public ApiResponse<SessionUserVO> register(@Valid @RequestBody CandidateRegisterRequest request) {
         return ApiResponse.success(authService.registerCandidate(request));
+    }
+
+    @PostMapping("/register/code")
+    public ApiResponse<Void> sendRegisterCode(@RequestBody VerificationCodeRequest request) {
+        verificationCodeService.sendRegisterCode(request.getMobilePhone(), request.getEmail(), request.getCaptchaId(), request.getCaptchaCode());
+        return ApiResponse.success("验证码已发送", null);
     }
 
     @GetMapping("/me")

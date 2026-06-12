@@ -567,6 +567,7 @@ public class InterviewServiceImpl implements InterviewService {
         }
         if (!isTerminalVideoSessionStatus(session.getSessionStatus()) && !StrUtil.equals(session.getSessionStatus(), "END_REQUESTED")) {
             session.setEndTime(session.getEndTime() == null ? LocalDateTime.now() : session.getEndTime());
+            session.setRecordingEndRequestedAt(session.getRecordingEndRequestedAt() == null ? LocalDateTime.now().plusSeconds(3) : session.getRecordingEndRequestedAt());
             session.setSessionStatus("END_REQUESTED");
             videoSessionMapper.updateById(session);
         }
@@ -580,7 +581,9 @@ public class InterviewServiceImpl implements InterviewService {
                     videoSessionMapper.updateById(session);
                 }
                 session.setSessionStatus("RECORDED");
+                session.setSummaryStatus("PENDING");
                 videoSessionMapper.updateById(session);
+                runAfterCommit(() -> CompletableFuture.runAsync(() -> summarizeVideoSessionSafely(session.getId())));
                 process.setStageStatus("WAITING_APPROVAL");
                 process.setProcessStatusView("视频待审批");
             } else {
@@ -805,7 +808,9 @@ public class InterviewServiceImpl implements InterviewService {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
         if (videoMergeService.canMerge(session) && !isReadableFile(session.getMergedRecordingPath())) {
             videoMergeService.mergeRecordings(session);
+            session.setSummaryStatus("PENDING");
             videoSessionMapper.updateById(session);
+            runAfterCommit(() -> CompletableFuture.runAsync(() -> summarizeVideoSessionSafely(session.getId())));
         }
         return session;
     }
@@ -844,12 +849,15 @@ public class InterviewServiceImpl implements InterviewService {
                     videoMergeService.mergeRecordings(session);
                 } catch (BusinessException ex) {
                     session.setSessionStatus("RECORDED");
+                    session.setSummaryStatus("FAILED");
                     videoSessionMapper.updateById(session);
                     markVideoWaitingApproval(session.getProcessId());
                     return toVideoSignalVO(session);
                 }
                 session.setSessionStatus("RECORDED");
+                session.setSummaryStatus("PENDING");
                 markVideoWaitingApproval(session.getProcessId());
+                runAfterCommit(() -> CompletableFuture.runAsync(() -> summarizeVideoSessionSafely(session.getId())));
             } else if (!StrUtil.equals(session.getSessionStatus(), "END_REQUESTED")) {
                 session.setSessionStatus("END_REQUESTED");
             }
@@ -884,6 +892,29 @@ public class InterviewServiceImpl implements InterviewService {
         VideoSignalVO vo = storeRecording(session, originalFileName, contentType, file, "interviewee");
         auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "UPLOAD_RECORDING", "VIDEO_SESSION", String.valueOf(vo.getSessionId()), vo.getRecordingFileName());
         return vo;
+    }
+
+    @Override
+    @Transactional
+    public InterviewVO uploadAiExamRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file) {
+        InterviewProcess process = requireIntervieweeProcess(processId, intervieweeUserId);
+        validateRecordingFile(originalFileName, contentType, file);
+        try {
+            Files.createDirectories(UploadPaths.RECORDING_DIR);
+            String storedName = "ai-exam-" + processId + "-" + intervieweeUserId + "-" + System.currentTimeMillis() + ".webm";
+            Path storedFile = UploadPaths.RECORDING_DIR.resolve(storedName).normalize().toAbsolutePath();
+            if (!storedFile.startsWith(UploadPaths.RECORDING_DIR)) {
+                throw new BusinessException("AI面试录制文件路径非法");
+            }
+            file.transferTo(storedFile.toFile());
+            auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "UPLOAD_AI_EXAM_RECORDING", "INTERVIEW_PROCESS", String.valueOf(processId), storedName);
+            InterviewVO vo = toProcessVO(process);
+            vo.setRecordingPath(storedFile.toString());
+            vo.setRecordingFileName(storedName);
+            return vo;
+        } catch (IOException ex) {
+            throw new BusinessException("AI面试录制文件上传失败: " + ex.getMessage());
+        }
     }
 
     @Override
@@ -1027,6 +1058,7 @@ public class InterviewServiceImpl implements InterviewService {
         session.setHrJoinTime(null);
         session.setStartTime(null);
         session.setEndTime(null);
+        session.setRecordingEndRequestedAt(null);
         session.setRecordingPath(null);
         session.setRecordingFileName(null);
         session.setHrRecordingPath(null);
@@ -1266,6 +1298,75 @@ public class InterviewServiceImpl implements InterviewService {
         return parseScore(response);
     }
 
+    private void summarizeVideoSessionSafely(Long sessionId) {
+        InterviewVideoSession session = videoSessionMapper.selectById(sessionId);
+        if (session == null) {
+            return;
+        }
+        try {
+            session.setSummaryStatus("PROCESSING");
+            videoSessionMapper.updateById(session);
+            if (StrUtil.isBlank(session.getAudioPath())) {
+                videoMergeService.extractAudio(session);
+                videoSessionMapper.updateById(session);
+            }
+            String transcript = callAudioTranscription(session.getAudioPath());
+            session.setTranscriptText(abbreviate(transcript, 20000));
+            String summary = callVideoSummaryLlm(transcript);
+            session.setSummaryText(abbreviate(summary, 5000));
+            session.setSummaryStatus("COMPLETED");
+            videoSessionMapper.updateById(session);
+        } catch (Exception ex) {
+            session.setSummaryStatus("FAILED: " + abbreviate(ex.getMessage(), 400));
+            videoSessionMapper.updateById(session);
+        }
+    }
+
+    private String callAudioTranscription(String audioPath) {
+        InterviewLlmConfig config = requireActiveLlmConfig("VIDEO_TRANSCRIBER");
+        cn.hutool.http.HttpResponse response;
+        try {
+            response = cn.hutool.http.HttpRequest.post(resolveAudioTranscriptionsUrl(config.getBaseUrl()))
+                    .header("Authorization", "Bearer " + config.getApiKey())
+                    .form("model", config.getModelName())
+                    .form("file", new java.io.File(audioPath))
+                    .timeout(120000)
+                    .execute();
+        } catch (Exception ex) {
+            throw new BusinessException("语音转文字接口调用失败: " + abbreviate(ex.getMessage()));
+        }
+        String body = response.body();
+        if (!response.isOk()) {
+            throw new BusinessException("语音转文字接口失败，HTTP " + response.getStatus() + ": " + abbreviate(body));
+        }
+        cn.hutool.json.JSONObject json = cn.hutool.json.JSONUtil.parseObj(body);
+        String text = json.getStr("text");
+        if (StrUtil.isBlank(text)) {
+            throw new BusinessException("语音转文字接口未返回text: " + abbreviate(body));
+        }
+        return text;
+    }
+
+    private String callVideoSummaryLlm(String transcript) {
+        InterviewLlmConfig config = requireActiveLlmConfig("VIDEO_SUMMARY");
+        String systemPrompt = StrUtil.blankToDefault(config.getScoringRulePrompt(), config.getPromptTemplate());
+        if (StrUtil.isBlank(systemPrompt)) {
+            systemPrompt = "你是HR视频面试会议纪要助手，请根据面试转写内容输出中文会议概要，包含候选人表现、关键回答、风险点和后续建议。";
+        }
+        return callOpenAiChat(config, systemPrompt, "视频面试转写：\n" + abbreviate(transcript, 20000));
+    }
+
+    private String resolveAudioTranscriptionsUrl(String baseUrl) {
+        String url = StrUtil.trim(baseUrl);
+        if (StrUtil.endWithIgnoreCase(url, "/audio/transcriptions")) {
+            return url;
+        }
+        if (StrUtil.endWithIgnoreCase(url, "/v1")) {
+            return url + "/audio/transcriptions";
+        }
+        return StrUtil.removeSuffix(url, "/") + "/v1/audio/transcriptions";
+    }
+
     private record LlmEvaluation(int score, String comment, String nextQuestion) {
     }
 
@@ -1501,6 +1602,12 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setRecordingPath(StrUtil.blankToDefault(entity.getMergedRecordingPath(), entity.getRecordingPath()));
         vo.setRecordingFileName(StrUtil.blankToDefault(entity.getMergedRecordingFileName(), entity.getRecordingFileName()));
         vo.setSessionStatus(entity.getSessionStatus());
+        vo.setRecordingEndRequestedAt(entity.getRecordingEndRequestedAt());
+        vo.setAudioPath(entity.getAudioPath());
+        vo.setAudioFileName(entity.getAudioFileName());
+        vo.setTranscriptText(entity.getTranscriptText());
+        vo.setSummaryText(entity.getSummaryText());
+        vo.setSummaryStatus(entity.getSummaryStatus());
         return vo;
     }
 
@@ -1515,9 +1622,15 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setVideoJoinLink(session.getVideoJoinLink());
         vo.setIntervieweeJoinTime(session.getIntervieweeJoinTime());
         vo.setHrJoinTime(session.getHrJoinTime());
+        vo.setRecordingEndRequestedAt(session.getRecordingEndRequestedAt());
         vo.setRecordingPath(StrUtil.blankToDefault(session.getMergedRecordingPath(), session.getRecordingPath()));
         vo.setRecordingFileName(StrUtil.blankToDefault(session.getMergedRecordingFileName(), session.getRecordingFileName()));
         vo.setSessionStatus(session.getSessionStatus());
+        vo.setAudioPath(session.getAudioPath());
+        vo.setAudioFileName(session.getAudioFileName());
+        vo.setTranscriptText(session.getTranscriptText());
+        vo.setSummaryText(session.getSummaryText());
+        vo.setSummaryStatus(session.getSummaryStatus());
     }
 
     private VideoSignalVO toVideoSignalVO(InterviewVideoSession entity) {
@@ -1533,6 +1646,10 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setRecordingPath(StrUtil.blankToDefault(entity.getMergedRecordingPath(), entity.getRecordingPath()));
         vo.setRecordingFileName(StrUtil.blankToDefault(entity.getMergedRecordingFileName(), entity.getRecordingFileName()));
         vo.setSessionStatus(entity.getSessionStatus());
+        vo.setRecordingEndRequestedAt(entity.getRecordingEndRequestedAt());
+        vo.setTranscriptText(entity.getTranscriptText());
+        vo.setSummaryText(entity.getSummaryText());
+        vo.setSummaryStatus(entity.getSummaryStatus());
         return vo;
     }
 

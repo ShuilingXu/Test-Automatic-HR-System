@@ -23,6 +23,7 @@
             <p>AI最少轮数：{{ processSummary.aiMinQuestionRounds || '-' }}</p>
             <p>AI最多轮数：{{ processSummary.aiMaxQuestionRounds || '-' }}</p>
             <p>反作弊：{{ antiCheat.fullscreen ? '全屏中' : '未全屏' }} / 切屏 {{ antiCheat.switchCount }} / {{ processSummary.antiCheatSwitchLimit || 5 }} 次</p>
+            <p v-if="processSummary.currentStage === 'AI'">AI强制录像：{{ aiExamRecordingStatusText }}</p>
             <p v-if="refreshState.retryCount > 0">自动重试：第 {{ refreshState.retryCount }} 次，{{ refreshState.lastError }}</p>
           </div>
           <div class="video-grid">
@@ -43,6 +44,13 @@
             <strong>{{ aiSubmitState.message }}</strong>
             <p>请勿重复点击或刷新页面，AI 正在评分并生成后续安排。</p>
           </div>
+          <div v-if="processSummary?.currentStage === 'AI'" class="ai-recording-card" :class="{ active: aiExamRecording.active }">
+            <div>
+              <strong>{{ aiExamRecordingStatusText }}</strong>
+              <p>AI答题期间必须开启摄像头和麦克风录像，未开始录像不能作答或提交。</p>
+            </div>
+            <video ref="aiExamVideo" autoplay muted playsinline></video>
+          </div>
           <div v-if="currentQuestion" class="question-card highlighted-question">
             <strong>当前问题 {{ currentQuestion.sequenceNo }}</strong>
             <p>{{ currentQuestion.questionContent }}</p>
@@ -57,8 +65,8 @@
             <p>你的回答：{{ item.answerContent || '待回答' }}</p>
             <p v-if="item.interviewerComment">面试官反馈：{{ item.interviewerComment }}</p>
           </div>
-          <el-input v-model="aiAnswer.answerContent" type="textarea" :rows="4" placeholder="回答当前 AI 问题" :disabled="aiSubmitState.submitting || !currentQuestion" />
-          <div class="link-row"><el-button type="primary" :loading="aiSubmitState.submitting" :disabled="aiSubmitState.submitting || !currentQuestion" @click="submitAiAnswer">{{ aiSubmitState.submitting ? 'AI处理中' : '提交 AI 回答' }}</el-button></div>
+          <el-input v-model="aiAnswer.answerContent" type="textarea" :rows="4" placeholder="回答当前 AI 问题" :disabled="aiSubmitState.submitting || !currentQuestion || aiAnswerDisabled" @copy.prevent @cut.prevent @paste.prevent @drop.prevent />
+          <div class="link-row"><el-button type="primary" :loading="aiSubmitState.submitting" :disabled="aiSubmitState.submitting || !currentQuestion || aiAnswerDisabled" @click="submitAiAnswer">{{ aiSubmitState.submitting ? 'AI处理中' : '提交 AI 回答' }}</el-button></div>
         </div>
       </div>
     </section>
@@ -84,9 +92,12 @@ const aiSubmitState = reactive({ submitting: false, message: '' })
 const aiPendingRefresh = reactive({ active: false, attempts: 0, questionId: null })
 const runtimeConfig = reactive({ disableDevtoolsShortcuts: true })
 const antiCheat = reactive({ fullscreen: false, switchCount: 0, hasEnteredFullscreen: false, aiEndNotified: false })
+const aiExamRecording = reactive({ active: false, starting: false, uploading: false, uploaded: false, error: '' })
 const localVideo = ref(null)
 const remoteVideo = ref(null)
+const aiExamVideo = ref(null)
 let localStream = null
+let aiExamStream = null
 let peer = null
 let pollTimer = null
 let aiRefreshTimer = null
@@ -96,6 +107,11 @@ let addedHrIce = new Set()
 let remoteStream = null
 let pendingHrIce = []
 let recordingStopInProgress = false
+let handledRecordingEndSignal = ''
+let recordingEndTimer = null
+let aiExamRecorder = null
+let aiExamRecordedChunks = []
+let aiExamRecordingStopInProgress = false
 
 const aiStatusText = computed(() => {
   if (aiSubmitState.submitting) return aiSubmitState.message || 'AI正在处理你的回答'
@@ -114,6 +130,17 @@ const aiStatusHint = computed(() => {
   if (processSummary.value?.stageStatus === 'WAITING_APPROVAL') return '请保持关注流程状态，HR审批后会进入下一阶段'
   if (!currentQuestion.value && processSummary.value?.currentStage === 'AI') return '系统会自动刷新题目，请不要重复提交'
   return '提交后按钮会锁定，避免重复提交'
+})
+
+const aiAnswerDisabled = computed(() => isAiExamInProgress() && !aiExamRecording.active)
+
+const aiExamRecordingStatusText = computed(() => {
+  if (aiExamRecording.uploading) return '录像上传中'
+  if (aiExamRecording.active) return '摄像头和麦克风录像中'
+  if (aiExamRecording.starting) return '正在请求摄像头和麦克风权限'
+  if (aiExamRecording.uploaded) return '录像已上传'
+  if (aiExamRecording.error) return aiExamRecording.error
+  return '未开始录像'
 })
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
@@ -196,8 +223,8 @@ async function submitAiAnswer() {
       ElMessage.warning('请先填写回答内容')
       return
     }
-    if (!antiCheat.fullscreen) {
-      ElMessage.warning('请先进入全屏答题模式')
+    if (!aiExamRecording.active || !antiCheat.fullscreen) {
+      ElMessage.warning('请先开启摄像头/麦克风录像并进入全屏答题模式')
       await enterAiExamMode()
       return
     }
@@ -271,6 +298,9 @@ function isPendingAiResolved() {
 }
 
 async function enterAiExamMode() {
+  if (isAiExamInProgress()) {
+    await ensureAiExamRecordingStarted()
+  }
   if (document.fullscreenElement !== document.documentElement) {
     try {
       await document.documentElement.requestFullscreen()
@@ -282,6 +312,83 @@ async function enterAiExamMode() {
   } else {
     antiCheat.hasEnteredFullscreen = true
   }
+}
+
+async function ensureAiExamRecordingStarted() {
+  if (aiExamRecording.active || aiExamRecording.starting) return
+  if (!window.MediaRecorder) {
+    aiExamRecording.error = '当前浏览器不支持录像，请使用最新版 Chrome/Edge'
+    await reportAntiCheat('AI_RECORDING_UNSUPPORTED', aiExamRecording.error)
+    throw new Error(aiExamRecording.error)
+  }
+  aiExamRecording.starting = true
+  aiExamRecording.error = ''
+  try {
+    aiExamStream = await requestCameraAndMicrophone()
+    if (aiExamVideo.value) {
+      aiExamVideo.value.srcObject = aiExamStream
+      playVideo(aiExamVideo.value)
+    }
+    aiExamRecorder = createMediaRecorder(aiExamStream)
+    aiExamRecordedChunks = []
+    aiExamRecorder.ondataavailable = (event) => { if (event.data.size > 0) aiExamRecordedChunks.push(event.data) }
+    aiExamRecorder.onstop = () => { aiExamRecording.active = false }
+    aiExamRecorder.start(1000)
+    aiExamRecording.active = true
+    aiExamRecording.uploaded = false
+    await reportAntiCheat('AI_RECORDING_STARTED', 'AI答题摄像头和麦克风录像已开始')
+    ElMessage.success('AI答题录像已开始')
+  } catch (error) {
+    aiExamRecording.error = buildMediaErrorMessage(error)
+    await reportAntiCheat('AI_RECORDING_DENIED', aiExamRecording.error)
+    ElMessage.error(aiExamRecording.error)
+    throw error
+  } finally {
+    aiExamRecording.starting = false
+  }
+}
+
+function createMediaRecorder(stream) {
+  const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type))
+  return mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+}
+
+async function stopAndUploadAiExamRecording() {
+  if (aiExamRecordingStopInProgress) return
+  if ((!aiExamRecorder || aiExamRecorder.state === 'inactive') && aiExamRecordedChunks.length === 0) return
+  aiExamRecordingStopInProgress = true
+  aiExamRecording.uploading = true
+  try {
+    if (aiExamRecorder && aiExamRecorder.state !== 'inactive') {
+      const currentRecorder = aiExamRecorder
+      await new Promise((resolve) => {
+        const previousStop = currentRecorder.onstop
+        currentRecorder.onstop = (event) => { previousStop?.(event); resolve() }
+        currentRecorder.stop()
+      })
+      aiExamRecorder = null
+    }
+    const blob = new Blob(aiExamRecordedChunks, { type: 'video/webm' })
+    if (blob.size > 0) {
+      const file = new File([blob], `ai-exam-${sessionForm.processId}.webm`, { type: 'video/webm' })
+      await interviewApi.uploadAiExamRecording(sessionForm.processId, file)
+      aiExamRecordedChunks = []
+      aiExamRecording.uploaded = true
+      await reportAntiCheat('AI_RECORDING_UPLOADED', 'AI答题录像已上传')
+      ElMessage.success('AI答题录像已上传')
+    }
+  } finally {
+    aiExamRecording.uploading = false
+    aiExamRecordingStopInProgress = false
+    stopAiExamStream()
+  }
+}
+
+function stopAiExamStream() {
+  aiExamStream?.getTracks().forEach((track) => track.stop())
+  aiExamStream = null
+  aiExamRecording.active = false
+  if (aiExamVideo.value) aiExamVideo.value.srcObject = null
 }
 
 async function reportAntiCheat(eventType, detail) {
@@ -331,10 +438,11 @@ function handleRestrictedShortcut(event) {
     || (event.ctrlKey && event.shiftKey && ['i', 'j', 'c'].includes(key))
     || (event.metaKey && event.altKey && ['i', 'j', 'c'].includes(key))
     || (event.ctrlKey && key === 'u')
+    || (isAiExamInProgress() && (event.ctrlKey || event.metaKey) && ['c', 'v', 'x'].includes(key))
   if (!blocked) return
   event.preventDefault()
   event.stopPropagation()
-  ElMessage.warning('面试期间已禁用开发者工具快捷键')
+  ElMessage.warning(isAiExamInProgress() && ['c', 'v', 'x'].includes(key) ? 'AI答题期间禁止复制、剪切和粘贴' : '面试期间已禁用开发者工具快捷键')
 }
 
 function handleContextMenu(event) {
@@ -351,8 +459,21 @@ function notifyAiFinishedIfNeeded() {
     antiCheat.aiEndNotified = true
     currentQuestion.value = null
     clearAiRefresh()
+    stopAndUploadAiExamRecording().catch(fail)
     ElMessageBox.alert(processSummary.value.processStatusView || 'AI面试已结束，请等待HR人工审批。', '面试结束', { confirmButtonText: '知道了' })
   }
+}
+
+function isAiExamInProgress() {
+  return processSummary.value?.currentStage === 'AI' && processSummary.value?.stageStatus === 'IN_PROGRESS' && processSummary.value?.overallStatus === 'IN_PROGRESS'
+}
+
+function handleClipboardBlocked(event) {
+  if (!isAiExamInProgress()) return
+  event.preventDefault()
+  event.stopPropagation()
+  reportAntiCheat('CLIPBOARD_BLOCKED', `AI答题期间阻止${event.type}操作`)
+  ElMessage.warning('AI答题期间禁止复制、剪切、粘贴和拖拽')
 }
 async function joinVideo() {
   try {
@@ -398,15 +519,11 @@ async function joinVideo() {
       if (state.sessionStatus === 'RECORDING') {
         startRecordingIfNeeded()
       }
-      if (state.sessionStatus === 'END_REQUESTED') {
+      if (shouldHandleRecordingEnd(state)) {
+        handledRecordingEndSignal = recordingEndSignalKey(state)
         clearInterval(pollTimer)
         pollTimer = null
-        try {
-          await stopAndUploadRecording()
-          disconnectVideo()
-        } catch (error) {
-          fail(error)
-        }
+        scheduleRecordingStop(state.recordingEndRequestedAt)
       }
     }, 1000)
     ElMessage.success('已加入视频面，等待HR就绪后同步开始录制')
@@ -416,10 +533,32 @@ async function stopRecording() {
   try {
     clearInterval(pollTimer)
     pollTimer = null
-    await interviewApi.completeIntervieweeVideo(sessionForm.processId)
-    await stopAndUploadRecording()
-    disconnectVideo()
+    const response = await interviewApi.completeIntervieweeVideo(sessionForm.processId)
+    handledRecordingEndSignal = recordingEndSignalKey(response.data || {})
+    scheduleRecordingStop(response.data?.recordingEndRequestedAt)
   } catch (error) { fail(error) }
+}
+
+function recordingEndSignalKey(state) {
+  return state.recordingEndRequestedAt || (state.sessionStatus === 'END_REQUESTED' ? 'END_REQUESTED' : '')
+}
+
+function shouldHandleRecordingEnd(state) {
+  const signal = recordingEndSignalKey(state)
+  return signal && signal !== handledRecordingEndSignal
+}
+
+function scheduleRecordingStop(endAt) {
+  clearTimeout(recordingEndTimer)
+  const delay = Math.max(new Date(endAt || Date.now()).getTime() - Date.now(), 0)
+  recordingEndTimer = setTimeout(async () => {
+    try {
+      await stopAndUploadRecording()
+      disconnectVideo()
+    } catch (error) {
+      fail(error)
+    }
+  }, delay)
 }
 
 function startRecordingIfNeeded() {
@@ -455,13 +594,16 @@ async function stopAndUploadRecording() {
 
 function disconnectVideo() {
   clearInterval(pollTimer)
+  clearTimeout(recordingEndTimer)
   pollTimer = null
+  recordingEndTimer = null
   peer?.getSenders?.().forEach((sender) => sender.track?.stop())
   peer?.close()
   peer = null
   recorder = null
   recordedChunks = []
   recordingStopInProgress = false
+  handledRecordingEndSignal = ''
   localStream?.getTracks().forEach((track) => track.stop())
   localStream = null
   remoteStream = null
@@ -515,6 +657,11 @@ onBeforeUnmount(() => {
   document.removeEventListener('fullscreenchange', handleFullscreenChange)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   window.removeEventListener('blur', handleWindowBlur)
+  document.removeEventListener('copy', handleClipboardBlocked, true)
+  document.removeEventListener('cut', handleClipboardBlocked, true)
+  document.removeEventListener('paste', handleClipboardBlocked, true)
+  document.removeEventListener('drop', handleClipboardBlocked, true)
+  stopAndUploadAiExamRecording().catch(() => {})
   disconnectVideo()
 })
 
@@ -525,6 +672,10 @@ onMounted(async () => {
   document.addEventListener('fullscreenchange', handleFullscreenChange)
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('blur', handleWindowBlur)
+  document.addEventListener('copy', handleClipboardBlocked, true)
+  document.addEventListener('cut', handleClipboardBlocked, true)
+  document.addEventListener('paste', handleClipboardBlocked, true)
+  document.addEventListener('drop', handleClipboardBlocked, true)
   if (!sessionForm.processId) {
     ElMessage.warning('请从面试者首页选择报名记录进入面试')
     router.push('/user')
@@ -533,7 +684,7 @@ onMounted(async () => {
   await loadProcessRecords()
   syncAiAutoRefresh()
   if (processSummary.value?.currentStage === 'AI' && processSummary.value?.overallStatus === 'IN_PROGRESS') {
-    ElMessage.info('AI面试需要全屏答题，切屏操作会被记录')
+    ElMessage.info('AI面试需要全屏答题并开启摄像头/麦克风录像，切屏和复制粘贴会被记录')
   }
 })
 </script>
@@ -547,6 +698,10 @@ onMounted(async () => {
 .ai-status-card.busy { background: rgba(15, 108, 143, 0.1); border-color: rgba(15, 108, 143, 0.22); }
 .status-dot { width: 10px; height: 10px; border-radius: 999px; background: #0f6c8f; box-shadow: 0 0 0 6px rgba(15, 108, 143, 0.12); }
 .ai-status-card.busy .status-dot { animation: pulse 1.2s ease-in-out infinite; }
+.ai-recording-card { display: grid; grid-template-columns: 1fr 160px; gap: 14px; align-items: center; margin-bottom: 14px; padding: 14px; border-radius: 16px; background: rgba(143, 15, 15, 0.08); border: 1px solid rgba(143, 15, 15, 0.18); }
+.ai-recording-card.active { background: rgba(28, 120, 74, 0.1); border-color: rgba(28, 120, 74, 0.25); }
+.ai-recording-card p { margin: 6px 0 0; color: #6d7a83; line-height: 1.6; }
+.ai-recording-card video { width: 160px; height: 100px; object-fit: cover; background: #111; border-radius: 12px; }
 .ai-submit-overlay { position: absolute; inset: 0; z-index: 5; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; background: rgba(248, 245, 239, 0.88); backdrop-filter: blur(8px); }
 .ai-submit-overlay p { max-width: 360px; margin: 0; color: #6d7a83; line-height: 1.7; }
 .ai-orbit { position: relative; width: 64px; height: 64px; border-radius: 999px; border: 2px solid rgba(15, 108, 143, 0.18); animation: spin 1.4s linear infinite; }

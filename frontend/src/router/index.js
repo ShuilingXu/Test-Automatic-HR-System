@@ -35,6 +35,7 @@ const routes = [
   { path: '/interview/hr/weights/:id', name: 'interview-weight-detail', component: InterviewAdminView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'], interviewTab: 'weights' } },
   { path: '/interview/hr/llm-configs', name: 'interview-llm-configs', component: InterviewAdminView, meta: { requiresAuth: true, roles: ['IT_ADMIN'], interviewTab: 'llm' } },
   { path: '/interview/hr/llm-configs/:id', name: 'interview-llm-config-detail', component: InterviewAdminView, meta: { requiresAuth: true, roles: ['IT_ADMIN'], interviewTab: 'llm' } },
+  { path: '/interview/hr/system', name: 'interview-system', component: InterviewAdminView, meta: { requiresAuth: true, roles: ['IT_ADMIN'], interviewTab: 'system' } },
   { path: '/interview/hr/processes', name: 'interview-processes', component: InterviewAdminView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'], interviewTab: 'process' } },
   { path: '/interview/hr/processes/:id', name: 'interview-process-detail', component: InterviewAdminView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'], interviewTab: 'process' } },
   { path: '/user', redirect: '/user/applications' },

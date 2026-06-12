@@ -11,7 +11,9 @@ import com.autohr.modules.auth.dto.UserAdminUpdateRequest;
 import com.autohr.modules.auth.entity.SysUser;
 import com.autohr.modules.auth.mapper.SysUserMapper;
 import com.autohr.modules.auth.service.AuthService;
+import com.autohr.modules.auth.service.CaptchaService;
 import com.autohr.modules.auth.service.JwtService;
+import com.autohr.modules.auth.service.VerificationCodeService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
@@ -31,9 +33,12 @@ public class AuthServiceImpl implements AuthService {
     private final SysUserMapper sysUserMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final VerificationCodeService verificationCodeService;
+    private final CaptchaService captchaService;
 
     @Override
     public LoginResponse login(LoginRequest request) {
+        captchaService.verifyCaptcha(request.getCaptchaId(), request.getCaptchaCode());
         SysUser user = findUserByUsername(request.getUsername());
         if (user == null) {
             throw new BusinessException("用户名或密码错误");
@@ -53,6 +58,13 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public SessionUserVO registerCandidate(CandidateRegisterRequest request) {
+        captchaService.verifyCaptcha(request.getCaptchaId(), request.getCaptchaCode());
+        boolean hasPhone = StrUtil.isNotBlank(request.getMobilePhone());
+        boolean hasEmail = StrUtil.isNotBlank(request.getEmail());
+        if (hasPhone == hasEmail) {
+            throw new BusinessException("手机号和邮箱必须择一提供");
+        }
+        verificationCodeService.verifyRegisterCode(request.getMobilePhone(), request.getEmail(), request.getVerificationCode());
         ensureUniqueUsername(request.getUsername());
         SysUser user = new SysUser();
         user.setId(nextId(sysUserMapper.selectList(null).stream().map(SysUser::getId).toList()));

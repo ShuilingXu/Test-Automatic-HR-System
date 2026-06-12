@@ -113,6 +113,7 @@ onMounted(async () => {
 .job-list { display: grid; gap: 12px; }
 .job-list strong, .job-list span, .job-list small { display: block; }
 .job-list span { margin: 6px 0; color: #61727d; }
+.job-list button { border-color: rgba(16, 37, 50, 0.08); background: rgba(255, 255, 255, 0.82); }
 .upload-tip { color: #6d7a83; margin-top: 8px; }
-.result-box { margin-top: 20px; padding: 16px; border-radius: 18px; background: #102532; color: #f4efe7; }
+.result-box { margin-top: 20px; padding: 16px; border-radius: 18px; background: linear-gradient(160deg, #102532 0%, #17394d 100%); color: #f4efe7; box-shadow: 0 16px 34px rgba(16, 37, 50, 0.16); }
 </style>

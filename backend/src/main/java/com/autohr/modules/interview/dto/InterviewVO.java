@@ -80,9 +80,15 @@ public class InterviewVO {
     private String videoJoinLink;
     private LocalDateTime intervieweeJoinTime;
     private LocalDateTime hrJoinTime;
+    private LocalDateTime recordingEndRequestedAt;
     private String recordingPath;
     private String recordingFileName;
     private String sessionStatus;
+    private String audioPath;
+    private String audioFileName;
+    private String transcriptText;
+    private String summaryText;
+    private String summaryStatus;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

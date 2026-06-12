@@ -72,8 +72,10 @@ export const recruitmentApi = {
 }
 
 export const authApi = {
+  getCaptcha() { return request.get('/auth/captcha') },
   login(payload) { return request.post('/auth/login', payload) },
   register(payload) { return request.post('/auth/register', payload) },
+  sendRegisterCode(payload) { return request.post('/auth/register/code', payload) },
   getSession() { return request.get('/auth/me') },
   updateProfile(payload) { return request.post('/auth/profile', payload) },
   listUsers(params) { return request.get('/auth/admin/users', { params }) },
@@ -85,6 +87,11 @@ export const authApi = {
       window.localStorage.removeItem('session-user')
     })
   },
+}
+
+export const systemApi = {
+  getConfig() { return request.get('/system/config') },
+  saveConfig(payload) { return request.post('/system/config', payload) },
 }
 
 export const interviewApi = {
@@ -129,6 +136,15 @@ export const interviewApi = {
     formData.append('originalFileName', file.name)
     formData.append('contentType', file.type || 'video/webm')
     return request.post(`/interview/interviewee/video-recording/${processId}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  uploadAiExamRecording(processId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('originalFileName', file.name)
+    formData.append('contentType', file.type || 'video/webm')
+    return request.post(`/interview/interviewee/ai-recording/${processId}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },

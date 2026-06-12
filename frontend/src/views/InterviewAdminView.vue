@@ -13,6 +13,7 @@
         <RouterLink class="link-chip" :class="{ active: activeTab === 'kb' }" to="/interview/hr/knowledge-bases">知识库</RouterLink>
         <RouterLink class="link-chip" :class="{ active: activeTab === 'weights' }" to="/interview/hr/weights">岗位权重</RouterLink>
         <RouterLink v-if="isItAdmin" class="link-chip" :class="{ active: activeTab === 'llm' }" to="/interview/hr/llm-configs">LLM配置</RouterLink>
+        <RouterLink v-if="isItAdmin" class="link-chip" :class="{ active: activeTab === 'system' }" to="/interview/hr/system">系统配置</RouterLink>
         <RouterLink class="link-chip" :class="{ active: activeTab === 'process' }" to="/interview/hr/processes">面试流程</RouterLink>
       </div>
 
@@ -76,6 +77,35 @@
         </el-table>
       </section>
 
+      <section v-if="activeTab === 'system'" class="surface">
+        <h3>系统配置</h3>
+        <p class="serial-line">配置写入服务器 .env 文件，敏感字段显示为掩码，保存时留空则不覆盖。</p>
+        <div class="llm-config-grid">
+          <div class="surface inner-surface">
+            <h3>阿里云短信</h3>
+            <el-form label-position="top" class="form-grid">
+              <el-form-item label="AccessKey ID"><el-input v-model="systemConfig.ALIYUN_ACCESS_KEY_ID" /></el-form-item>
+              <el-form-item label="AccessKey Secret"><el-input v-model="systemConfig.ALIYUN_ACCESS_KEY_SECRET" type="password" show-password placeholder="留空则不覆盖" /></el-form-item>
+              <el-form-item label="短信签名"><el-input v-model="systemConfig.ALIYUN_SMS_SIGN_NAME" /></el-form-item>
+              <el-form-item label="短信模板Code"><el-input v-model="systemConfig.ALIYUN_SMS_TEMPLATE_CODE" /></el-form-item>
+            </el-form>
+          </div>
+          <div class="surface inner-surface">
+            <h3>注册邮箱 SMTP</h3>
+            <el-form label-position="top" class="form-grid">
+              <el-form-item label="SMTP服务器"><el-input v-model="systemConfig.SMTP_HOST" placeholder="smtp.example.com" /></el-form-item>
+              <el-form-item label="SMTP端口"><el-input v-model="systemConfig.SMTP_PORT" placeholder="587" /></el-form-item>
+              <el-form-item label="用户名"><el-input v-model="systemConfig.SMTP_USERNAME" /></el-form-item>
+              <el-form-item label="密码"><el-input v-model="systemConfig.SMTP_PASSWORD" type="password" show-password placeholder="留空则不覆盖" /></el-form-item>
+              <el-form-item label="发件人"><el-input v-model="systemConfig.SMTP_FROM" placeholder="默认使用用户名" /></el-form-item>
+              <el-form-item label="SSL启用"><el-input v-model="systemConfig.SMTP_SSL_ENABLED" placeholder="true / false" /></el-form-item>
+              <el-form-item label="STARTTLS启用"><el-input v-model="systemConfig.SMTP_STARTTLS_ENABLED" placeholder="true / false" /></el-form-item>
+            </el-form>
+          </div>
+        </div>
+        <div class="action-row"><el-button type="primary" :loading="savingSystemConfig" @click="saveSystemConfig">保存系统配置</el-button></div>
+      </section>
+
       <section v-if="activeTab === 'llm'" class="surface">
         <h3>LLM 模型连接配置</h3>
         <div class="llm-config-grid">
@@ -111,6 +141,27 @@
               <el-form-item label="用户填写提示词" class="wide"><el-input v-model="resumeReviewLlmForm.scoringRulePrompt" type="textarea" :rows="4" placeholder="例如：重点考察岗位硬技能、项目经历、稳定性和薪资匹配度" /></el-form-item>
             </el-form>
             <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(resumeReviewLlmForm, 'RESUME_REVIEW')">保存简历初筛模型</el-button><span class="serial-line">API Key：{{ resumeReviewKeyLabel }}</span></div>
+          </div>
+          <div class="surface inner-surface">
+            <h3>视频语音转文字模型</h3>
+            <el-form :model="videoTranscriberLlmForm" label-position="top" class="form-grid">
+              <el-form-item label="配置名称"><el-input v-model="videoTranscriberLlmForm.configName" /></el-form-item>
+              <el-form-item label="OpenAI接口地址"><el-input v-model="videoTranscriberLlmForm.baseUrl" placeholder="如 https://api.openai.com/v1" /></el-form-item>
+              <el-form-item label="API Key"><el-input v-model="videoTranscriberLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
+              <el-form-item label="模型名称"><el-input v-model="videoTranscriberLlmForm.modelName" placeholder="如 whisper-1" /></el-form-item>
+            </el-form>
+            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(videoTranscriberLlmForm, 'VIDEO_TRANSCRIBER')">保存语音转文字模型</el-button><span class="serial-line">API Key：{{ videoTranscriberKeyLabel }}</span></div>
+          </div>
+          <div class="surface inner-surface">
+            <h3>视频会议概要 LLM</h3>
+            <el-form :model="videoSummaryLlmForm" label-position="top" class="form-grid">
+              <el-form-item label="配置名称"><el-input v-model="videoSummaryLlmForm.configName" /></el-form-item>
+              <el-form-item label="OpenAI接口地址"><el-input v-model="videoSummaryLlmForm.baseUrl" /></el-form-item>
+              <el-form-item label="API Key"><el-input v-model="videoSummaryLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
+              <el-form-item label="模型名称"><el-input v-model="videoSummaryLlmForm.modelName" /></el-form-item>
+              <el-form-item label="概要提示词" class="wide"><el-input v-model="videoSummaryLlmForm.scoringRulePrompt" type="textarea" :rows="4" placeholder="例如：总结候选人表现、沟通能力、风险点和录用建议" /></el-form-item>
+            </el-form>
+            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(videoSummaryLlmForm, 'VIDEO_SUMMARY')">保存会议概要模型</el-button><span class="serial-line">API Key：{{ videoSummaryKeyLabel }}</span></div>
           </div>
         </div>
         <el-table :data="llmConfigs" stripe class="data-table" @row-click="openLlmConfig">
@@ -202,6 +253,11 @@
               <div class="video-box"><span>HR本地视频</span><video ref="hrLocalVideo" autoplay muted playsinline></video></div>
               <div class="video-box"><span>面试者远端视频</span><video ref="hrRemoteVideo" autoplay playsinline></video></div>
             </div>
+            <div class="video-summary-box">
+              <span>音频转写/会议概要状态：{{ selectedProcess.summaryStatus || '未生成' }}</span>
+              <p><strong>会议概要</strong>{{ selectedProcess.summaryText || '暂无概要，双侧录制完成后自动生成。' }}</p>
+              <p><strong>转写文本</strong>{{ selectedProcess.transcriptText || '暂无转写文本' }}</p>
+            </div>
           </section>
           <section class="workbench-panel ai-question-panel">
             <h3>AI问答题号</h3>
@@ -253,7 +309,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { authApi, interviewApi, recruitmentApi } from '../services/api'
+import { authApi, interviewApi, recruitmentApi, systemApi } from '../services/api'
 import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, isRelayIceCandidate, playVideo, requestCameraAndMicrophone } from '../utils/media'
 
 const sessionUser = ref(JSON.parse(localStorage.getItem('session-user') || 'null'))
@@ -275,6 +331,7 @@ const selectedCandidate = ref(null)
 const videoActive = ref(false)
 const processRemark = ref('')
 const savingRemark = ref(false)
+const savingSystemConfig = ref(false)
 
 const hrLocalVideo = ref(null)
 const hrRemoteVideo = ref(null)
@@ -287,6 +344,8 @@ let addedIntervieweeIce = new Set()
 let hrRemoteStream = null
 let pendingIntervieweeIce = []
 let hrRecordingStopInProgress = false
+let handledHrRecordingEndSignal = ''
+let hrRecordingEndTimer = null
 
 const kbForm = reactive({ id: null, knowledgeBaseName: '', techCategory: '', jobCategory: '', status: 1 })
 const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '', knowledgeContent: '', status: 1 })
@@ -294,12 +353,29 @@ const weightForm = reactive({ id: null, jobId: null, knowledgeBaseId: null, weig
 const interviewerLlmForm = reactive(createLlmForm('INTERVIEWER'))
 const scorerLlmForm = reactive(createLlmForm('SCORER'))
 const resumeReviewLlmForm = reactive(createLlmForm('RESUME_REVIEW'))
+const videoTranscriberLlmForm = reactive(createLlmForm('VIDEO_TRANSCRIBER'))
+const videoSummaryLlmForm = reactive(createLlmForm('VIDEO_SUMMARY'))
 const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 70, aiMinQuestionRounds: 1, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })
 const processSearch = reactive({ keyword: '' })
+const systemConfig = reactive({
+  ALIYUN_ACCESS_KEY_ID: '',
+  ALIYUN_ACCESS_KEY_SECRET: '',
+  ALIYUN_SMS_SIGN_NAME: '',
+  ALIYUN_SMS_TEMPLATE_CODE: '',
+  SMTP_HOST: '',
+  SMTP_PORT: '',
+  SMTP_USERNAME: '',
+  SMTP_PASSWORD: '',
+  SMTP_FROM: '',
+  SMTP_SSL_ENABLED: '',
+  SMTP_STARTTLS_ENABLED: '',
+})
 
 const interviewerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')?.apiKeyMasked || '未配置')
 const scorerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'SCORER')?.apiKeyMasked || '未配置')
 const resumeReviewKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'RESUME_REVIEW')?.apiKeyMasked || '未配置，默认回退评分模型')
+const videoTranscriberKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'VIDEO_TRANSCRIBER')?.apiKeyMasked || '未配置')
+const videoSummaryKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'VIDEO_SUMMARY')?.apiKeyMasked || '未配置')
 
 const canTerminate = computed(() => selectedProcess.value?.overallStatus === 'IN_PROGRESS')
 const canApproveAi = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'AI')
@@ -324,6 +400,7 @@ async function loadAll() {
     knowledgeBases.value = (await interviewApi.listKnowledgeBases()).data
     if (isItAdmin.value) {
       llmConfigs.value = (await interviewApi.listLlmConfigs()).data
+      Object.assign(systemConfig, (await systemApi.getConfig()).data)
       syncLlmForms()
     } else {
       llmConfigs.value = []
@@ -359,16 +436,21 @@ async function saveWeight() { try { await interviewApi.saveJobKnowledgeWeight({ 
 async function deleteWeight(id) { try { await interviewApi.deleteJobKnowledgeWeight(id); ElMessage.success('权重已删除'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
 async function saveRoleLlmConfig(form, role) { try { await interviewApi.saveLlmConfig({ ...form, modelRole: role }); ElMessage.success('LLM配置已保存'); form.apiKey = ''; await loadAll() } catch (error) { fail(error) } }
 async function deleteLlmConfig(id) { try { await interviewApi.deleteLlmConfig(id); ElMessage.success('LLM配置已删除'); await loadAll() } catch (error) { fail(error) } }
+async function saveSystemConfig() { savingSystemConfig.value = true; try { await systemApi.saveConfig({ ...systemConfig }); ElMessage.success('系统配置已保存'); Object.assign(systemConfig, (await systemApi.getConfig()).data) } catch (error) { fail(error) } finally { savingSystemConfig.value = false } }
 function editLlmConfig(row) { Object.assign(llmFormByRole(row.modelRole), { ...row, apiKey: '' }) }
-function createLlmForm(role) { return { id: null, configName: role === 'SCORER' ? '评分模型' : role === 'RESUME_REVIEW' ? '简历初筛模型' : '面试官模型', modelRole: role, baseUrl: '', apiKey: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 } }
-function llmFormByRole(role) { return role === 'SCORER' ? scorerLlmForm : role === 'RESUME_REVIEW' ? resumeReviewLlmForm : interviewerLlmForm }
+function createLlmForm(role) { return { id: null, configName: role === 'SCORER' ? '评分模型' : role === 'RESUME_REVIEW' ? '简历初筛模型' : role === 'VIDEO_TRANSCRIBER' ? '视频语音转文字模型' : role === 'VIDEO_SUMMARY' ? '视频会议概要模型' : '面试官模型', modelRole: role, baseUrl: '', apiKey: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 } }
+function llmFormByRole(role) { return role === 'SCORER' ? scorerLlmForm : role === 'RESUME_REVIEW' ? resumeReviewLlmForm : role === 'VIDEO_TRANSCRIBER' ? videoTranscriberLlmForm : role === 'VIDEO_SUMMARY' ? videoSummaryLlmForm : interviewerLlmForm }
 function syncLlmForms() {
   const interviewer = llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')
   const scorer = llmConfigs.value.find((item) => item.modelRole === 'SCORER')
   const resumeReview = llmConfigs.value.find((item) => item.modelRole === 'RESUME_REVIEW')
+  const videoTranscriber = llmConfigs.value.find((item) => item.modelRole === 'VIDEO_TRANSCRIBER')
+  const videoSummary = llmConfigs.value.find((item) => item.modelRole === 'VIDEO_SUMMARY')
   Object.assign(interviewerLlmForm, interviewer ? { ...interviewer, apiKey: '' } : createLlmForm('INTERVIEWER'))
   Object.assign(scorerLlmForm, scorer ? { ...scorer, apiKey: '' } : createLlmForm('SCORER'))
   Object.assign(resumeReviewLlmForm, resumeReview ? { ...resumeReview, apiKey: '' } : createLlmForm('RESUME_REVIEW'))
+  Object.assign(videoTranscriberLlmForm, videoTranscriber ? { ...videoTranscriber, apiKey: '' } : createLlmForm('VIDEO_TRANSCRIBER'))
+  Object.assign(videoSummaryLlmForm, videoSummary ? { ...videoSummary, apiKey: '' } : createLlmForm('VIDEO_SUMMARY'))
 }
 async function syncIntervieweeByCandidate(candidateId) { const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId); processForm.intervieweeUserId = candidate?.intervieweeUserId ? String(candidate.intervieweeUserId) : ''; processForm.jobId = candidate?.jobId || null }
 async function startProcess() { try { if (!processForm.recruitmentCandidateId) { ElMessage.warning('请先选择候选人投递记录'); return } if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到候选人账号'); return } if (!processForm.jobId) { ElMessage.warning('投递记录未绑定岗位'); return } if (processForm.aiMaxQuestionRounds < processForm.aiMinQuestionRounds) { ElMessage.warning('AI最多问答轮数不能小于最少问答轮数'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
@@ -455,16 +537,11 @@ async function startHrVideoCall() {
       if (state.sessionStatus === 'RECORDING') {
         startHrRecordingIfNeeded()
       }
-      if (state.sessionStatus === 'END_REQUESTED') {
+      if (shouldHandleHrRecordingEnd(state)) {
+        handledHrRecordingEndSignal = hrRecordingEndSignalKey(state)
         clearInterval(hrPollTimer)
         hrPollTimer = null
-        try {
-          await stopAndUploadHrRecording()
-          disconnectHrVideo()
-          await loadAll()
-        } catch (error) {
-          fail(error)
-        }
+        scheduleHrRecordingStop(state.recordingEndRequestedAt)
       }
     }, 1000)
     ElMessage.success('HR视频已就绪，等待面试者加入后同步开始录制')
@@ -475,11 +552,33 @@ async function stopHrRecording() {
   try {
     clearInterval(hrPollTimer)
     hrPollTimer = null
-    await interviewApi.completeVideo(selectedProcess.value.id)
-    await stopAndUploadHrRecording()
-    disconnectHrVideo()
-    await loadAll()
+    const response = await interviewApi.completeVideo(selectedProcess.value.id)
+    handledHrRecordingEndSignal = hrRecordingEndSignalKey(response.data || {})
+    scheduleHrRecordingStop(response.data?.recordingEndRequestedAt)
   } catch (error) { fail(error) }
+}
+
+function hrRecordingEndSignalKey(state) {
+  return state.recordingEndRequestedAt || (state.sessionStatus === 'END_REQUESTED' ? 'END_REQUESTED' : '')
+}
+
+function shouldHandleHrRecordingEnd(state) {
+  const signal = hrRecordingEndSignalKey(state)
+  return signal && signal !== handledHrRecordingEndSignal
+}
+
+function scheduleHrRecordingStop(endAt) {
+  clearTimeout(hrRecordingEndTimer)
+  const delay = Math.max(new Date(endAt || Date.now()).getTime() - Date.now(), 0)
+  hrRecordingEndTimer = setTimeout(async () => {
+    try {
+      await stopAndUploadHrRecording()
+      disconnectHrVideo()
+      await loadAll()
+    } catch (error) {
+      fail(error)
+    }
+  }, delay)
 }
 
 function startHrRecordingIfNeeded() {
@@ -518,13 +617,16 @@ async function stopAndUploadHrRecording() {
 
 function disconnectHrVideo() {
   clearInterval(hrPollTimer)
+  clearTimeout(hrRecordingEndTimer)
   hrPollTimer = null
+  hrRecordingEndTimer = null
   hrPeer?.getSenders?.().forEach((sender) => sender.track?.stop())
   hrPeer?.close()
   hrPeer = null
   hrRecorder = null
   hrRecordedChunks = []
   hrRecordingStopInProgress = false
+  handledHrRecordingEndSignal = ''
   hrLocalStream?.getTracks().forEach((track) => track.stop())
   hrLocalStream = null
   hrRemoteStream = null
@@ -603,7 +705,7 @@ onMounted(loadAll)
 .detail-headline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
 .detail-headline h3 { margin: 6px 0 0; }
 .process-workbench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto; gap: 16px; }
-.workbench-panel { min-width: 0; border-radius: 22px; padding: 16px; background: rgba(255,255,255,0.84); }
+.workbench-panel { min-width: 0; border: 1px solid rgba(16, 37, 50, 0.07); border-radius: 22px; padding: 16px; background: rgba(255,255,255,0.84); box-shadow: 0 10px 28px rgba(16, 37, 50, 0.05); }
 .workbench-panel h3 { margin: 0 0 12px; }
 .candidate-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .candidate-info-grid div, .resume-ai-box, .process-stats { border-radius: 14px; padding: 10px; background: #f8f5ef; }
@@ -624,7 +726,7 @@ onMounted(loadAll)
 .csv-import-box { grid-column: 1 / -1; }
 .serial-line { margin: 8px 0 14px; color: #42515b; }
 .video-link { margin-left: 12px; color: #0f6c8f; font-weight: 700; text-decoration: none; }
-.candidate-preview { margin: 10px 0 16px; padding: 16px; border-radius: 18px; background: rgba(255,255,255,0.82); }
+.candidate-preview { margin: 10px 0 16px; padding: 16px; border: 1px solid rgba(16, 37, 50, 0.07); border-radius: 18px; background: rgba(255,255,255,0.82); }
 .candidate-preview h4 { margin: 0 0 12px; }
 .preview-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .preview-grid span { display: block; color: #6d7a83; font-size: 12px; margin-bottom: 4px; }
@@ -633,6 +735,10 @@ onMounted(loadAll)
 .video-box { background: rgba(255,255,255,0.82); padding: 12px; border-radius: 16px; }
 .video-box span { display: block; margin-bottom: 8px; color: #6d7a83; }
 .video-box video { width: 100%; min-height: 220px; background: #111; border-radius: 12px; }
+.video-summary-box { display: grid; gap: 10px; padding: 14px; border: 1px solid rgba(16, 37, 50, 0.07); border-radius: 16px; background: rgba(248,245,239,0.82); }
+.video-summary-box span { color: #0f6c8f; font-weight: 800; }
+.video-summary-box p { margin: 0; color: #42515b; line-height: 1.7; }
+.video-summary-box strong { display: block; margin-bottom: 4px; color: #102532; }
 .data-table { margin-top: 18px; }
-@media (max-width: 900px) { .form-grid, .video-grid, .llm-config-grid, .preview-grid, .process-workbench, .candidate-info-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .topline, .detail-headline { flex-direction: column; } .form-grid, .video-grid, .llm-config-grid, .preview-grid, .process-workbench, .candidate-info-grid { grid-template-columns: 1fr; } }
 </style>

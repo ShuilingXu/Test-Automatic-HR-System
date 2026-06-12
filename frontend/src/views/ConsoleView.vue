@@ -447,21 +447,22 @@ function syncRouteState() {
 </script>
 
 <style scoped>
-.console-shell { display: grid; grid-template-columns: 300px 1fr; gap: 24px; }
-.console-side { background: #102532; color: #f4efe7; border-radius: 28px; padding: 26px; display: flex; flex-direction: column; gap: 16px; min-height: calc(100vh - 56px); }
+.console-shell { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 24px; }
+.console-side { position: sticky; top: 28px; z-index: 2; background: linear-gradient(160deg, #102532 0%, #17394d 100%); color: #f4efe7; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 28px; padding: 26px; display: flex; flex-direction: column; gap: 16px; min-height: calc(100vh - 56px); box-shadow: 0 18px 42px rgba(16, 37, 50, 0.18); }
 .console-side h1 { margin: 0; line-height: 1.1; }
 .console-side p { color: rgba(244, 239, 231, 0.76); line-height: 1.7; }
 .console-side nav { display: grid; gap: 10px; }
 .console-side button, .side-link { text-align: left; }
-.console-side button.active { background: #f8f5ef; border-color: rgba(240, 182, 111, 0.58); color: #102532; }
-.console-main { display: grid; gap: 18px; }
+.console-side button.active, .console-side .side-link.active { background: #f8f5ef; border-color: rgba(240, 182, 111, 0.58); color: #102532; }
+.logout-btn { margin-top: auto; }
+.console-main { min-width: 0; display: grid; gap: 18px; }
 .topline { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
 .topline h2 { margin: 6px 0 0; }
 .metric-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; }
-.metric { background: #f8f5ef; border-radius: 18px; padding: 18px; }
+.metric { background: linear-gradient(180deg, #fff 0%, #f8f5ef 100%); border: 1px solid rgba(16,37,50,0.07); border-radius: 18px; padding: 18px; box-shadow: 0 10px 24px rgba(16, 37, 50, 0.05); }
 .metric span { display: block; color: #6d7a83; margin-bottom: 8px; }
 .metric strong { font-size: 30px; }
-.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin-top: 18px; }
 .wide { grid-column: 1 / -1; }
 .sub-tabs { margin-bottom: 18px; }
 .action-row { display: flex; gap: 12px; margin-top: 4px; }
@@ -480,5 +481,5 @@ function syncRouteState() {
 .audit-panel-head span { color: #6d7a83; font-weight: 700; }
 .compact-table { margin-top: 12px; }
 @media (max-width: 1200px) { .audit-grid { grid-template-columns: 1fr; } }
-@media (max-width: 980px) { .console-shell { grid-template-columns: 1fr; } .metric-grid, .form-grid { grid-template-columns: 1fr; } }
+@media (max-width: 980px) { .console-shell { grid-template-columns: 1fr; } .console-side { position: relative; top: auto; min-height: auto; } .metric-grid, .form-grid { grid-template-columns: 1fr; } }
 </style>

@@ -296,12 +296,22 @@ public class InterviewController {
 
     @PostMapping("/interviewee/video-recording/{processId}")
     public ApiResponse<VideoSignalVO> uploadRecording(Authentication authentication,
+                                                       @PathVariable Long processId,
+                                                       @RequestParam String originalFileName,
+                                                       @RequestParam(required = false) String contentType,
+                                                       @RequestParam("file") MultipartFile file) {
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.uploadIntervieweeRecording(processId, current.getId(), current.getDisplayName(), originalFileName, contentType, file));
+    }
+
+    @PostMapping("/interviewee/ai-recording/{processId}")
+    public ApiResponse<InterviewVO> uploadAiRecording(Authentication authentication,
                                                       @PathVariable Long processId,
                                                       @RequestParam String originalFileName,
                                                       @RequestParam(required = false) String contentType,
                                                       @RequestParam("file") MultipartFile file) {
         SessionUserVO current = currentUser(authentication);
-        return ApiResponse.success(interviewService.uploadIntervieweeRecording(processId, current.getId(), current.getDisplayName(), originalFileName, contentType, file));
+        return ApiResponse.success(interviewService.uploadAiExamRecording(processId, current.getId(), current.getDisplayName(), originalFileName, contentType, file));
     }
 
     @GetMapping("/hr/video-recording/{processId}")

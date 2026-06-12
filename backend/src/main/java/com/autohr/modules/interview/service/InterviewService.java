@@ -52,6 +52,7 @@ public interface InterviewService {
     VideoSignalVO getVideoSignalState(Long processId);
     VideoSignalVO uploadHrRecording(Long processId, String originalFileName, String contentType, MultipartFile file);
     VideoSignalVO uploadIntervieweeRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file);
+    InterviewVO uploadAiExamRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file);
     InterviewVO reportAntiCheatEvent(AntiCheatEventRequest request, Long intervieweeUserId, String intervieweeName);
     InterviewVideoSession getVideoSession(Long processId);
     InterviewVideoSession getDownloadableVideoSession(Long processId);

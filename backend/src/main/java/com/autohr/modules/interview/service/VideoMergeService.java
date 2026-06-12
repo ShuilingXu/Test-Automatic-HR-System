@@ -48,6 +48,25 @@ public class VideoMergeService {
         }
     }
 
+    public void extractAudio(InterviewVideoSession session) {
+        String source = session.getMergedRecordingPath() == null ? session.getRecordingPath() : session.getMergedRecordingPath();
+        if (source == null || !Files.isRegularFile(Path.of(source))) {
+            throw new BusinessException("视频文件不存在，不能分离音频");
+        }
+        try {
+            Files.createDirectories(UploadPaths.RECORDING_DIR);
+            Path output = UploadPaths.RECORDING_DIR.resolve(session.getVideoSerialNo() + "-audio.wav").normalize().toAbsolutePath();
+            if (!output.startsWith(UploadPaths.RECORDING_DIR)) {
+                throw new BusinessException("音频文件路径非法");
+            }
+            runFfmpeg(List.of(ffmpegPath, "-y", "-i", source, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", output.toString()), "分离音频失败");
+            session.setAudioPath(output.toString());
+            session.setAudioFileName(output.getFileName().toString());
+        } catch (IOException ex) {
+            throw new BusinessException("分离音频失败: " + ex.getMessage());
+        }
+    }
+
     private void mergeSideBySide(InterviewVideoSession session, Path output) {
         runFfmpeg(List.of(
                 ffmpegPath,
