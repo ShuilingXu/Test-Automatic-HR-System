@@ -132,6 +132,6 @@ onMounted(async () => {
 .code-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; width: 100%; }
 .captcha-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(96px, 128px); gap: 10px; width: 100%; min-width: 0; }
 .captcha-image { width: 100%; max-width: 128px; height: 44px; padding: 0; border: 1px solid rgba(16, 37, 50, 0.16); border-radius: 10px; background: #f6f1e8; cursor: pointer; overflow: hidden; }
-.captcha-image img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.captcha-image img { display: block; width: 100%; height: 100%; object-fit: contain; }
 @media (max-width: 560px) { .code-row, .captcha-row { grid-template-columns: minmax(0, 1fr); } .captcha-image { max-width: 100%; } }
 </style>

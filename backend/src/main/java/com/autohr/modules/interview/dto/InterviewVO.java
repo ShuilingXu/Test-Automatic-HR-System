@@ -83,6 +83,8 @@ public class InterviewVO {
     private LocalDateTime recordingEndRequestedAt;
     private String recordingPath;
     private String recordingFileName;
+    private String aiRecordingPath;
+    private String aiRecordingFileName;
     private String sessionStatus;
     private String audioPath;
     private String audioFileName;

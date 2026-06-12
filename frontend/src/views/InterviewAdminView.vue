@@ -258,7 +258,10 @@
             </div>
           </section>
           <section class="workbench-panel ai-question-panel">
-            <h3>AI问答题号</h3>
+            <div class="panel-title-row">
+              <h3>AI问答题号</h3>
+              <a v-if="selectedProcess.aiRecordingPath || selectedProcess.aiRecordingFileName" :href="interviewApi.getAiRecordingUrl(selectedProcess.id)" target="_blank" class="video-link">查看AI问答视频</a>
+            </div>
             <div class="question-number-grid">
               <button v-for="item in aiRecords" :key="item.id" class="question-number" :class="{ answered: item.answerContent }">Q{{ item.sequenceNo }}</button>
             </div>

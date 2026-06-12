@@ -13,6 +13,7 @@ import com.autohr.modules.interview.dto.VideoSignalRequest;
 import com.autohr.modules.interview.dto.VideoSignalVO;
 import com.autohr.modules.interview.entity.InterviewVideoSession;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -38,6 +39,7 @@ public interface InterviewService {
     InterviewVO getIntervieweeNextAiQuestion(Long processId, Long intervieweeUserId);
     InterviewVO submitAiAnswer(AiAnswerRequest request);
     InterviewVO submitIntervieweeAiAnswer(AiAnswerRequest request, Long intervieweeUserId);
+    SseEmitter submitIntervieweeAiAnswerStream(AiAnswerRequest request, Long intervieweeUserId);
     List<InterviewVO> listAiRecords(Long processId);
     List<InterviewVO> listIntervieweeAiRecords(Long processId, Long intervieweeUserId);
     InterviewVO createVideoSession(Long processId, Long approverUserId, String approverName);

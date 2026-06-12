@@ -53,6 +53,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.nio.charset.Charset;
@@ -503,6 +504,33 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     @Override
+    public SseEmitter submitIntervieweeAiAnswerStream(AiAnswerRequest request, Long intervieweeUserId) {
+        requireIntervieweeProcess(request.getProcessId(), intervieweeUserId);
+        SseEmitter emitter = new SseEmitter(180000L);
+        CompletableFuture.runAsync(() -> {
+            try {
+                sendSse(emitter, "message", "已收到回答，开始AI评分");
+                sendSse(emitter, "message", "正在调用面试官模型生成评价和下一题");
+                InterviewVO result = submitAiAnswer(request);
+                sendSse(emitter, "message", "正在同步AI面试状态");
+                sendSse(emitter, "done", result);
+                emitter.complete();
+            } catch (Exception ex) {
+                try {
+                    sendSse(emitter, "error", abbreviate(ex.getMessage()));
+                } catch (IOException ignored) {
+                }
+                emitter.completeWithError(ex);
+            }
+        });
+        return emitter;
+    }
+
+    private void sendSse(SseEmitter emitter, String event, Object data) throws IOException {
+        emitter.send(SseEmitter.event().name(event).data(data));
+    }
+
+    @Override
     public List<InterviewVO> listAiRecords(Long processId) {
         return aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>()
                 .eq(processId != null, InterviewAiRecord::getProcessId, processId)
@@ -913,10 +941,11 @@ public class InterviewServiceImpl implements InterviewService {
                 throw new BusinessException("AI面试录制文件路径非法");
             }
             file.transferTo(storedFile.toFile());
+            process.setAiRecordingPath(storedFile.toString());
+            process.setAiRecordingFileName(storedName);
+            processMapper.updateById(process);
             auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "UPLOAD_AI_EXAM_RECORDING", "INTERVIEW_PROCESS", String.valueOf(processId), storedName);
             InterviewVO vo = toProcessVO(process);
-            vo.setRecordingPath(storedFile.toString());
-            vo.setRecordingFileName(storedName);
             return vo;
         } catch (IOException ex) {
             throw new BusinessException("AI面试录制文件上传失败: " + ex.getMessage());
@@ -1593,6 +1622,8 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setApprovedHrName(entity.getApprovedHrName());
         vo.setProcessStatusView(entity.getProcessStatusView());
         vo.setRemark(entity.getRemark());
+        vo.setAiRecordingPath(entity.getAiRecordingPath());
+        vo.setAiRecordingFileName(entity.getAiRecordingFileName());
         fillVideoSessionSummary(vo, entity.getId());
         vo.setCreatedAt(entity.getCreatedAt());
         vo.setUpdatedAt(entity.getUpdatedAt());

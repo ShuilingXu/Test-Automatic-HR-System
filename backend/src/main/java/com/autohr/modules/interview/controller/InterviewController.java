@@ -32,6 +32,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
@@ -179,9 +180,16 @@ public class InterviewController {
 
     @PostMapping("/interviewee/ai-answer")
     public ApiResponse<InterviewVO> submitAiAnswer(Authentication authentication,
-                                                    @Valid @RequestBody AiAnswerRequest request) {
+                                                     @Valid @RequestBody AiAnswerRequest request) {
         SessionUserVO current = currentUser(authentication);
         return ApiResponse.success(interviewService.submitIntervieweeAiAnswer(request, current.getId()));
+    }
+
+    @PostMapping("/interviewee/ai-answer/stream")
+    public SseEmitter submitAiAnswerStream(Authentication authentication,
+                                           @Valid @RequestBody AiAnswerRequest request) {
+        SessionUserVO current = currentUser(authentication);
+        return interviewService.submitIntervieweeAiAnswerStream(request, current.getId());
     }
 
     @PostMapping("/interviewee/anti-cheat-event")
@@ -320,6 +328,12 @@ public class InterviewController {
         String path = session.getMergedRecordingPath() == null ? session.getRecordingPath() : session.getMergedRecordingPath();
         String fileName = session.getMergedRecordingFileName() == null ? session.getRecordingFileName() : session.getMergedRecordingFileName();
         return FileDownloadSupport.buildInlineResponse(path, UploadPaths.RECORDING_DIR, fileName, "video/webm", "录制文件不可访问");
+    }
+
+    @GetMapping("/hr/ai-recording/{processId}")
+    public ResponseEntity<Resource> downloadAiRecording(@PathVariable Long processId) {
+        var process = interviewService.getProcess(processId);
+        return FileDownloadSupport.buildInlineResponse(process.getAiRecordingPath(), UploadPaths.RECORDING_DIR, process.getAiRecordingFileName(), "video/webm", "AI问答视频不可访问");
     }
 
     @PostMapping("/hr/approve-ai/{processId}")

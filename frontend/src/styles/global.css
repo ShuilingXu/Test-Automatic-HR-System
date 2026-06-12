@@ -79,7 +79,7 @@ button:not(:disabled),
   letter-spacing: 0.01em;
   text-decoration: none;
   box-shadow: var(--button-shadow);
-  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   white-space: normal;
 }
 
@@ -195,7 +195,7 @@ button:not(:disabled),
   background: var(--button-bg-hover);
   border-color: var(--button-border-active);
   color: var(--brand-ink);
-  box-shadow: 0 10px 24px rgba(16, 37, 50, 0.1);
+  box-shadow: var(--button-shadow);
 }
 
 .el-button--primary,
@@ -229,20 +229,22 @@ button:not(:disabled),
 }
 
 .el-button.is-text {
-  --el-button-bg-color: var(--button-bg);
-  --el-button-border-color: var(--button-border);
+  --el-button-bg-color: transparent;
+  --el-button-border-color: transparent;
   --el-button-text-color: var(--brand-ink);
-  --el-button-hover-bg-color: var(--button-bg-hover);
-  --el-button-hover-border-color: var(--button-border-active);
+  --el-button-hover-bg-color: rgba(16, 37, 50, 0.06);
+  --el-button-hover-border-color: transparent;
   --el-button-hover-text-color: var(--brand-ink);
-  box-shadow: var(--button-shadow);
+  min-height: 32px;
+  box-shadow: none;
   padding-inline: 14px;
 }
 
 .el-button.is-text.el-button--danger {
-  --el-button-border-color: rgba(184, 67, 67, 0.42);
+  --el-button-border-color: transparent;
   --el-button-text-color: #7f2828;
-  --el-button-hover-border-color: rgba(184, 67, 67, 0.66);
+  --el-button-hover-bg-color: rgba(184, 67, 67, 0.08);
+  --el-button-hover-border-color: transparent;
   --el-button-hover-text-color: #7f2828;
 }
 

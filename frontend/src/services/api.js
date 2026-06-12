@@ -159,6 +159,7 @@ export const interviewApi = {
     })
   },
   getRecordingUrl(processId) { return authenticatedFileUrl(`/api/interview/hr/video-recording/${processId}`) },
+  getAiRecordingUrl(processId) { return authenticatedFileUrl(`/api/interview/hr/ai-recording/${processId}`) },
   intervieweeJoin(processId) { return request.post(`/interview/interviewee/video-join/${processId}`) },
   hrJoin(processId, params) { return request.post(`/interview/hr/video-join/${processId}`, null, { params }) },
   completeVideo(processId, params) { return request.post(`/interview/hr/video-complete/${processId}`, null, { params }) },
@@ -169,4 +170,36 @@ export const interviewApi = {
   terminateProcess(processId, payload) { return request.post(`/interview/hr/terminate/${processId}`, payload) },
   updateProcessRemark(processId, payload) { return request.post(`/interview/hr/processes/${processId}/remark`, payload) },
   submitAiAnswer(payload) { return request.post('/interview/interviewee/ai-answer', payload, { timeout: 120000 }) },
+  async submitAiAnswerStream(payload, onEvent) {
+    const token = window.localStorage.getItem('demo-token')
+    const response = await fetch('/api/interview/interviewee/ai-answer/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok || !response.body) {
+      throw new Error(await response.text() || '流式提交失败')
+    }
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const chunks = buffer.split('\n\n')
+      buffer = chunks.pop() || ''
+      chunks.forEach((chunk) => {
+        const streamEvent = { event: 'message', data: '' }
+        chunk.split('\n').forEach((line) => {
+          if (line.startsWith('event:')) streamEvent.event = line.slice(6).trim()
+          if (line.startsWith('data:')) streamEvent.data += line.slice(5).trim()
+        })
+        if (streamEvent.data) onEvent?.(streamEvent)
+      })
+    }
+  },
 }

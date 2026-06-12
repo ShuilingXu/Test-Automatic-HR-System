@@ -270,6 +270,8 @@ CREATE TABLE IF NOT EXISTS interview_process (
     ai_max_question_rounds INTEGER NOT NULL DEFAULT 10,
     anti_cheat_switch_limit INTEGER NOT NULL DEFAULT 5,
     anti_cheat_switch_count INTEGER NOT NULL DEFAULT 0,
+    ai_recording_path VARCHAR(500),
+    ai_recording_file_name VARCHAR(255),
     video_approved INTEGER NOT NULL DEFAULT 0,
     onsite_approved INTEGER NOT NULL DEFAULT 0,
     approved_hr_user_id INTEGER,
