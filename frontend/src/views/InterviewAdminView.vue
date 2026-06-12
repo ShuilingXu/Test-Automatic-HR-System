@@ -12,7 +12,6 @@
       <div class="sub-tabs">
         <RouterLink class="link-chip" :class="{ active: activeTab === 'kb' }" to="/interview/hr/knowledge-bases">知识库</RouterLink>
         <RouterLink class="link-chip" :class="{ active: activeTab === 'weights' }" to="/interview/hr/weights">岗位权重</RouterLink>
-        <RouterLink v-if="isItAdmin" class="link-chip" :class="{ active: activeTab === 'llm' }" to="/interview/hr/llm-configs">LLM配置</RouterLink>
         <RouterLink v-if="isItAdmin" class="link-chip" :class="{ active: activeTab === 'system' }" to="/interview/hr/system">系统配置</RouterLink>
         <RouterLink class="link-chip" :class="{ active: activeTab === 'process' }" to="/interview/hr/processes">面试流程</RouterLink>
       </div>
@@ -104,10 +103,8 @@
           </div>
         </div>
         <div class="action-row"><el-button type="primary" :loading="savingSystemConfig" @click="saveSystemConfig">保存系统配置</el-button></div>
-      </section>
 
-      <section v-if="activeTab === 'llm'" class="surface">
-        <h3>LLM 模型连接配置</h3>
+        <h3 class="section-title">LLM 模型连接配置</h3>
         <div class="llm-config-grid">
           <div class="surface inner-surface">
             <h3>面试官 LLM A</h3>
@@ -143,14 +140,14 @@
             <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(resumeReviewLlmForm, 'RESUME_REVIEW')">保存简历初筛模型</el-button><span class="serial-line">API Key：{{ resumeReviewKeyLabel }}</span></div>
           </div>
           <div class="surface inner-surface">
-            <h3>视频语音转文字模型</h3>
+            <h3>阿里云视频语音转文字</h3>
             <el-form :model="videoTranscriberLlmForm" label-position="top" class="form-grid">
               <el-form-item label="配置名称"><el-input v-model="videoTranscriberLlmForm.configName" /></el-form-item>
-              <el-form-item label="OpenAI接口地址"><el-input v-model="videoTranscriberLlmForm.baseUrl" placeholder="如 https://api.openai.com/v1" /></el-form-item>
-              <el-form-item label="API Key"><el-input v-model="videoTranscriberLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
-              <el-form-item label="模型名称"><el-input v-model="videoTranscriberLlmForm.modelName" placeholder="如 whisper-1" /></el-form-item>
+              <el-form-item label="NLS网关地址"><el-input v-model="videoTranscriberLlmForm.baseUrl" placeholder="wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1" /></el-form-item>
+              <el-form-item label="阿里云Token"><el-input v-model="videoTranscriberLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原Token" /></el-form-item>
+              <el-form-item label="AppKey"><el-input v-model="videoTranscriberLlmForm.modelName" placeholder="阿里云智能语音交互项目AppKey" /></el-form-item>
             </el-form>
-            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(videoTranscriberLlmForm, 'VIDEO_TRANSCRIBER')">保存语音转文字模型</el-button><span class="serial-line">API Key：{{ videoTranscriberKeyLabel }}</span></div>
+            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(videoTranscriberLlmForm, 'VIDEO_TRANSCRIBER')">保存阿里云STT配置</el-button><span class="serial-line">Token：{{ videoTranscriberKeyLabel }}</span></div>
           </div>
           <div class="surface inner-surface">
             <h3>视频会议概要 LLM</h3>
@@ -423,7 +420,7 @@ async function loadAll() {
 async function selectKnowledgeBase(row) { itemForm.knowledgeBaseId = row.id; knowledgeItems.value = (await interviewApi.listKnowledgeItems({ knowledgeBaseId: row.id })).data }
 async function openKnowledgeBase(row) { await router.push(`/interview/hr/knowledge-bases/${row.id}`) }
 function openWeight(row) { Object.assign(weightForm, row); router.push(`/interview/hr/weights/${row.id}`) }
-function openLlmConfig(row) { editLlmConfig(row); router.push(`/interview/hr/llm-configs/${row.id}`) }
+function openLlmConfig(row) { editLlmConfig(row) }
 function openProcess(row) { router.push(`/interview/hr/processes/${row.id}`) }
 async function saveKnowledgeBase() { try { await interviewApi.saveKnowledgeBase({ ...kbForm }); ElMessage.success('知识库已保存'); await loadAll() } catch (error) { fail(error) } }
 async function deleteKnowledgeBase(id) { try { await interviewApi.deleteKnowledgeBase(id); ElMessage.success('知识库已删除'); await loadAll() } catch (error) { fail(error) } }
@@ -438,7 +435,7 @@ async function saveRoleLlmConfig(form, role) { try { await interviewApi.saveLlmC
 async function deleteLlmConfig(id) { try { await interviewApi.deleteLlmConfig(id); ElMessage.success('LLM配置已删除'); await loadAll() } catch (error) { fail(error) } }
 async function saveSystemConfig() { savingSystemConfig.value = true; try { await systemApi.saveConfig({ ...systemConfig }); ElMessage.success('系统配置已保存'); Object.assign(systemConfig, (await systemApi.getConfig()).data) } catch (error) { fail(error) } finally { savingSystemConfig.value = false } }
 function editLlmConfig(row) { Object.assign(llmFormByRole(row.modelRole), { ...row, apiKey: '' }) }
-function createLlmForm(role) { return { id: null, configName: role === 'SCORER' ? '评分模型' : role === 'RESUME_REVIEW' ? '简历初筛模型' : role === 'VIDEO_TRANSCRIBER' ? '视频语音转文字模型' : role === 'VIDEO_SUMMARY' ? '视频会议概要模型' : '面试官模型', modelRole: role, baseUrl: '', apiKey: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 } }
+function createLlmForm(role) { return { id: null, configName: role === 'SCORER' ? '评分模型' : role === 'RESUME_REVIEW' ? '简历初筛模型' : role === 'VIDEO_TRANSCRIBER' ? '阿里云视频语音转文字' : role === 'VIDEO_SUMMARY' ? '视频会议概要模型' : '面试官模型', modelRole: role, baseUrl: role === 'VIDEO_TRANSCRIBER' ? 'wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1' : '', apiKey: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 } }
 function llmFormByRole(role) { return role === 'SCORER' ? scorerLlmForm : role === 'RESUME_REVIEW' ? resumeReviewLlmForm : role === 'VIDEO_TRANSCRIBER' ? videoTranscriberLlmForm : role === 'VIDEO_SUMMARY' ? videoSummaryLlmForm : interviewerLlmForm }
 function syncLlmForms() {
   const interviewer = llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')
@@ -700,6 +697,7 @@ onMounted(loadAll)
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
 .llm-config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .wide { grid-column: 1 / -1; }
+.section-title { margin-top: 28px; }
 .inner-surface { background: rgba(255,255,255,0.82); }
 .detail-surface { margin-top: 18px; }
 .detail-headline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }

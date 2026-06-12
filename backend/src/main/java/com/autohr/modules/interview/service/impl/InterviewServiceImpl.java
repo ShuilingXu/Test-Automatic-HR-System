@@ -34,6 +34,12 @@ import com.autohr.modules.interview.mapper.InterviewProcessMapper;
 import com.autohr.modules.interview.mapper.InterviewVideoSessionMapper;
 import com.autohr.modules.interview.service.InterviewService;
 import com.autohr.modules.interview.service.VideoMergeService;
+import com.alibaba.nls.client.AccessToken;
+import com.alibaba.nls.client.protocol.InputFormatEnum;
+import com.alibaba.nls.client.protocol.NlsClient;
+import com.alibaba.nls.client.protocol.SampleRateEnum;
+import com.alibaba.nls.client.protocol.asr.SpeechRecognizer;
+import com.alibaba.nls.client.protocol.asr.SpeechRecognizerListener;
 import com.autohr.modules.recruitment.entity.RecruitmentCandidate;
 import com.autohr.modules.recruitment.entity.RecruitmentJob;
 import com.autohr.modules.recruitment.mapper.RecruitmentCandidateMapper;
@@ -1324,27 +1330,56 @@ public class InterviewServiceImpl implements InterviewService {
 
     private String callAudioTranscription(String audioPath) {
         InterviewLlmConfig config = requireActiveLlmConfig("VIDEO_TRANSCRIBER");
-        cn.hutool.http.HttpResponse response;
+        String token = StrUtil.trim(config.getApiKey());
+        String appKey = StrUtil.trim(config.getModelName());
+        String endpoint = StrUtil.blankToDefault(config.getBaseUrl(), "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1");
+        StringBuilder text = new StringBuilder();
+        NlsClient client = new NlsClient(endpoint, token);
         try {
-            response = cn.hutool.http.HttpRequest.post(resolveAudioTranscriptionsUrl(config.getBaseUrl()))
-                    .header("Authorization", "Bearer " + config.getApiKey())
-                    .form("model", config.getModelName())
-                    .form("file", new java.io.File(audioPath))
-                    .timeout(120000)
-                    .execute();
+            SpeechRecognizer recognizer = new SpeechRecognizer(client, new SpeechRecognizerListener() {
+                @Override
+                public void onStarted(com.alibaba.nls.client.protocol.asr.SpeechRecognizerResponse response) {
+                }
+
+                @Override
+                public void onRecognitionResultChanged(com.alibaba.nls.client.protocol.asr.SpeechRecognizerResponse response) {
+                }
+
+                @Override
+                public void onRecognitionCompleted(com.alibaba.nls.client.protocol.asr.SpeechRecognizerResponse response) {
+                    if (StrUtil.isNotBlank(response.getRecognizedText())) {
+                        text.append(response.getRecognizedText()).append('\n');
+                    }
+                }
+
+                @Override
+                public void onFail(com.alibaba.nls.client.protocol.asr.SpeechRecognizerResponse response) {
+                    throw new BusinessException("阿里云语音识别失败: " + response.getStatusText());
+                }
+            });
+            recognizer.setAppKey(appKey);
+            recognizer.setFormat(InputFormatEnum.PCM);
+            recognizer.setSampleRate(SampleRateEnum.SAMPLE_RATE_16K);
+            recognizer.setEnableIntermediateResult(false);
+            recognizer.start();
+            byte[] buffer = new byte[3200];
+            try (java.io.InputStream inputStream = Files.newInputStream(Path.of(audioPath))) {
+                int len;
+                while ((len = inputStream.read(buffer)) > 0) {
+                    recognizer.send(java.util.Arrays.copyOf(buffer, len));
+                    Thread.sleep(100);
+                }
+            }
+            recognizer.stop();
         } catch (Exception ex) {
-            throw new BusinessException("语音转文字接口调用失败: " + abbreviate(ex.getMessage()));
+            throw new BusinessException("阿里云语音转文字失败: " + abbreviate(ex.getMessage()));
+        } finally {
+            client.shutdown();
         }
-        String body = response.body();
-        if (!response.isOk()) {
-            throw new BusinessException("语音转文字接口失败，HTTP " + response.getStatus() + ": " + abbreviate(body));
+        if (StrUtil.isBlank(text.toString())) {
+            throw new BusinessException("阿里云语音转文字未返回识别文本");
         }
-        cn.hutool.json.JSONObject json = cn.hutool.json.JSONUtil.parseObj(body);
-        String text = json.getStr("text");
-        if (StrUtil.isBlank(text)) {
-            throw new BusinessException("语音转文字接口未返回text: " + abbreviate(body));
-        }
-        return text;
+        return text.toString();
     }
 
     private String callVideoSummaryLlm(String transcript) {
@@ -1354,17 +1389,6 @@ public class InterviewServiceImpl implements InterviewService {
             systemPrompt = "你是HR视频面试会议纪要助手，请根据面试转写内容输出中文会议概要，包含候选人表现、关键回答、风险点和后续建议。";
         }
         return callOpenAiChat(config, systemPrompt, "视频面试转写：\n" + abbreviate(transcript, 20000));
-    }
-
-    private String resolveAudioTranscriptionsUrl(String baseUrl) {
-        String url = StrUtil.trim(baseUrl);
-        if (StrUtil.endWithIgnoreCase(url, "/audio/transcriptions")) {
-            return url;
-        }
-        if (StrUtil.endWithIgnoreCase(url, "/v1")) {
-            return url + "/audio/transcriptions";
-        }
-        return StrUtil.removeSuffix(url, "/") + "/v1/audio/transcriptions";
     }
 
     private record LlmEvaluation(int score, String comment, String nextQuestion) {
