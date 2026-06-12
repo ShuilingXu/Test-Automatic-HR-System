@@ -695,11 +695,11 @@ onMounted(loadAll)
 <style scoped>
 .topline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .sub-tabs { margin: 22px 0; }
-.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
-.llm-config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.form-grid { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.llm-config-grid { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .wide { grid-column: 1 / -1; }
 .section-title { margin-top: 28px; }
-.inner-surface { background: rgba(255,255,255,0.82); }
+.inner-surface { min-width: 0; background: rgba(255,255,255,0.82); }
 .detail-surface { margin-top: 18px; }
 .detail-headline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
 .detail-headline h3 { margin: 6px 0 0; }
@@ -720,11 +720,11 @@ onMounted(loadAll)
 .compact-ai-table { margin-top: 8px; }
 .process-stats { display: grid; gap: 4px; margin-bottom: 12px; }
 .process-stats p { margin: 0; color: #42515b; }
-.action-button-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.action-button-grid { min-width: 0; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
 .remark-box { display: grid; gap: 10px; }
 .csv-import-box { grid-column: 1 / -1; }
-.serial-line { margin: 8px 0 14px; color: #42515b; }
-.video-link { margin-left: 12px; color: #0f6c8f; font-weight: 700; text-decoration: none; }
+.serial-line { min-width: 0; margin: 8px 0 14px; color: #42515b; overflow-wrap: anywhere; }
+.video-link { display: inline-flex; max-width: 100%; margin-left: 12px; color: #0f6c8f; font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
 .candidate-preview { margin: 10px 0 16px; padding: 16px; border: 1px solid rgba(16, 37, 50, 0.07); border-radius: 18px; background: rgba(255,255,255,0.82); }
 .candidate-preview h4 { margin: 0 0 12px; }
 .preview-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }

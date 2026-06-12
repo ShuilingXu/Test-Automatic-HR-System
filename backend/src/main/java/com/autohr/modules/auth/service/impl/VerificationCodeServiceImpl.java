@@ -92,7 +92,7 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
                     .setTemplateCode(config.get("ALIYUN_SMS_TEMPLATE_CODE"))
                     .setTemplateParam("{\"code\":\"" + code + "\"}");
             client.sendSms(request);
-        } catch (Exception ex) {
+        } catch (Throwable ex) {
             throw new BusinessException("短信验证码发送失败");
         }
     }

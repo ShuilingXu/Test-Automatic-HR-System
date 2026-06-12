@@ -448,7 +448,7 @@ function syncRouteState() {
 
 <style scoped>
 .console-shell { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 24px; }
-.console-side { position: sticky; top: 28px; z-index: 2; background: linear-gradient(160deg, #102532 0%, #17394d 100%); color: #f4efe7; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 28px; padding: 26px; display: flex; flex-direction: column; gap: 16px; min-height: calc(100vh - 56px); box-shadow: 0 18px 42px rgba(16, 37, 50, 0.18); }
+.console-side { position: sticky; top: 28px; z-index: 2; min-width: 0; background: linear-gradient(160deg, #102532 0%, #17394d 100%); color: #f4efe7; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 28px; padding: 26px; display: flex; flex-direction: column; gap: 16px; min-height: calc(100vh - 56px); box-shadow: 0 18px 42px rgba(16, 37, 50, 0.18); }
 .console-side h1 { margin: 0; line-height: 1.1; }
 .console-side p { color: rgba(244, 239, 231, 0.76); line-height: 1.7; }
 .console-side nav { display: grid; gap: 10px; }
@@ -458,14 +458,14 @@ function syncRouteState() {
 .console-main { min-width: 0; display: grid; gap: 18px; }
 .topline { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
 .topline h2 { margin: 6px 0 0; }
-.metric-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; }
 .metric { background: linear-gradient(180deg, #fff 0%, #f8f5ef 100%); border: 1px solid rgba(16,37,50,0.07); border-radius: 18px; padding: 18px; box-shadow: 0 10px 24px rgba(16, 37, 50, 0.05); }
 .metric span { display: block; color: #6d7a83; margin-bottom: 8px; }
 .metric strong { font-size: 30px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin-top: 18px; }
 .wide { grid-column: 1 / -1; }
 .sub-tabs { margin-bottom: 18px; }
-.action-row { display: flex; gap: 12px; margin-top: 4px; }
+.action-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; }
 .resume-link { color: #0f6c8f; font-weight: 700; text-decoration: none; }
 .candidate-detail { margin-top: 18px; padding: 18px; border-radius: 20px; background: #f8f5ef; }
 .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -475,7 +475,7 @@ function syncRouteState() {
 .intro-box p { margin: 0; line-height: 1.7; }
 .data-table { margin-top: 18px; }
 .audit-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-.audit-panel { min-width: 0; padding: 14px; border-radius: 20px; background: #f8f5ef; }
+.audit-panel { min-width: 0; overflow: hidden; padding: 14px; border-radius: 20px; background: #f8f5ef; }
 .audit-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .audit-panel-head h3 { margin: 0; }
 .audit-panel-head span { color: #6d7a83; font-weight: 700; }

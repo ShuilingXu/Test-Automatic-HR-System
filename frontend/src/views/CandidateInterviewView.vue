@@ -698,7 +698,7 @@ onMounted(async () => {
 .ai-status-card.busy { background: rgba(15, 108, 143, 0.1); border-color: rgba(15, 108, 143, 0.22); }
 .status-dot { width: 10px; height: 10px; border-radius: 999px; background: #0f6c8f; box-shadow: 0 0 0 6px rgba(15, 108, 143, 0.12); }
 .ai-status-card.busy .status-dot { animation: pulse 1.2s ease-in-out infinite; }
-.ai-recording-card { display: grid; grid-template-columns: 1fr 160px; gap: 14px; align-items: center; margin-bottom: 14px; padding: 14px; border-radius: 16px; background: rgba(143, 15, 15, 0.08); border: 1px solid rgba(143, 15, 15, 0.18); }
+.ai-recording-card { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 160px); gap: 14px; align-items: center; margin-bottom: 14px; padding: 14px; border-radius: 16px; background: rgba(143, 15, 15, 0.08); border: 1px solid rgba(143, 15, 15, 0.18); }
 .ai-recording-card.active { background: rgba(28, 120, 74, 0.1); border-color: rgba(28, 120, 74, 0.25); }
 .ai-recording-card p { margin: 6px 0 0; color: #6d7a83; line-height: 1.6; }
 .ai-recording-card video { width: 160px; height: 100px; object-fit: cover; background: #111; border-radius: 12px; }
@@ -714,10 +714,10 @@ onMounted(async () => {
 .question-card p { margin: 0; line-height: 1.7; }
 .question-card small { color: #6d7a83; }
 .video-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin-top: 18px; }
-.video-box { background: rgba(255,255,255,0.82); padding: 12px; border-radius: 16px; }
+.video-box { min-width: 0; background: rgba(255,255,255,0.82); padding: 12px; border-radius: 16px; }
 .video-box span { display: block; margin-bottom: 8px; color: #6d7a83; }
 .video-box video { width: 100%; min-height: 220px; background: #111; border-radius: 12px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.45); opacity: 0.55; } }
-@media (max-width: 900px) { .video-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .video-grid, .ai-recording-card { grid-template-columns: 1fr; } }
 </style>
