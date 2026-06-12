@@ -39,17 +39,13 @@
             <strong>{{ aiStatusText }}</strong>
             <small>{{ aiStatusHint }}</small>
           </div>
-          <div v-if="aiSubmitState.submitting && !isStreamMode" class="ai-submit-overlay">
+          <div v-if="aiSubmitState.submitting" class="ai-submit-overlay">
             <div class="ai-orbit"><span></span><span></span><span></span></div>
             <strong>{{ aiSubmitState.message }}</strong>
             <p>{{ aiSubmitOverlayHint }}</p>
-          </div>
-          <div v-if="isStreamMode && (aiSubmitState.submitting || aiStreamText)" class="ai-stream-card">
-            <div class="ai-stream-head">
-              <span class="status-dot"></span>
-              <strong>{{ aiSubmitState.submitting ? 'AI面试官正在实时输出' : 'AI面试官输出' }}</strong>
+            <div v-if="isStreamMode && aiStreamText" class="ai-stream-log">
+              {{ aiStreamText }}
             </div>
-            <div class="ai-stream-log">{{ aiStreamText || '正在等待AI面试官输出...' }}</div>
           </div>
           <div v-if="processSummary?.currentStage === 'AI'" class="ai-recording-card" :class="{ active: aiExamRecording.active }">
             <div>
@@ -744,8 +740,6 @@ onMounted(async () => {
 .ai-submit-overlay { position: absolute; inset: 0; z-index: 5; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; background: rgba(248, 245, 239, 0.88); backdrop-filter: blur(8px); }
 .ai-submit-overlay p { max-width: 360px; margin: 0; color: #6d7a83; line-height: 1.7; }
 .ai-stream-log { width: min(520px, 100%); max-height: 220px; overflow: auto; padding: 12px; border-radius: 14px; background: rgba(255,255,255,0.72); color: #42515b; text-align: left; line-height: 1.7; white-space: pre-wrap; }
-.ai-stream-card { display: grid; gap: 10px; margin-bottom: 14px; padding: 14px; border-radius: 16px; background: rgba(15, 108, 143, 0.08); border: 1px solid rgba(15, 108, 143, 0.18); }
-.ai-stream-head { display: flex; gap: 10px; align-items: center; color: #102532; }
 .ai-orbit { position: relative; width: 64px; height: 64px; border-radius: 999px; border: 2px solid rgba(15, 108, 143, 0.18); animation: spin 1.4s linear infinite; }
 .ai-orbit span { position: absolute; width: 12px; height: 12px; border-radius: 999px; background: #0f6c8f; }
 .ai-orbit span:nth-child(1) { top: -6px; left: 26px; }

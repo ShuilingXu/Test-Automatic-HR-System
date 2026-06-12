@@ -69,7 +69,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -465,24 +464,8 @@ public class InterviewServiceImpl implements InterviewService {
         record.setAnswerContent(request.getAnswerContent());
         String materials = loadKnowledgeMaterials(record.getKnowledgeBaseId());
         String jobRequirements = loadJobRequirements(process);
-        LlmEvaluation interviewerEvaluation;
-        LlmEvaluation scorerEvaluation;
-        if (interviewerChunkConsumer == null) {
-            interviewerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "INTERVIEWER", true);
-            scorerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "SCORER", false);
-        } else {
-            CompletableFuture<LlmEvaluation> scorerFuture = CompletableFuture.supplyAsync(() -> callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "SCORER", false));
-            interviewerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "INTERVIEWER", true, interviewerChunkConsumer);
-            try {
-                scorerEvaluation = scorerFuture.join();
-            } catch (CompletionException ex) {
-                Throwable cause = ex.getCause();
-                if (cause instanceof BusinessException businessException) {
-                    throw businessException;
-                }
-                throw ex;
-            }
-        }
+        LlmEvaluation interviewerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "INTERVIEWER", true, interviewerChunkConsumer);
+        LlmEvaluation scorerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "SCORER", false);
         int interviewerScore = interviewerEvaluation.score();
         int scorerScore = scorerEvaluation.score();
         int averageScore = Math.round((interviewerScore + scorerScore) / 2.0f);
