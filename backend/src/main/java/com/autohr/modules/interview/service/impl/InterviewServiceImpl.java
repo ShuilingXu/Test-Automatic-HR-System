@@ -1330,11 +1330,21 @@ public class InterviewServiceImpl implements InterviewService {
 
     private String callAudioTranscription(String audioPath) {
         InterviewLlmConfig config = requireActiveLlmConfig("VIDEO_TRANSCRIBER");
-        String token = StrUtil.trim(config.getApiKey());
+        String accessKeyId = StrUtil.trim(config.getPromptTemplate());
+        String accessKeySecret = StrUtil.trim(config.getApiKey());
         String appKey = StrUtil.trim(config.getModelName());
         String endpoint = StrUtil.blankToDefault(config.getBaseUrl(), "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1");
+        if (StrUtil.isBlank(accessKeyId)) {
+            throw new BusinessException("阿里云语音转文字未配置AccessKey ID");
+        }
+        AccessToken accessToken = new AccessToken(accessKeyId, accessKeySecret);
+        try {
+            accessToken.apply();
+        } catch (Exception ex) {
+            throw new BusinessException("阿里云语音转文字获取AccessToken失败: " + abbreviate(ex.getMessage()));
+        }
         StringBuilder text = new StringBuilder();
-        NlsClient client = new NlsClient(endpoint, token);
+        NlsClient client = new NlsClient(endpoint, accessToken.getToken());
         try {
             SpeechRecognizer recognizer = new SpeechRecognizer(client, new SpeechRecognizerListener() {
                 @Override

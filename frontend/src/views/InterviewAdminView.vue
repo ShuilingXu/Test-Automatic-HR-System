@@ -144,10 +144,11 @@
             <el-form :model="videoTranscriberLlmForm" label-position="top" class="form-grid">
               <el-form-item label="配置名称"><el-input v-model="videoTranscriberLlmForm.configName" /></el-form-item>
               <el-form-item label="NLS网关地址"><el-input v-model="videoTranscriberLlmForm.baseUrl" placeholder="wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1" /></el-form-item>
-              <el-form-item label="阿里云Token"><el-input v-model="videoTranscriberLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原Token" /></el-form-item>
+              <el-form-item label="AccessKey ID"><el-input v-model="videoTranscriberLlmForm.promptTemplate" placeholder="用于自动获取NLS AccessToken" /></el-form-item>
+              <el-form-item label="AccessKey Secret"><el-input v-model="videoTranscriberLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原Secret" /></el-form-item>
               <el-form-item label="AppKey"><el-input v-model="videoTranscriberLlmForm.modelName" placeholder="阿里云智能语音交互项目AppKey" /></el-form-item>
             </el-form>
-            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(videoTranscriberLlmForm, 'VIDEO_TRANSCRIBER')">保存阿里云STT配置</el-button><span class="serial-line">Token：{{ videoTranscriberKeyLabel }}</span></div>
+            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(videoTranscriberLlmForm, 'VIDEO_TRANSCRIBER')">保存阿里云STT配置</el-button><span class="serial-line">AccessKey Secret：{{ videoTranscriberKeyLabel }}</span></div>
           </div>
           <div class="surface inner-surface">
             <h3>视频会议概要 LLM</h3>
