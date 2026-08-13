@@ -121,9 +121,9 @@ button:not(:disabled),
   --el-button-border-color: var(--primary);
   --el-button-hover-bg-color: var(--primary-dark);
   --el-button-hover-border-color: var(--primary-dark);
-  --el-button-active-bg-color: #3730a3;
-  --el-button-active-border-color: #3730a3;
-  box-shadow: 0 1px 2px rgba(79, 70, 229, 0.24), 0 6px 16px -4px rgba(79, 70, 229, 0.35);
+  --el-button-active-bg-color: var(--primary-dark);
+  --el-button-active-border-color: var(--primary-dark);
+  box-shadow: 0 1px 2px rgba(23, 96, 82, 0.2), 0 6px 16px -4px rgba(23, 96, 82, 0.3);
 }
 
 .el-button--danger {
@@ -188,7 +188,7 @@ button:not(:disabled),
   background: var(--primary);
   border-color: var(--primary);
   color: #ffffff;
-  box-shadow: 0 1px 2px rgba(79, 70, 229, 0.24), 0 6px 16px -4px rgba(79, 70, 229, 0.35);
+  box-shadow: 0 1px 2px rgba(23, 96, 82, 0.2), 0 6px 16px -4px rgba(23, 96, 82, 0.3);
 }
 
 .el-button > span,
@@ -281,6 +281,29 @@ button:not(:disabled),
 
 .el-upload-list__item {
   border-radius: var(--radius-sm);
+}
+
+/* Keep blocking notices usable on narrow candidate and admin screens. */
+.el-overlay-message-box {
+  padding: 16px;
+}
+
+.el-message-box {
+  width: min(420px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  border-radius: var(--radius-md);
+}
+
+.el-message-box__content,
+.el-message-box__message,
+.el-message-box__message p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.el-message-box__btns {
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 /* ------------------------------------------------------------------
