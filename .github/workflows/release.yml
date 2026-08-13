@@ -80,12 +80,7 @@ jobs:
             set -euo pipefail
             sudo install -d -m 0755 /opt/auto-hr "$DEPLOY_WEB_ROOT"
             sudo rm -rf /tmp/auto-hr-release
-            sudo python3 - <<'PY'
-            import zipfile
-
-            with zipfile.ZipFile('/tmp/auto-hr-release.zip') as archive:
-                archive.extractall('/tmp/auto-hr-release')
-            PY
+            sudo python3 -c 'import zipfile; zipfile.ZipFile("/tmp/auto-hr-release.zip").extractall("/tmp/auto-hr-release")'
             sudo cp -a /tmp/auto-hr-release/auto-hr-release/. /opt/auto-hr/
             sudo cp -a /opt/auto-hr/frontend/. "$DEPLOY_WEB_ROOT"/
             sudo install -m 0644 /opt/auto-hr/auto-hr.service /etc/systemd/system/auto-hr.service
