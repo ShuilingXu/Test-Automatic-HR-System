@@ -39,18 +39,36 @@ jobs:
 
   deploy:
     needs: package
-    if: github.ref == 'refs/heads/main' && secrets.DEPLOY_HOST != '' && secrets.DEPLOY_USER != '' && secrets.DEPLOY_SSH_KEY != '' && secrets.DEPLOY_WEB_ROOT != ''
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: auto-hr-release
+      - name: Check deployment configuration
+        id: deployment
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_WEB_ROOT: ${{ secrets.DEPLOY_WEB_ROOT }}
+        run: |
+          if [ -n "$DEPLOY_HOST" ] && [ -n "$DEPLOY_USER" ] && [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_WEB_ROOT" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Deployment skipped: configure DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, and DEPLOY_WEB_ROOT repository secrets."
+          fi
       - name: Configure deployment key
+        if: steps.deployment.outputs.enabled == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          printf '%s' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_rsa
+          printf '%s' "$DEPLOY_SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
       - name: Deploy and restart service
+        if: steps.deployment.outputs.enabled == 'true'
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -58,4 +76,19 @@ jobs:
           DEPLOY_WEB_ROOT: ${{ secrets.DEPLOY_WEB_ROOT }}
         run: |
           scp -P "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new auto-hr-release.zip "$DEPLOY_USER@$DEPLOY_HOST:/tmp/auto-hr-release.zip"
-          ssh -p "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" "sudo install -d -m 0755 /opt/auto-hr \"$DEPLOY_WEB_ROOT\" && sudo unzip -oq /tmp/auto-hr-release.zip -d /tmp/auto-hr-release && sudo cp -a /tmp/auto-hr-release/auto-hr-release/. /opt/auto-hr/ && sudo cp -a /opt/auto-hr/frontend/. \"$DEPLOY_WEB_ROOT\"/ && sudo systemctl daemon-reload && sudo systemctl restart auto-hr"
+          ssh -p "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" "DEPLOY_WEB_ROOT='$DEPLOY_WEB_ROOT' bash -s" <<'REMOTE'
+            set -euo pipefail
+            sudo install -d -m 0755 /opt/auto-hr "$DEPLOY_WEB_ROOT"
+            sudo rm -rf /tmp/auto-hr-release
+            sudo python3 - <<'PY'
+            import zipfile
+
+            with zipfile.ZipFile('/tmp/auto-hr-release.zip') as archive:
+                archive.extractall('/tmp/auto-hr-release')
+            PY
+            sudo cp -a /tmp/auto-hr-release/auto-hr-release/. /opt/auto-hr/
+            sudo cp -a /opt/auto-hr/frontend/. "$DEPLOY_WEB_ROOT"/
+            sudo install -m 0644 /opt/auto-hr/auto-hr.service /etc/systemd/system/auto-hr.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable --now auto-hr
+          REMOTE
