@@ -9,7 +9,7 @@
         </RouterLink>
       </nav>
       <el-button class="side-link logout-btn" @click="logout">退出登录</el-button>
-      <RouterLink class="side-link" to="/interview/hr/processes">线上面试</RouterLink>
+      <RouterLink class="side-link" to="/interview/hr/processes">面试流程</RouterLink>
     </aside>
 
     <main class="console-main">
@@ -161,11 +161,21 @@
         </template>
       </section>
 
-      <section v-if="activeTab === 'bindings'" class="page-card">
-        <div class="topline"><div><p class="page-eyebrow">Integrations</p><h2>系统挂接</h2></div><el-button @click="loadBindings">刷新</el-button></div>
-        <el-form :model="bindingForm" label-position="top" class="form-grid"><el-form-item label="模块"><el-select v-model="bindingForm.moduleCode"><el-option label="招聘" value="RECRUITMENT" /><el-option label="绩效" value="PERFORMANCE" /><el-option label="面试" value="INTERVIEW" /></el-select></el-form-item><el-form-item label="业务类型"><el-input v-model="bindingForm.businessType" /></el-form-item><el-form-item label="员工"><el-select v-model="bindingForm.employeeId" clearable><el-option v-for="item in employees" :key="item.id" :label="item.fullName" :value="item.id" /></el-select></el-form-item><el-form-item label="部门"><el-select v-model="bindingForm.departmentId" clearable><el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" /></el-select></el-form-item><el-form-item label="外部引用"><el-input v-model="bindingForm.externalRef" /></el-form-item><el-form-item label="状态"><el-input v-model="bindingForm.bindingStatus" /></el-form-item></el-form>
-        <el-button type="primary" @click="saveBinding">保存挂接</el-button>
-        <el-table :data="bindings" stripe class="data-table" @row-click="openBinding"><el-table-column prop="moduleCode" label="模块" /><el-table-column prop="businessType" label="业务类型" /><el-table-column prop="employeeName" label="员工" /><el-table-column prop="departmentName" label="部门" /></el-table>
+      <section v-if="activeTab === 'content'" class="page-card">
+        <div class="topline"><div><p class="page-eyebrow">Site editor</p><h2>站点内容</h2><p class="page-subtitle">管理首页的信息发布。保存为草稿后，发布状态才会显示在公开首页。</p></div><el-button @click="loadContent">刷新</el-button></div>
+        <div class="content-editor-layout">
+          <el-form :model="contentForm" label-position="top" class="content-form">
+            <el-form-item label="标题"><el-input v-model="contentForm.title" placeholder="例如：春季招聘开放" /></el-form-item>
+            <el-form-item label="摘要"><el-input v-model="contentForm.summary" maxlength="140" show-word-limit placeholder="首页列表中展示的一句话" /></el-form-item>
+            <el-form-item label="正文"><el-input v-model="contentForm.content" type="textarea" :rows="9" placeholder="支持纯文本，建议分段书写" /></el-form-item>
+            <div class="form-row"><el-form-item label="内容类型"><el-select v-model="contentForm.type"><el-option label="公告" value="announcement" /><el-option label="团队动态" value="story" /><el-option label="招聘说明" value="guide" /></el-select></el-form-item><el-form-item label="发布时间"><el-input v-model="contentForm.publishedAt" placeholder="2026-08-13 09:00" /></el-form-item></div>
+            <el-form-item><el-checkbox v-model="contentForm.published">发布到首页</el-checkbox></el-form-item>
+            <div class="action-row"><el-button type="primary" @click="saveContent">保存内容</el-button><el-button @click="resetContentForm">新建内容</el-button></div>
+          </el-form>
+          <aside class="content-preview"><div class="preview-label">首页预览</div><p class="preview-date">{{ contentForm.publishedAt || '未设置日期' }}</p><h3>{{ contentForm.title || '内容标题' }}</h3><p>{{ contentForm.summary || contentForm.content || '这里会显示首页信息摘要。' }}</p><span :class="['publish-state', { published: contentForm.published }]">{{ contentForm.published ? '已发布' : '草稿' }}</span></aside>
+        </div>
+        <div class="content-table-head"><h3>已保存内容</h3><span>{{ contentItems.length }} 条</span></div>
+        <el-table :data="contentItems" stripe class="data-table" @row-click="editContent"><el-table-column prop="title" label="标题" min-width="200" /><el-table-column prop="type" label="类型" width="110" /><el-table-column prop="publishedAt" label="时间" width="160" /><el-table-column label="状态" width="100"><template #default="scope"><el-tag :type="scope.row.published ? 'success' : 'info'">{{ scope.row.published ? '已发布' : '草稿' }}</el-tag></template></el-table-column><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteContent(scope.row.id)">删除</el-button></template></el-table-column></el-table>
       </section>
 
       <section v-if="activeTab === 'recruitment'" class="page-card">
@@ -204,7 +214,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { authApi, hrApi, interviewApi, recruitmentApi } from '../services/api'
+import { authApi, hrApi, interviewApi, recruitmentApi, siteContentApi } from '../services/api'
 
 const router = useRouter()
 const route = useRoute()
@@ -216,7 +226,7 @@ const tabs = computed(() => {
     { key: 'dashboard', label: '总览', to: '/admin/dashboard' },
     { key: 'departments', label: '部门', to: '/admin/departments' },
     { key: 'employees', label: '员工', to: '/admin/employees' },
-    { key: 'bindings', label: '挂接', to: '/admin/bindings' },
+    { key: 'content', label: '站点内容', to: '/admin/content' },
     { key: 'recruitment', label: '招聘', to: '/admin/recruitment/jobs' },
   ]
   if (isItAdmin.value || isHrAdmin.value) {
@@ -233,7 +243,7 @@ const recruitmentMode = ref(route.meta.recruitmentMode || 'jobCreate')
 const dashboard = reactive({ departmentCount: 0, employeeCount: 0, activeEmployeeCount: 0, pendingOnboardingCount: 0, recruitmentBindingCount: 0, performanceBindingCount: 0 })
 const departments = ref([])
 const employees = ref([])
-const bindings = ref([])
+const contentItems = ref([])
 const jobs = ref([])
 const candidates = ref([])
 const users = ref([])
@@ -242,13 +252,13 @@ const auditLogs = ref([])
 const userForm = reactive({ id: null, username: '', displayName: '', roleCode: 'HR_USER', status: 1, mobilePhone: '', email: '', newPassword: '' })
 const departmentForm = reactive({ id: null, departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '', sortOrder: 0, status: 1 })
 const employeeForm = reactive({ id: null, employeeCode: '', fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' })
-const bindingForm = reactive({ moduleCode: 'RECRUITMENT', businessType: 'EMPLOYEE_SYNC', employeeId: null, departmentId: null, externalRef: '', bindingStatus: 'ACTIVE', payload: '{"source":"frontend-demo"}' })
 const jobForm = reactive({ id: null, jobTitle: '', jobCode: '', departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 })
 const auditFilter = reactive({ moduleCode: '', actionCode: '', keyword: '' })
 const departmentFilter = reactive({ parentDepartmentId: null, status: null, keyword: '' })
 const employeeFilter = reactive({ departmentId: null, employmentStatus: null, keyword: '' })
 const jobFilter = reactive({ status: null, departmentName: '', jobType: '', keyword: '' })
 const candidateFilter = reactive({ jobId: null, status: '', interviewStageStatus: '', keyword: '' })
+const contentForm = reactive({ id: null, type: 'announcement', title: '', summary: '', content: '', cover: '', published: false, publishedAt: '' })
 
 const roleLabels = {
   IT_ADMIN: 'IT管理员',
@@ -265,8 +275,6 @@ const actionLabels = {
   CREATE_EMPLOYEE: '新增员工',
   UPDATE_EMPLOYEE: '修改员工',
   DELETE_EMPLOYEE: '删除员工',
-  CREATE_BINDING: '新增系统挂接',
-  UPDATE_BINDING: '修改系统挂接',
   CREATE_RECRUITMENT_JOB: '新增招聘岗位',
   UPDATE_RECRUITMENT_JOB: '修改招聘岗位',
   DELETE_RECRUITMENT_JOB: '删除招聘岗位',
@@ -293,7 +301,6 @@ const targetLabels = {
   SYS_USER: '系统用户',
   HR_DEPARTMENT: '部门',
   HR_EMPLOYEE: '员工',
-  HR_INTEGRATION_BINDING: '系统挂接',
   RECRUITMENT_JOB: '招聘岗位',
   RECRUITMENT_CANDIDATE: '候选人',
   RECRUITMENT_RESUME: '简历文件',
@@ -314,8 +321,8 @@ const metrics = computed(() => [
   { label: '员工', value: dashboard.employeeCount },
   { label: '在职', value: dashboard.activeEmployeeCount },
   { label: '待入职', value: dashboard.pendingOnboardingCount },
-  { label: '招聘挂接', value: dashboard.recruitmentBindingCount },
-  { label: '绩效挂接', value: dashboard.performanceBindingCount },
+  { label: '开放岗位', value: jobs.value.length },
+  { label: '首页信息', value: contentItems.value.length },
 ])
 const availableParentDepartments = computed(() => departments.value.filter((item) => item.id !== departmentForm.id))
 const auditGroups = computed(() => [
@@ -336,16 +343,19 @@ async function loadSession() { try { const response = await authApi.getSession()
 async function loadDashboard() { try { Object.assign(dashboard, (await hrApi.getDashboard()).data) } catch (error) { fail(error) } }
 async function loadDepartments() { try { departments.value = (await hrApi.listDepartments(cleanParams(departmentFilter))).data } catch (error) { fail(error) } }
 async function loadEmployees() { try { employees.value = (await hrApi.listEmployees(cleanParams(employeeFilter))).data } catch (error) { fail(error) } }
-async function loadBindings() { try { bindings.value = (await hrApi.listBindings()).data } catch (error) { fail(error) } }
+async function loadContent() { try { contentItems.value = (await siteContentApi.listAdmin()).data || [] } catch (error) { fail(error) } }
 async function loadJobs() { try { jobs.value = (await recruitmentApi.listAdminJobs(cleanParams(jobFilter))).data } catch (error) { fail(error) } }
 async function loadCandidates() { try { candidates.value = (await recruitmentApi.listCandidates(cleanParams(candidateFilter))).data } catch (error) { fail(error) } }
 async function loadRecruitment() { await Promise.all([loadJobs(), loadCandidates()]) }
 async function loadUsers() { if (!(isItAdmin.value || isHrAdmin.value)) return; try { users.value = (await authApi.listUsers()).data } catch (error) { fail(error) } }
 async function loadAuditLogs() { if (!(isItAdmin.value || isHrAdmin.value)) return; try { const params = cleanParams({ ...auditFilter, actionCode: resolveActionCode(auditFilter.actionCode) }); auditLogs.value = (await authApi.listAuditLogs(params)).data } catch (error) { fail(error) } }
-async function loadAll() { await Promise.all([loadSession(), loadDashboard(), loadDepartments(), loadEmployees(), loadBindings(), loadRecruitment()]); if (isItAdmin.value || isHrAdmin.value) { await Promise.all([loadUsers(), loadAuditLogs()]) } syncRouteState() }
+async function loadAll() { await Promise.all([loadSession(), loadDashboard(), loadDepartments(), loadEmployees(), loadRecruitment(), loadContent()]); if (isItAdmin.value || isHrAdmin.value) { await Promise.all([loadUsers(), loadAuditLogs()]) } syncRouteState() }
 async function saveDepartment() { try { await hrApi.saveDepartment({ ...departmentForm }); ElMessage.success('部门已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveEmployee() { try { await hrApi.saveEmployee({ ...employeeForm }); ElMessage.success('员工已保存'); await loadAll() } catch (error) { fail(error) } }
-async function saveBinding() { try { await hrApi.saveBinding({ ...bindingForm }); ElMessage.success('挂接已保存'); await loadAll() } catch (error) { fail(error) } }
+async function saveContent() { try { const saved = (await siteContentApi.save({ ...contentForm })).data; Object.assign(contentForm, saved); ElMessage.success(contentForm.published ? '内容已发布' : '草稿已保存'); await loadContent() } catch (error) { fail(error) } }
+async function deleteContent(id) { try { await siteContentApi.remove(id); ElMessage.success('内容已删除'); if (contentForm.id === id) resetContentForm(); await loadContent() } catch (error) { fail(error) } }
+function resetContentForm() { Object.assign(contentForm, { id: null, type: 'announcement', title: '', summary: '', content: '', cover: '', published: false, publishedAt: '' }) }
+function editContent(row) { Object.assign(contentForm, row) }
 async function deleteDepartment(id) { try { await hrApi.deleteDepartment(id); ElMessage.success('部门已删除'); if (departmentForm.id === id) resetDepartmentForm(); await loadAll() } catch (error) { fail(error) } }
 async function deleteEmployee(id) { try { await hrApi.deleteEmployee(id); ElMessage.success('员工已删除'); if (employeeForm.id === id) resetEmployeeForm(); await loadAll() } catch (error) { fail(error) } }
 function resetJobForm() { Object.assign(jobForm, { id: null, jobTitle: '', jobCode: '', departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 }) }
@@ -367,7 +377,6 @@ function editEmployee(row) { Object.assign(employeeForm, row); employeeMode.valu
 function openUser(row) { router.push(`/admin/users/${row.id}`) }
 function openDepartment(row) { router.push(`/admin/departments/${row.id}`) }
 function openEmployee(row) { router.push(`/admin/employees/${row.id}`) }
-function openBinding(row) { Object.assign(bindingForm, row); router.push(`/admin/bindings/${row.id}`) }
 function openJob(row) { router.push(`/admin/recruitment/jobs/${row.id}`) }
 function openCandidate(row) { router.push(`/admin/recruitment/candidates/${row.id}`) }
 function resumeUrl(id) { return recruitmentApi.getResumeUrl(id) }
@@ -439,22 +448,19 @@ function syncRouteState() {
   } else if (route.name === 'admin-recruitment-job-detail') {
     const row = jobs.value.find((item) => item.id === id)
     if (row) editJob(row)
-  } else if (activeTab.value === 'bindings') {
-    const row = bindings.value.find((item) => item.id === id)
-    if (row) Object.assign(bindingForm, row)
   }
 }
 </script>
 
 <style scoped>
 .console-shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 24px; }
-.console-side { position: sticky; top: 32px; z-index: 2; min-width: 0; background: var(--ink); color: #f8fafc; border-radius: var(--radius-lg); padding: 24px; display: flex; flex-direction: column; gap: 12px; min-height: calc(100vh - 64px); box-shadow: var(--shadow-card); }
+.console-side { position: sticky; top: 32px; z-index: 2; min-width: 0; background: #164f46; color: #f5f8f5; border-radius: var(--radius-lg); padding: 24px; display: flex; flex-direction: column; gap: 12px; min-height: calc(100vh - 64px); box-shadow: var(--shadow-card); }
 .console-side h1 { margin: 0; line-height: 1.1; font-size: 22px; color: #f8fafc; }
-.console-side .page-eyebrow { color: rgba(248,250,252,0.55); }
+.console-side .page-eyebrow { color: rgba(220, 242, 230, 0.66); }
 .console-side nav { display: grid; gap: 6px; margin-top: 4px; }
 .console-side .side-link { color: rgba(248,250,252,0.8); background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.1); justify-content: flex-start; }
 .console-side .side-link:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.2); color: #f8fafc; }
-.console-side .side-link.active { background: #ffffff; border-color: rgba(255,255,255,0.9); color: var(--ink); }
+.console-side .side-link.active { background: #d7ede1; border-color: rgba(255,255,255,0.9); color: #164f46; }
 .console-side .el-button { color: rgba(248,250,252,0.8); background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.1); justify-content: flex-start; }
 .console-side .el-button:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.2); color: #f8fafc; }
 .logout-btn { margin-top: auto; }
@@ -462,7 +468,7 @@ function syncRouteState() {
 .topline { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
 .topline h2 { margin: 6px 0 0; }
 .metric-grid { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 14px; }
-.metric { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 20px; box-shadow: 0 1px 2px rgba(15,23,42,0.04); }
+.metric { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 20px; box-shadow: 0 1px 2px rgba(23,33,31,0.04); }
 .metric span { display: block; color: var(--text-muted); font-size: 13px; margin-bottom: 8px; }
 .metric strong { font-size: 28px; font-weight: 800; color: var(--ink); }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin-top: 18px; }
@@ -483,8 +489,15 @@ function syncRouteState() {
 .audit-panel-head h3 { margin: 0; }
 .audit-panel-head span { color: var(--text-muted); font-weight: 600; font-size: 13px; }
 .compact-table { margin-top: 12px; }
+.content-editor-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(240px, .75fr); gap: 22px; margin-top: 24px; }
+.content-form { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.content-preview { min-width: 0; min-height: 280px; padding: 22px; border: 1px solid #cbd7d1; border-radius: var(--radius-md); background: #f5f8f5; }
+.preview-label { color: #175c50; font-size: 11px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }.preview-date { margin: 34px 0 12px; color: #7b8781; font-size: 12px; }.content-preview h3 { margin: 0 0 11px; font-size: 22px; }.content-preview p:not(.preview-date) { color: #68766f; line-height: 1.7; }.publish-state { display: inline-flex; margin-top: 22px; padding: 5px 9px; border-radius: 999px; background: #e9edf0; color: #66737c; font-size: 12px; }.publish-state.published { color: #175c50; background: #dceee7; }
+.content-table-head { display: flex; align-items: center; justify-content: space-between; margin-top: 30px; }.content-table-head h3 { margin: 0; }.content-table-head span { color: var(--text-muted); font-size: 13px; }
 @media (max-width: 1200px) { .audit-grid { grid-template-columns: 1fr; } }
 @media (max-width: 1200px) { .metric-grid { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
-@media (max-width: 980px) { .console-shell { grid-template-columns: 1fr; } .console-side { position: relative; top: auto; min-height: auto; } .form-grid { grid-template-columns: 1fr; } }
+@media (max-width: 980px) { .console-shell { grid-template-columns: 1fr; } .console-side { position: relative; top: auto; min-height: auto; } .form-grid, .content-editor-layout { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .form-row { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .metric-grid { grid-template-columns: 1fr; } }
 </style>

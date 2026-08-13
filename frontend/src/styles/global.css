@@ -4,36 +4,36 @@
   font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
 
   /* ---- design tokens ---- */
-  --ink: #0f172a;
-  --ink-soft: #334155;
-  --text-muted: #64748b;
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
-  --bg: #f4f6fb;
+  --ink: #17211f;
+  --ink-soft: #3f504a;
+  --text-muted: #718079;
+  --border: #dce5df;
+  --border-strong: #c4d1c9;
+  --bg: #f1f4f1;
   --surface: #ffffff;
   --surface-soft: #f8fafc;
-  --primary: #4f46e5;
-  --primary-dark: #4338ca;
-  --primary-soft: #eef2ff;
-  --primary-ring: rgba(79, 70, 229, 0.14);
+  --primary: #176052;
+  --primary-dark: #12483e;
+  --primary-soft: #e5f1eb;
+  --primary-ring: rgba(23, 96, 82, 0.14);
   --danger: #dc2626;
   --danger-soft: #fef2f2;
   --warning: #d97706;
   --success: #16a34a;
-  --radius-lg: 16px;
-  --radius-md: 12px;
-  --radius-sm: 10px;
-  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 30px -12px rgba(15, 23, 42, 0.12);
-  --shadow-hover: 0 4px 12px -2px rgba(15, 23, 42, 0.08), 0 16px 40px -12px rgba(15, 23, 42, 0.16);
+  --radius-lg: 12px;
+  --radius-md: 8px;
+  --radius-sm: 6px;
+  --shadow-card: 0 1px 2px rgba(23, 33, 31, 0.04), 0 12px 32px -18px rgba(23, 33, 31, 0.2);
+  --shadow-hover: 0 7px 18px -8px rgba(23, 33, 31, 0.24);
 
   /* ---- element-plus theme ---- */
-  --el-color-primary: #4f46e5;
-  --el-color-primary-dark-2: #4338ca;
-  --el-color-primary-light-3: #7c74ec;
-  --el-color-primary-light-5: #a5a0f2;
-  --el-color-primary-light-7: #cac7f8;
-  --el-color-primary-light-8: #dcdafb;
-  --el-color-primary-light-9: #eef2ff;
+  --el-color-primary: #176052;
+  --el-color-primary-dark-2: #12483e;
+  --el-color-primary-light-3: #5a988b;
+  --el-color-primary-light-5: #8db9ae;
+  --el-color-primary-light-7: #c0d9d1;
+  --el-color-primary-light-8: #d7e8e1;
+  --el-color-primary-light-9: #e5f1eb;
   --el-color-danger: #dc2626;
   --el-color-warning: #d97706;
   --el-color-success: #16a34a;
@@ -71,7 +71,7 @@ a {
 }
 
 ::selection {
-  background: rgba(79, 70, 229, 0.18);
+  background: rgba(23, 96, 82, 0.18);
 }
 
 h1,
@@ -291,10 +291,7 @@ button:not(:disabled),
   overflow-x: hidden;
   min-height: 100vh;
   padding: 32px 28px 48px;
-  background:
-    radial-gradient(900px 400px at 8% -10%, rgba(79, 70, 229, 0.07), transparent 60%),
-    radial-gradient(800px 420px at 96% 0%, rgba(14, 165, 233, 0.06), transparent 55%),
-    var(--bg);
+  background: var(--bg);
 }
 
 .page-card {

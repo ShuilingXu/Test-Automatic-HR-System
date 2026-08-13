@@ -77,99 +77,34 @@
       </section>
 
       <section v-if="activeTab === 'system'" class="surface">
-        <h3>系统配置</h3>
-        <p class="serial-line">配置写入服务器 .env 文件，敏感字段显示为掩码，保存时留空则不覆盖。</p>
-        <div class="llm-config-grid">
-          <div class="surface inner-surface">
-            <h3>阿里云短信</h3>
-            <el-form label-position="top" class="form-grid">
-              <el-form-item label="AccessKey ID"><el-input v-model="systemConfig.ALIYUN_ACCESS_KEY_ID" /></el-form-item>
-              <el-form-item label="AccessKey Secret"><el-input v-model="systemConfig.ALIYUN_ACCESS_KEY_SECRET" type="password" show-password placeholder="留空则不覆盖" /></el-form-item>
-              <el-form-item label="短信签名"><el-input v-model="systemConfig.ALIYUN_SMS_SIGN_NAME" /></el-form-item>
-              <el-form-item label="短信模板Code"><el-input v-model="systemConfig.ALIYUN_SMS_TEMPLATE_CODE" /></el-form-item>
-            </el-form>
-          </div>
-          <div class="surface inner-surface">
-            <h3>注册邮箱 SMTP</h3>
-            <el-form label-position="top" class="form-grid">
-              <el-form-item label="SMTP服务器"><el-input v-model="systemConfig.SMTP_HOST" placeholder="smtp.example.com" /></el-form-item>
-              <el-form-item label="SMTP端口"><el-input v-model="systemConfig.SMTP_PORT" placeholder="587" /></el-form-item>
-              <el-form-item label="用户名"><el-input v-model="systemConfig.SMTP_USERNAME" /></el-form-item>
-              <el-form-item label="密码"><el-input v-model="systemConfig.SMTP_PASSWORD" type="password" show-password placeholder="留空则不覆盖" /></el-form-item>
-              <el-form-item label="发件人"><el-input v-model="systemConfig.SMTP_FROM" placeholder="默认使用用户名" /></el-form-item>
-              <el-form-item label="SSL启用"><el-input v-model="systemConfig.SMTP_SSL_ENABLED" placeholder="true / false" /></el-form-item>
-              <el-form-item label="STARTTLS启用"><el-input v-model="systemConfig.SMTP_STARTTLS_ENABLED" placeholder="true / false" /></el-form-item>
-            </el-form>
-          </div>
-        </div>
-        <div class="action-row"><el-button type="primary" :loading="savingSystemConfig" @click="saveSystemConfig">保存系统配置</el-button></div>
+        <div class="config-heading"><div><h3>面试系统配置</h3><p class="serial-line">运行参数保存到服务器 .env，保存后部分参数需要重启服务生效。</p></div><span class="env-badge">.env</span></div>
+        <div class="config-tabs" role="tablist"><button v-for="tab in configTabs" :key="tab.key" :class="{ active: configTab === tab.key }" @click="configTab = tab.key">{{ tab.label }}</button></div>
 
-        <h3 class="section-title">LLM 模型连接配置</h3>
-        <div class="llm-config-grid">
-          <div class="surface inner-surface">
-            <h3>面试官 LLM A</h3>
-            <el-form :model="interviewerLlmForm" label-position="top" class="form-grid">
-              <el-form-item label="配置名称"><el-input v-model="interviewerLlmForm.configName" /></el-form-item>
-              <el-form-item label="OpenAI接口地址"><el-input v-model="interviewerLlmForm.baseUrl" /></el-form-item>
-              <el-form-item label="API Key"><el-input v-model="interviewerLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
-              <el-form-item label="模型名称"><el-input v-model="interviewerLlmForm.modelName" /></el-form-item>
-              <el-form-item label="提问提示词模板" class="wide"><el-input v-model="interviewerLlmForm.promptTemplate" type="textarea" :rows="4" /></el-form-item>
+        <template v-if="configTab !== 'models'">
+          <div class="config-panel-head"><div><h3>{{ currentConfigGroup.title }}</h3><p>{{ currentConfigGroup.description }}</p></div></div>
+          <el-form label-position="top" class="config-form-grid">
+            <el-form-item v-for="field in currentConfigGroup.fields" :key="field.key" :label="field.label">
+              <el-input v-model="systemConfig[field.key]" :type="field.secret ? 'password' : 'text'" :show-password="field.secret" :placeholder="field.placeholder || ''" />
+            </el-form-item>
+          </el-form>
+          <div class="action-row"><el-button type="primary" :loading="savingSystemConfig" @click="saveSystemConfig">保存当前参数</el-button></div>
+        </template>
+
+        <template v-else>
+          <div class="model-tabs"><button v-for="model in modelTabs" :key="model.role" :class="{ active: modelTab === model.role }" @click="modelTab = model.role">{{ model.label }}</button></div>
+          <div class="model-editor">
+            <div class="config-panel-head"><div><h3>{{ currentModel.label }}</h3><p>{{ currentModel.description }}</p></div><span class="key-state">密钥：{{ currentModel.keyLabel() }}</span></div>
+            <el-form :model="currentModel.form" label-position="top" class="config-form-grid">
+              <el-form-item label="配置名称"><el-input v-model="currentModel.form.configName" /></el-form-item>
+              <el-form-item :label="currentModel.role === 'VIDEO_TRANSCRIBER' ? 'NLS 网关地址' : '接口地址'"><el-input v-model="currentModel.form.baseUrl" /></el-form-item>
+              <el-form-item :label="currentModel.role === 'VIDEO_TRANSCRIBER' ? 'AccessKey Secret' : 'API Key'"><el-input v-model="currentModel.form.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
+              <el-form-item :label="currentModel.role === 'VIDEO_TRANSCRIBER' ? 'AppKey' : '模型名称'"><el-input v-model="currentModel.form.modelName" /></el-form-item>
+              <el-form-item v-if="currentModel.role === 'VIDEO_TRANSCRIBER'" label="AccessKey ID" class="wide"><el-input v-model="currentModel.form.promptTemplate" /></el-form-item>
+              <el-form-item v-else :label="currentModel.promptLabel" class="wide"><el-input v-model="currentModel.form[currentModel.promptField]" type="textarea" :rows="6" /></el-form-item>
             </el-form>
-            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(interviewerLlmForm, 'INTERVIEWER')">保存面试官模型</el-button><span class="serial-line">API Key：{{ interviewerKeyLabel }}</span></div>
+            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(currentModel.form, currentModel.role)">保存模型配置</el-button></div>
           </div>
-          <div class="surface inner-surface">
-            <h3>评分 LLM B</h3>
-            <el-form :model="scorerLlmForm" label-position="top" class="form-grid">
-              <el-form-item label="配置名称"><el-input v-model="scorerLlmForm.configName" /></el-form-item>
-              <el-form-item label="OpenAI接口地址"><el-input v-model="scorerLlmForm.baseUrl" /></el-form-item>
-              <el-form-item label="API Key"><el-input v-model="scorerLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
-              <el-form-item label="模型名称"><el-input v-model="scorerLlmForm.modelName" /></el-form-item>
-              <el-form-item label="系统级评分提示词" class="wide"><el-input v-model="scorerLlmForm.scoringRulePrompt" type="textarea" :rows="4" /></el-form-item>
-            </el-form>
-            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(scorerLlmForm, 'SCORER')">保存评分模型</el-button><span class="serial-line">API Key：{{ scorerKeyLabel }}</span></div>
-          </div>
-          <div class="surface inner-surface">
-            <h3>简历初筛 LLM</h3>
-            <el-form :model="resumeReviewLlmForm" label-position="top" class="form-grid">
-              <el-form-item label="配置名称"><el-input v-model="resumeReviewLlmForm.configName" /></el-form-item>
-              <el-form-item label="OpenAI接口地址"><el-input v-model="resumeReviewLlmForm.baseUrl" /></el-form-item>
-              <el-form-item label="API Key"><el-input v-model="resumeReviewLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
-              <el-form-item label="模型名称"><el-input v-model="resumeReviewLlmForm.modelName" /></el-form-item>
-              <el-form-item label="用户填写提示词" class="wide"><el-input v-model="resumeReviewLlmForm.scoringRulePrompt" type="textarea" :rows="4" placeholder="例如：重点考察岗位硬技能、项目经历、稳定性和薪资匹配度" /></el-form-item>
-            </el-form>
-            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(resumeReviewLlmForm, 'RESUME_REVIEW')">保存简历初筛模型</el-button><span class="serial-line">API Key：{{ resumeReviewKeyLabel }}</span></div>
-          </div>
-          <div class="surface inner-surface">
-            <h3>阿里云视频语音转文字</h3>
-            <el-form :model="videoTranscriberLlmForm" label-position="top" class="form-grid">
-              <el-form-item label="配置名称"><el-input v-model="videoTranscriberLlmForm.configName" /></el-form-item>
-              <el-form-item label="NLS网关地址"><el-input v-model="videoTranscriberLlmForm.baseUrl" placeholder="wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1" /></el-form-item>
-              <el-form-item label="AccessKey ID"><el-input v-model="videoTranscriberLlmForm.promptTemplate" placeholder="用于自动获取NLS AccessToken" /></el-form-item>
-              <el-form-item label="AccessKey Secret"><el-input v-model="videoTranscriberLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原Secret" /></el-form-item>
-              <el-form-item label="AppKey"><el-input v-model="videoTranscriberLlmForm.modelName" placeholder="阿里云智能语音交互项目AppKey" /></el-form-item>
-            </el-form>
-            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(videoTranscriberLlmForm, 'VIDEO_TRANSCRIBER')">保存阿里云STT配置</el-button><span class="serial-line">AccessKey Secret：{{ videoTranscriberKeyLabel }}</span></div>
-          </div>
-          <div class="surface inner-surface">
-            <h3>视频会议概要 LLM</h3>
-            <el-form :model="videoSummaryLlmForm" label-position="top" class="form-grid">
-              <el-form-item label="配置名称"><el-input v-model="videoSummaryLlmForm.configName" /></el-form-item>
-              <el-form-item label="OpenAI接口地址"><el-input v-model="videoSummaryLlmForm.baseUrl" /></el-form-item>
-              <el-form-item label="API Key"><el-input v-model="videoSummaryLlmForm.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
-              <el-form-item label="模型名称"><el-input v-model="videoSummaryLlmForm.modelName" /></el-form-item>
-              <el-form-item label="概要提示词" class="wide"><el-input v-model="videoSummaryLlmForm.scoringRulePrompt" type="textarea" :rows="4" placeholder="例如：总结候选人表现、沟通能力、风险点和录用建议" /></el-form-item>
-            </el-form>
-            <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(videoSummaryLlmForm, 'VIDEO_SUMMARY')">保存会议概要模型</el-button><span class="serial-line">API Key：{{ videoSummaryKeyLabel }}</span></div>
-          </div>
-        </div>
-        <el-table :data="llmConfigs" stripe class="data-table" @row-click="openLlmConfig">
-          <el-table-column prop="configName" label="配置名称" />
-          <el-table-column prop="modelRole" label="角色" />
-          <el-table-column prop="baseUrl" label="接口地址" min-width="220" />
-          <el-table-column prop="apiKeyMasked" label="API Key" />
-          <el-table-column prop="modelName" label="模型" />
-          <el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteLlmConfig(scope.row.id)">删除</el-button></template></el-table-column>
-        </el-table>
+        </template>
       </section>
 
       <section v-if="activeTab === 'process' && !isProcessDetail" class="surface">
@@ -334,6 +269,8 @@ const videoActive = ref(false)
 const processRemark = ref('')
 const savingRemark = ref(false)
 const savingSystemConfig = ref(false)
+const configTab = ref('notifications')
+const modelTab = ref('INTERVIEWER')
 
 const hrLocalVideo = ref(null)
 const hrRemoteVideo = ref(null)
@@ -371,13 +308,49 @@ const systemConfig = reactive({
   SMTP_FROM: '',
   SMTP_SSL_ENABLED: '',
   SMTP_STARTTLS_ENABLED: '',
+  ALIYUN_STT_APP_KEY: '', ALIYUN_STT_ENDPOINT: '', ALIYUN_OSS_BUCKET_NAME: '', ALIYUN_OSS_ENDPOINT: '',
+  DB_TYPE: '', DB_URL: '', DB_USERNAME: '', DB_PASSWORD: '', JWT_SECRET: '',
+  INTERVIEW_VIDEO_FFMPEG_PATH: '', INTERVIEW_VIDEO_VIDEO_CODEC: '', INTERVIEW_VIDEO_AUDIO_CODEC: '',
+  INTERVIEW_STUN_URLS: '', INTERVIEW_TURN_URLS: '', INTERVIEW_TURN_USERNAME: '', INTERVIEW_TURN_CREDENTIAL: '',
+  TURN_HOST: '', TURN_EXTERNAL_IP: '', TURN_PRIVATE_IP: '', TURN_REALM: '', TURN_MIN_PORT: '', TURN_MAX_PORT: '',
+  RESUME_OCR_ENABLED: '', RESUME_OCR_TESSERACT_PATH: '', RESUME_OCR_LANGUAGE: '', RESUME_OCR_DPI: '', RESUME_OCR_MAX_PAGES: '',
 })
 
+const configTabs = [
+  { key: 'notifications', label: '通知服务' },
+  { key: 'media', label: '面试媒体' },
+  { key: 'database', label: '数据库与安全' },
+  { key: 'resume', label: '简历识别' },
+  { key: 'models', label: 'AI 模型' },
+]
+const configGroups = {
+  notifications: { title: '通知服务', description: '短信验证码与注册邮件使用的接口参数。', fields: [
+    { key: 'ALIYUN_ACCESS_KEY_ID', label: '阿里云 AccessKey ID' }, { key: 'ALIYUN_ACCESS_KEY_SECRET', label: '阿里云 AccessKey Secret', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_SMS_SIGN_NAME', label: '短信签名' }, { key: 'ALIYUN_SMS_TEMPLATE_CODE', label: '短信模板 Code' }, { key: 'SMTP_HOST', label: 'SMTP 服务器', placeholder: 'smtp.example.com' }, { key: 'SMTP_PORT', label: 'SMTP 端口', placeholder: '587' }, { key: 'SMTP_USERNAME', label: 'SMTP 用户名' }, { key: 'SMTP_PASSWORD', label: 'SMTP 密码', secret: true, placeholder: '留空则不覆盖' }, { key: 'SMTP_FROM', label: '发件人' }, { key: 'SMTP_SSL_ENABLED', label: 'SSL 启用', placeholder: 'true / false' }, { key: 'SMTP_STARTTLS_ENABLED', label: 'STARTTLS 启用', placeholder: 'true / false' },
+  ] },
+  media: { title: '面试媒体', description: '视频编码、WebRTC 网络和语音转文字服务参数。', fields: [
+    { key: 'INTERVIEW_VIDEO_FFMPEG_PATH', label: 'FFmpeg 路径', placeholder: 'ffmpeg' }, { key: 'INTERVIEW_VIDEO_VIDEO_CODEC', label: '视频编码器' }, { key: 'INTERVIEW_VIDEO_AUDIO_CODEC', label: '音频编码器' }, { key: 'INTERVIEW_STUN_URLS', label: 'STUN 地址' }, { key: 'INTERVIEW_TURN_URLS', label: 'TURN 地址' }, { key: 'INTERVIEW_TURN_USERNAME', label: 'TURN 用户名' }, { key: 'INTERVIEW_TURN_CREDENTIAL', label: 'TURN 凭证', secret: true }, { key: 'ALIYUN_STT_APP_KEY', label: '阿里云 STT AppKey' }, { key: 'ALIYUN_STT_ENDPOINT', label: '阿里云 STT Endpoint' }, { key: 'ALIYUN_OSS_BUCKET_NAME', label: 'OSS Bucket' }, { key: 'ALIYUN_OSS_ENDPOINT', label: 'OSS Endpoint' }, { key: 'TURN_HOST', label: 'TURN 主机' }, { key: 'TURN_EXTERNAL_IP', label: 'TURN 外部 IP' }, { key: 'TURN_PRIVATE_IP', label: 'TURN 内部 IP' }, { key: 'TURN_REALM', label: 'TURN Realm' }, { key: 'TURN_MIN_PORT', label: 'TURN 最小端口' }, { key: 'TURN_MAX_PORT', label: 'TURN 最大端口' },
+  ] },
+  database: { title: '数据库与安全', description: '数据库连接和 JWT 签名参数。敏感值以掩码显示。', fields: [
+    { key: 'DB_TYPE', label: '数据库类型', placeholder: 'sqlite / mysql / postgresql' }, { key: 'DB_URL', label: '数据库 URL' }, { key: 'DB_USERNAME', label: '数据库用户名' }, { key: 'DB_PASSWORD', label: '数据库密码', secret: true, placeholder: '留空则不覆盖' }, { key: 'JWT_SECRET', label: 'JWT Secret', secret: true, placeholder: '至少 32 位，留空则不覆盖' },
+  ] },
+  resume: { title: '简历识别', description: '简历 OCR 的开关、语言和处理限制。', fields: [
+    { key: 'RESUME_OCR_ENABLED', label: 'OCR 启用', placeholder: 'true / false' }, { key: 'RESUME_OCR_TESSERACT_PATH', label: 'Tesseract 路径' }, { key: 'RESUME_OCR_LANGUAGE', label: '识别语言', placeholder: 'chi_sim+eng' }, { key: 'RESUME_OCR_DPI', label: '识别 DPI' }, { key: 'RESUME_OCR_MAX_PAGES', label: '最大页数' },
+  ] },
+}
+const currentConfigGroup = computed(() => configGroups[configTab.value] || configGroups.notifications)
 const interviewerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')?.apiKeyMasked || '未配置')
 const scorerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'SCORER')?.apiKeyMasked || '未配置')
 const resumeReviewKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'RESUME_REVIEW')?.apiKeyMasked || '未配置，默认回退评分模型')
 const videoTranscriberKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'VIDEO_TRANSCRIBER')?.apiKeyMasked || '未配置')
 const videoSummaryKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'VIDEO_SUMMARY')?.apiKeyMasked || '未配置')
+const modelTabs = [
+  { role: 'INTERVIEWER', label: '面试官', description: '生成面试问题和追问。', keyLabel: () => interviewerKeyLabel.value, form: interviewerLlmForm, promptField: 'promptTemplate', promptLabel: '提问提示词模板' },
+  { role: 'SCORER', label: '评分器', description: '根据回答和岗位要求生成评分。', keyLabel: () => scorerKeyLabel.value, form: scorerLlmForm, promptField: 'scoringRulePrompt', promptLabel: '评分提示词' },
+  { role: 'RESUME_REVIEW', label: '简历初筛', description: '对候选人简历进行初步匹配。', keyLabel: () => resumeReviewKeyLabel.value, form: resumeReviewLlmForm, promptField: 'scoringRulePrompt', promptLabel: '筛选提示词' },
+  { role: 'VIDEO_TRANSCRIBER', label: '视频转写', description: '将视频面试转换为文本。', keyLabel: () => videoTranscriberKeyLabel.value, form: videoTranscriberLlmForm, promptField: 'promptTemplate', promptLabel: '提示词' },
+  { role: 'VIDEO_SUMMARY', label: '会议概要', description: '总结视频面试表现和建议。', keyLabel: () => videoSummaryKeyLabel.value, form: videoSummaryLlmForm, promptField: 'scoringRulePrompt', promptLabel: '概要提示词' },
+]
+const currentModel = computed(() => modelTabs.find((item) => item.role === modelTab.value) || modelTabs[0])
 
 const canTerminate = computed(() => selectedProcess.value?.overallStatus === 'IN_PROGRESS')
 const canApproveAi = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'AI')
@@ -743,5 +716,9 @@ onMounted(loadAll)
 .video-summary-box p { margin: 0; color: var(--ink-soft); line-height: 1.7; }
 .video-summary-box strong { display: block; margin-bottom: 4px; color: var(--ink); }
 .data-table { margin-top: 18px; }
+.config-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }.config-heading h3, .config-panel-head h3 { margin: 0; }.config-heading .serial-line { margin: 8px 0 0; }.env-badge { padding: 5px 9px; border: 1px solid #bfd3c9; border-radius: 5px; background: #edf6f1; color: #175c50; font-size: 12px; font-weight: 700; }
+.config-tabs, .model-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0; padding-bottom: 12px; border-bottom: 1px solid var(--border); }.config-tabs button, .model-tabs button { padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink-soft); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }.config-tabs button:hover, .model-tabs button:hover { color: var(--primary); border-color: var(--primary); }.config-tabs button.active, .model-tabs button.active { color: #fff; background: var(--primary); border-color: var(--primary); }
+.config-panel-head { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin: 6px 0 18px; }.config-panel-head p { margin: 7px 0 0; color: var(--text-muted); line-height: 1.6; }.config-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }.model-editor { max-width: 880px; }.key-state { color: var(--text-muted); font-size: 13px; }.model-editor .action-row { margin-top: 18px; }
 @media (max-width: 900px) { .topline, .detail-headline { flex-direction: column; } .form-grid, .video-grid, .llm-config-grid, .preview-grid, .process-workbench, .candidate-info-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .config-form-grid { grid-template-columns: 1fr; } .config-heading, .config-panel-head { flex-direction: column; } }
 </style>

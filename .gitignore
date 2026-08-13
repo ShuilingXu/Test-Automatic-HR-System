@@ -29,6 +29,7 @@ Thumbs.db
 # Env
 .env
 .env.local
+.site-content.json
 *.log
 /backend/uploads/resumes
 /backend/uploads

@@ -1,7 +1,8 @@
 import axios from 'axios'
 
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
 const request = axios.create({
-  baseURL: '/api',
+  baseURL: apiBaseUrl,
   timeout: 10000,
 })
 
@@ -30,7 +31,9 @@ request.interceptors.response.use(
 
 function authenticatedFileUrl(path) {
   const token = window.localStorage.getItem('demo-token')
-  return token ? `${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : path
+  const normalizedPath = path.startsWith('/api') ? path.slice(4) : path
+  const url = `${apiBaseUrl.replace(/\/$/, '')}${normalizedPath}`
+  return token ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : url
 }
 
 export const hrApi = {
@@ -41,8 +44,6 @@ export const hrApi = {
   listEmployees(params) { return request.get('/hr/employees', { params }) },
   saveEmployee(payload) { return request.post('/hr/employees', payload) },
   deleteEmployee(id) { return request.delete(`/hr/employees/${id}`) },
-  listBindings(params) { return request.get('/hr/bindings', { params }) },
-  saveBinding(payload) { return request.post('/hr/bindings', payload) },
 }
 
 export const recruitmentApi = {
@@ -88,6 +89,13 @@ export const authApi = {
 export const systemApi = {
   getConfig() { return request.get('/system/config') },
   saveConfig(payload) { return request.post('/system/config', payload) },
+}
+
+export const siteContentApi = {
+  listPublished() { return request.get('/site-content') },
+  listAdmin() { return request.get('/site-content/admin') },
+  save(payload) { return request.post('/site-content/admin', payload) },
+  remove(id) { return request.delete(`/site-content/admin/${id}`) },
 }
 
 export const interviewApi = {
@@ -168,7 +176,8 @@ export const interviewApi = {
   submitAiAnswer(payload) { return request.post('/interview/interviewee/ai-answer', payload, { timeout: 120000 }) },
   async submitAiAnswerStream(payload, onEvent) {
     const token = window.localStorage.getItem('demo-token')
-    const response = await fetch('/api/interview/interviewee/ai-answer/stream', {
+    const streamUrl = `${apiBaseUrl.replace(/\/$/, '')}/interview/interviewee/ai-answer/stream`
+    const response = await fetch(streamUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

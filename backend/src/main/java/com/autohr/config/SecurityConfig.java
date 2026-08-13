@@ -27,6 +27,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/register/code", "/api/auth/captcha").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/recruitment/jobs/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/site-content").permitAll()
+                        .requestMatchers("/api/site-content/admin/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "IT_ADMIN", "HR_ADMIN")
+                        .requestMatchers("/api/system/**").hasAnyAuthority("ROLE_IT_ADMIN", "IT_ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/recruitment/candidates/**").hasAnyAuthority("ROLE_INTERVIEWEE", "INTERVIEWEE")
                         .requestMatchers("/api/auth/admin/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "IT_ADMIN", "HR_ADMIN")
                         .requestMatchers("/api/hr/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "ROLE_HR_USER", "IT_ADMIN", "HR_ADMIN", "HR_USER")
