@@ -11,7 +11,7 @@ PACKAGE_DIR="$RELEASE_DIR/$PACKAGE_NAME"
 if [ -d "$PACKAGE_DIR" ]; then
   rm -rf "$PACKAGE_DIR"
 fi
-mkdir -p "$PACKAGE_DIR/backend" "$PACKAGE_DIR/uploads" "$PACKAGE_DIR/logs"
+mkdir -p "$PACKAGE_DIR/backend" "$PACKAGE_DIR/frontend" "$PACKAGE_DIR/uploads" "$PACKAGE_DIR/logs"
 
 echo "Building backend tests..."
 mvn -q -f "$BACKEND_DIR/pom.xml" test
@@ -29,6 +29,7 @@ mvn -q -f "$BACKEND_DIR/pom.xml" -DskipTests package
 JAR_FILE="$(find "$BACKEND_DIR/target" -maxdepth 1 -name '*.jar' ! -name '*.original' | head -n 1)"
 test -n "$JAR_FILE"
 cp "$JAR_FILE" "$PACKAGE_DIR/backend/auto-hr.jar"
+cp -R "$FRONTEND_DIR/dist/." "$PACKAGE_DIR/frontend/"
 cp "$ROOT_DIR/.env.example" "$PACKAGE_DIR/.env.example"
 cp "$ROOT_DIR/scripts/start-release.sh" "$PACKAGE_DIR/start.sh"
 cp "$ROOT_DIR/scripts/auto-hr.service" "$PACKAGE_DIR/auto-hr.service"

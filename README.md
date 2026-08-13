@@ -417,7 +417,7 @@ SMTP_STARTTLS_ENABLED=true
 
 ### 一键发行包与 systemd
 
-GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。推送 `v*` 标签还会创建 GitHub Release。若在仓库 Secrets 配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY` 和可选的 `DEPLOY_PORT`，`main` 推送会自动发布到服务器。
+GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。推送 `v*` 标签还会创建 GitHub Release。若在仓库 Secrets 配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_WEB_ROOT` 和可选的 `DEPLOY_PORT`，`main` 推送会自动发布到服务器；`DEPLOY_WEB_ROOT` 应为 OpenResty/Nginx 的站点静态目录，例如 `/www/sites/hr.zroevn.cn/index`。
 
 本地也可生成同一发行包：
 
