@@ -10,6 +10,7 @@ public class AppDatabaseProperties {
     private String username;
     private String password;
     private String sqliteFallbackUrl = "jdbc:sqlite:autohr.db";
+    private boolean fallbackEnabled = true;
 
     public String getType() {
         return type;
@@ -49,5 +50,13 @@ public class AppDatabaseProperties {
 
     public void setSqliteFallbackUrl(String sqliteFallbackUrl) {
         this.sqliteFallbackUrl = sqliteFallbackUrl;
+    }
+
+    public boolean isFallbackEnabled() {
+        return fallbackEnabled;
+    }
+
+    public void setFallbackEnabled(boolean fallbackEnabled) {
+        this.fallbackEnabled = fallbackEnabled;
     }
 }

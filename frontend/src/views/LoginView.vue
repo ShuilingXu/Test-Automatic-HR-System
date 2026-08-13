@@ -26,8 +26,16 @@
           <el-form-item label="用户名"><el-input v-model="registerForm.username" /></el-form-item>
           <el-form-item label="密码"><el-input v-model="registerForm.password" type="password" show-password /></el-form-item>
           <el-form-item label="姓名"><el-input v-model="registerForm.displayName" /></el-form-item>
-          <el-form-item label="手机号"><el-input v-model="registerForm.mobilePhone" placeholder="手机号和邮箱择一填写" /></el-form-item>
-          <el-form-item label="邮箱"><el-input v-model="registerForm.email" placeholder="手机号和邮箱择一填写" /></el-form-item>
+          <el-form-item label="验证方式">
+            <el-radio-group v-model="registerForm.contactType" class="contact-type" @change="changeContactType">
+              <el-radio-button label="phone">手机号</el-radio-button>
+              <el-radio-button label="email">邮箱</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item :label="registerForm.contactType === 'phone' ? '手机号' : '邮箱'">
+            <el-input v-if="registerForm.contactType === 'phone'" v-model="registerForm.mobilePhone" placeholder="请输入手机号" />
+            <el-input v-else v-model="registerForm.email" placeholder="请输入邮箱" />
+          </el-form-item>
           <el-form-item label="验证码">
             <div class="code-row">
               <el-input v-model="registerForm.verificationCode" />
@@ -57,7 +65,7 @@ import { authApi } from '../services/api'
 
 const router = useRouter()
 const loginForm = reactive({ username: '', password: '', captchaId: '', captchaCode: '' })
-const registerForm = reactive({ username: '', password: '', displayName: '', mobilePhone: '', email: '', verificationCode: '', captchaId: '', captchaCode: '' })
+const registerForm = reactive({ username: '', password: '', displayName: '', contactType: 'phone', mobilePhone: '', email: '', verificationCode: '', captchaId: '', captchaCode: '' })
 const loginCaptcha = reactive({ imageBase64: '' })
 const registerCaptcha = reactive({ imageBase64: '' })
 const sendingCode = ref(false)
@@ -81,7 +89,8 @@ async function login() {
 
 async function register() {
   try {
-    await authApi.register({ ...registerForm })
+    const { contactType, ...payload } = registerForm
+    await authApi.register(payload)
     ElMessage.success('注册成功，请登录后完善信息')
     loginForm.username = registerForm.username
     loginForm.password = registerForm.password
@@ -91,11 +100,15 @@ async function register() {
   }
 }
 
+function changeContactType(type) {
+  if (type === 'phone') registerForm.email = ''
+  else registerForm.mobilePhone = ''
+}
+
 async function sendRegisterCode() {
-  const hasPhone = Boolean(registerForm.mobilePhone.trim())
-  const hasEmail = Boolean(registerForm.email.trim())
-  if (hasPhone === hasEmail) {
-    ElMessage.warning('手机号和邮箱必须择一填写')
+  const contact = registerForm.contactType === 'phone' ? registerForm.mobilePhone : registerForm.email
+  if (!contact.trim()) {
+    ElMessage.warning(registerForm.contactType === 'phone' ? '请填写手机号' : '请填写邮箱')
     return
   }
   sendingCode.value = true

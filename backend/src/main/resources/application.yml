@@ -63,5 +63,6 @@ app:
     username: ${DB_USERNAME:}
     password: ${DB_PASSWORD:}
     sqlite-fallback-url: ${SQLITE_FALLBACK_URL:jdbc:sqlite:autohr.db}
+    fallback-enabled: ${DB_FALLBACK_ENABLED:true}
   migration:
     enabled: ${MIGRATION_ENABLED:true}

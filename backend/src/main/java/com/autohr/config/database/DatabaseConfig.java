@@ -34,8 +34,8 @@ public class DatabaseConfig {
             log.info("Using {} database: {}", requested.type(), requested.url());
             return requested;
         } catch (SQLException ex) {
-            if (requestedType == DatabaseType.SQLITE) {
-                throw new IllegalStateException("SQLite database connection failed: " + requested.url(), ex);
+            if (requestedType == DatabaseType.SQLITE || !properties.isFallbackEnabled()) {
+                throw new IllegalStateException(requestedType + " database connection failed: " + requested.url(), ex);
             }
             ActiveDatabase fallback = new ActiveDatabase(
                     DatabaseType.SQLITE,

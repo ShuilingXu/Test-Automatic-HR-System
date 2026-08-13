@@ -393,6 +393,48 @@ JWT_SECRET=replace-with-a-secure-secret-at-least-32-chars
 
 如果 MySQL 或 PostgreSQL 连接失败，系统会尝试回退到 SQLite。
 
+### 生产 PostgreSQL 与邮件
+
+生产环境使用 PostgreSQL 时请设置 `DB_FALLBACK_ENABLED=false`。这样 PostgreSQL 不可用时服务会拒绝启动，而不会意外将新数据写入 SQLite。将 `.env.example` 复制为 `.env` 后，至少配置：
+
+```properties
+DB_TYPE=pgsql
+DB_URL=jdbc:postgresql://127.0.0.1:5432/hrsystem
+DB_USERNAME=hrsystem
+DB_PASSWORD=change-this-password
+DB_FALLBACK_ENABLED=false
+
+SMTP_HOST=smtp.office365.com
+SMTP_PORT=587
+SMTP_USERNAME=your-office365-mailbox@example.com
+SMTP_PASSWORD=your-smtp-password
+SMTP_FROM=your-office365-mailbox@example.com
+SMTP_SSL_ENABLED=false
+SMTP_STARTTLS_ENABLED=true
+```
+
+候选人注册页可选择使用手机号或邮箱接收验证码，两个联系方式互斥；短信验证码需要另行配置阿里云短信变量。
+
+### 一键发行包与 systemd
+
+GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。推送 `v*` 标签还会创建 GitHub Release。若在仓库 Secrets 配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY` 和可选的 `DEPLOY_PORT`，`main` 推送会自动发布到服务器。
+
+本地也可生成同一发行包：
+
+```bash
+bash scripts/package-release.sh
+```
+
+解压后保留已有 `.env` 与 `uploads/`，将 `auto-hr.service` 安装到 `/etc/systemd/system/auto-hr.service`，并执行：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now auto-hr
+sudo systemctl status auto-hr
+```
+
+默认服务监听 `127.0.0.1` 所在主机的 `8081` 端口，适合由 OpenResty/Nginx 反向代理；服务以生产 profile 启动、开机自启，并在异常退出时自动重启。
+
 ## 面试相关配置
 
 | 变量 | 默认值 | 说明 |
