@@ -1399,7 +1399,23 @@ public class InterviewServiceImpl implements InterviewService {
             videoSessionMapper.updateById(session);
             videoMergeService.extractAudio(session);
             videoSessionMapper.updateById(session);
-            String transcript = callAudioTranscription(session.getAudioPath());
+            String transcript;
+            if (videoMergeService.canMerge(session)) {
+                String hrAudioPath = videoMergeService.extractSpeakerAudio(session, "hr");
+                String intervieweeAudioPath = videoMergeService.extractSpeakerAudio(session, "interviewee");
+                String hrTranscript = callAudioTranscription(hrAudioPath);
+                String intervieweeTranscript = callAudioTranscription(intervieweeAudioPath);
+                if (StrUtil.isBlank(hrTranscript) && StrUtil.isBlank(intervieweeTranscript)) {
+                    throw new BusinessException("阿里云语音转文字未返回识别文本");
+                }
+                transcript = "面试官：" + StrUtil.blankToDefault(hrTranscript, "（未识别到语音）")
+                        + "\n候选人：" + StrUtil.blankToDefault(intervieweeTranscript, "（未识别到语音）");
+            } else {
+                transcript = callAudioTranscription(session.getAudioPath());
+                if (StrUtil.isBlank(transcript)) {
+                    throw new BusinessException("阿里云语音转文字未返回识别文本");
+                }
+            }
             session.setTranscriptText(abbreviate(transcript, 20000));
             String summary = callVideoSummaryLlm(transcript);
             session.setSummaryText(abbreviate(summary, 5000));
@@ -1468,9 +1484,6 @@ public class InterviewServiceImpl implements InterviewService {
             throw new BusinessException("阿里云语音转文字失败: " + abbreviate(ex.getMessage()));
         } finally {
             client.shutdown();
-        }
-        if (StrUtil.isBlank(text.toString())) {
-            throw new BusinessException("阿里云语音转文字未返回识别文本");
         }
         return text.toString();
     }

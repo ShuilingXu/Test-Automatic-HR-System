@@ -94,6 +94,35 @@ public class VideoMergeService {
         }
     }
 
+    public String extractSpeakerAudio(InterviewVideoSession session, String speaker) {
+        String source = "hr".equals(speaker) ? session.getHrRecordingPath() : session.getIntervieweeRecordingPath();
+        if (source == null || !Files.isRegularFile(Path.of(source))) {
+            throw new BusinessException("" + speaker + "录制文件不存在，不能分离音频");
+        }
+        try {
+            Files.createDirectories(UploadPaths.RECORDING_DIR);
+            Path output = UploadPaths.RECORDING_DIR.resolve(session.getVideoSerialNo() + "-" + speaker + "-audio.pcm").normalize().toAbsolutePath();
+            if (!output.startsWith(UploadPaths.RECORDING_DIR)) {
+                throw new BusinessException("说话人音频文件路径非法");
+            }
+            runFfmpeg(List.of(
+                    ffmpegPath,
+                    "-y",
+                    "-i", source,
+                    "-map", "0:a:0",
+                    "-vn",
+                    "-ac", "1",
+                    "-ar", "16000",
+                    "-f", "s16le",
+                    "-c:a", "pcm_s16le",
+                    output.toString()
+            ), "分离" + speaker + "音频失败");
+            return output.toString();
+        } catch (IOException ex) {
+            throw new BusinessException("分离" + speaker + "音频失败: " + ex.getMessage());
+        }
+    }
+
     private void mergeSideBySide(InterviewVideoSession session, Path output) {
         runFfmpeg(List.of(
                 ffmpegPath,
