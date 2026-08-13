@@ -198,8 +198,18 @@
                   @click="retryVideoSummary"
                 >重新生成</el-button>
               </div>
-              <p><strong>会议概要</strong>{{ selectedProcess.summaryText || '暂无概要，双侧录制完成后自动生成。' }}</p>
-              <p><strong>转写文本</strong>{{ selectedProcess.transcriptText || '暂无转写文本' }}</p>
+              <div>
+                <strong>会议概要</strong>
+                <div v-if="selectedProcess.summaryText" class="summary-document">
+                  <template v-for="(line, index) in summaryLines(selectedProcess.summaryText)" :key="index">
+                    <h4 v-if="line.kind === 'heading'">{{ line.text }}</h4>
+                    <p v-else-if="line.kind === 'list'" class="summary-list-item">{{ line.text }}</p>
+                    <p v-else>{{ line.text }}</p>
+                  </template>
+                </div>
+                <p v-else>暂无概要，双侧录制完成后自动生成。</p>
+              </div>
+              <p class="transcript-text"><strong>转写文本</strong>{{ selectedProcess.transcriptText || '暂无转写文本' }}</p>
             </div>
           </section>
           <section class="workbench-panel ai-question-panel">
@@ -379,6 +389,13 @@ const filteredProcessCandidates = computed(() => {
 const processCandidatePreview = computed(() => recruitmentCandidates.value.find((item) => item.id === processForm.recruitmentCandidateId) || null)
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
+function summaryLines(markdown) {
+  return String(markdown || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+    if (/^#{1,6}\s+/.test(line)) return { kind: 'heading', text: line.replace(/^#{1,6}\s+/, '').replace(/\*\*/g, '') }
+    if (/^(?:[-*]|\d+\.)\s+/.test(line)) return { kind: 'list', text: line.replace(/^([-*]|\d+\.)\s+/, '').replace(/\*\*/g, '') }
+    return { kind: 'text', text: line.replace(/\*\*/g, '') }
+  })
+}
 function resumeLlmStatusLabel(status) { return ({ PENDING: '评分中', COMPLETED: '已完成', FAILED: '评分失败' })[status] || '-' }
 async function loadAll() {
   try {
@@ -749,6 +766,11 @@ onMounted(loadAll)
 .summary-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .video-summary-box p { margin: 0; color: var(--ink-soft); line-height: 1.7; }
 .video-summary-box strong { display: block; margin-bottom: 4px; color: var(--ink); }
+.summary-document { display: grid; gap: 7px; max-height: 460px; padding-right: 8px; overflow-y: auto; }
+.summary-document h4 { margin: 12px 0 2px; color: var(--ink); font-size: 15px; }
+.summary-document .summary-list-item { position: relative; padding-left: 16px; }
+.summary-document .summary-list-item::before { position: absolute; left: 2px; color: var(--primary); content: '•'; }
+.transcript-text { white-space: pre-wrap; }
 .data-table { margin-top: 18px; }
 .config-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }.config-heading h3, .config-panel-head h3 { margin: 0; }.config-heading .serial-line { margin: 8px 0 0; }.env-badge { padding: 5px 9px; border: 1px solid #bfd3c9; border-radius: 5px; background: #edf6f1; color: #175c50; font-size: 12px; font-weight: 700; }
 .config-tabs, .model-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0; padding-bottom: 12px; border-bottom: 1px solid var(--border); }.config-tabs button, .model-tabs button { padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink-soft); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }.config-tabs button:hover, .model-tabs button:hover { color: var(--primary); border-color: var(--primary); }.config-tabs button.active, .model-tabs button.active { color: #fff; background: var(--primary); border-color: var(--primary); }
