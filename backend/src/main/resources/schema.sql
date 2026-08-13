@@ -323,7 +323,7 @@ CREATE TABLE IF NOT EXISTS interview_video_session (
     audio_file_name VARCHAR(255),
     transcript_text TEXT,
     summary_text TEXT,
-    summary_status VARCHAR(32),
+    summary_status VARCHAR(128),
     hr_offer_sdp TEXT,
     interviewee_answer_sdp TEXT,
     hr_ice_candidates TEXT,

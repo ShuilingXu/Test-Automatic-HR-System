@@ -135,6 +135,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "interview_video_session", "transcript_text", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "summary_text", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "summary_status", "VARCHAR(32)");
+        widenColumnIfNeeded(statement, "interview_video_session", "summary_status", "VARCHAR(128)");
         addColumnIfMissing(connection, statement, "interview_video_session", "hr_offer_sdp", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_answer_sdp", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "hr_ice_candidates", "TEXT");
@@ -171,6 +172,13 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         try (ResultSet columns = metaData.getColumns(null, null, table.toUpperCase(), column.toUpperCase())) {
             return columns.next();
         }
+    }
+
+    private void widenColumnIfNeeded(Statement statement, String table, String column, String definition) throws SQLException {
+        if (activeDatabase.type() != DatabaseType.PGSQL) {
+            return;
+        }
+        statement.executeUpdate("ALTER TABLE " + table + " ALTER COLUMN " + column + " TYPE " + definition);
     }
 
     private boolean messageContains(SQLException ex, String value) {
