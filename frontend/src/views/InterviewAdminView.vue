@@ -117,6 +117,7 @@
           <el-form-item label="投递岗位"><el-select v-model="processForm.jobId" disabled><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
           <el-form-item label="候选人唯一ID"><el-input :model-value="processCandidatePreview?.id || '-'" disabled /></el-form-item>
           <el-form-item label="AI通过阈值"><el-input-number v-model="processForm.aiThresholdScore" :min="1" /></el-form-item>
+          <el-form-item label="低分追问阈值"><el-input-number v-model="processForm.aiFollowUpThreshold" :min="0" :max="100" /></el-form-item>
           <el-form-item label="AI最少问答轮数"><el-input-number v-model="processForm.aiMinQuestionRounds" :min="1" /></el-form-item>
           <el-form-item label="AI最多问答轮数"><el-input-number v-model="processForm.aiMaxQuestionRounds" :min="1" /></el-form-item>
           <el-form-item label="切屏终止阈值"><el-input-number v-model="processForm.antiCheatSwitchLimit" :min="1" /></el-form-item>
@@ -215,6 +216,7 @@
               <p>流程流水号：{{ selectedProcess.id }}</p>
               <p>当前状态：{{ selectedProcess.processStatusView || '-' }}</p>
               <p>AI均分：{{ selectedProcess.aiAverageScore ?? '-' }}</p>
+              <p>低分追问阈值：{{ selectedProcess.aiFollowUpThreshold ?? 70 }}</p>
               <p>AI轮数：{{ selectedProcess.aiMinQuestionRounds || '-' }} - {{ selectedProcess.aiMaxQuestionRounds || '-' }}</p>
               <p>切屏次数：{{ selectedProcess.antiCheatSwitchCount || 0 }} / {{ selectedProcess.antiCheatSwitchLimit || 5 }}</p>
             </div>
@@ -294,7 +296,7 @@ const scorerLlmForm = reactive(createLlmForm('SCORER'))
 const resumeReviewLlmForm = reactive(createLlmForm('RESUME_REVIEW'))
 const videoTranscriberLlmForm = reactive(createLlmForm('VIDEO_TRANSCRIBER'))
 const videoSummaryLlmForm = reactive(createLlmForm('VIDEO_SUMMARY'))
-const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 70, aiMinQuestionRounds: 1, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5, aiOutputMode: 'NORMAL' })
+const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 70, aiFollowUpThreshold: 70, aiMinQuestionRounds: 5, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5, aiOutputMode: 'NORMAL' })
 const processSearch = reactive({ keyword: '' })
 const systemConfig = reactive({
   ALIYUN_ACCESS_KEY_ID: '',

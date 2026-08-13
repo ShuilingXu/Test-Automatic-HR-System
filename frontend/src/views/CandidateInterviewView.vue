@@ -1,78 +1,124 @@
 <template>
-  <div class="page-shell">
-    <section class="page-card">
-      <p class="page-eyebrow">Interviewee</p>
-      <h1 class="page-title">面试者面试系统</h1>
-      <div class="page-grid">
-        <div class="surface">
-          <h3>流程入口</h3>
-          <div class="summary-box">
-            <p>绑定状态：{{ sessionForm.processId ? '已绑定面试流程' : '未选择报名记录' }}</p>
-          </div>
-          <div class="link-row">
-            <el-button type="primary" @click="loadProcessRecords">加载流程</el-button>
-            <RouterLink class="link-chip" to="/user">返回我的报名</RouterLink>
-            <el-button type="primary" @click="enterAiExamMode">进入AI答题全屏</el-button>
-            <el-button @click="joinVideo">加入视频面</el-button>
-            <el-button @click="stopRecording">结束并上传录制</el-button>
-          </div>
-          <div v-if="processSummary" class="summary-box">
-            <p>当前阶段：{{ processSummary.currentStage }}</p>
-            <p>状态：{{ processSummary.processStatusView }}</p>
-            <p>AI均分：{{ processSummary.aiAverageScore ?? '-' }}</p>
-            <p>AI最少轮数：{{ processSummary.aiMinQuestionRounds || '-' }}</p>
-            <p>AI最多轮数：{{ processSummary.aiMaxQuestionRounds || '-' }}</p>
-            <p>反作弊：{{ antiCheat.fullscreen ? '全屏中' : '未全屏' }} / 切屏 {{ antiCheat.switchCount }} / {{ processSummary.antiCheatSwitchLimit || 5 }} 次</p>
-            <p v-if="processSummary.currentStage === 'AI'">AI强制录像：{{ aiExamRecordingStatusText }}</p>
-            <p v-if="refreshState.retryCount > 0">自动重试：第 {{ refreshState.retryCount }} 次，{{ refreshState.lastError }}</p>
-          </div>
-          <div class="video-grid">
-            <div class="video-box"><span>本地视频</span><video ref="localVideo" autoplay muted playsinline></video></div>
-            <div class="video-box"><span>远端视频</span><video ref="remoteVideo" autoplay playsinline></video></div>
-          </div>
+  <div class="interview-shell">
+    <main class="interview-workspace">
+      <header class="workspace-header">
+        <div>
+          <p class="page-eyebrow">Candidate interview</p>
+          <h1>候选人面试</h1>
+        </div>
+        <div class="header-actions">
+          <span v-if="processSummary" class="stage-badge">{{ processSummary.processStatusView }}</span>
+          <RouterLink class="link-chip" to="/user">返回报名记录</RouterLink>
+        </div>
+      </header>
+
+      <template v-if="processSummary">
+        <section class="status-rail" aria-label="面试进度">
+          <div><span>当前阶段</span><strong>{{ stageLabel }}</strong></div>
+          <div><span>答题进度</span><strong>{{ answeredAiRecords.length }} / {{ processSummary.aiMaxQuestionRounds || '-' }}</strong></div>
+          <div><span>当前均分</span><strong>{{ processSummary.aiAverageScore ?? '-' }}</strong></div>
+          <div><span>监考状态</span><strong>{{ proctoringStatus }}</strong></div>
+        </section>
+
+        <div v-if="processSummary.currentStage === 'AI'" class="ai-workspace">
+          <aside class="exam-sidebar">
+            <section class="sidebar-section">
+              <div class="section-heading">
+                <span>考试录像</span>
+                <i class="recording-dot" :class="{ active: aiExamRecording.active }"></i>
+              </div>
+              <video ref="aiExamVideo" class="proctor-video" autoplay muted playsinline></video>
+              <strong class="recording-label">{{ aiExamRecordingStatusText }}</strong>
+            </section>
+
+            <section class="sidebar-section compact-section">
+              <div class="section-heading"><span>轮次</span><strong>{{ currentRoundLabel }}</strong></div>
+              <div class="round-track">
+                <span
+                  v-for="round in processSummary.aiMaxQuestionRounds || 1"
+                  :key="round"
+                  :class="{ done: round <= answeredAiRecords.length, current: round === currentQuestion?.sequenceNo }"
+                >{{ round }}</span>
+              </div>
+              <dl class="exam-facts">
+                <div><dt>全屏</dt><dd>{{ antiCheat.fullscreen ? '已进入' : '未进入' }}</dd></div>
+                <div><dt>切屏记录</dt><dd>{{ antiCheat.switchCount }} / {{ processSummary.antiCheatSwitchLimit || 5 }}</dd></div>
+              </dl>
+            </section>
+
+            <el-button v-if="isAiExamInProgress()" type="primary" class="wide-action" @click="enterAiExamMode">
+              {{ aiExamRecording.active ? '返回全屏答题' : '开始全屏答题' }}
+            </el-button>
+            <el-button class="wide-action" @click="loadProcessRecords">刷新状态</el-button>
+          </aside>
+
+          <section class="answer-workspace">
+            <div v-if="aiStatusText" class="ai-status-card" :class="{ busy: aiSubmitState.submitting, terminal: isAiTerminal }">
+              <span class="status-dot"></span>
+              <div><strong>{{ aiStatusText }}</strong><small>{{ aiStatusHint }}</small></div>
+            </div>
+
+            <div v-if="currentQuestion" class="current-question">
+              <div class="question-meta"><span>第 {{ currentQuestion.sequenceNo }} 题</span><em>{{ currentQuestion.knowledgePoint }}</em></div>
+              <h2>{{ currentQuestion.questionContent }}</h2>
+              <div class="answer-composer">
+                <el-input v-model="aiAnswer.answerContent" type="textarea" :rows="7" placeholder="在这里输入你的回答" :disabled="aiSubmitState.submitting || aiAnswerDisabled" @copy.prevent @cut.prevent @paste.prevent @drop.prevent />
+                <div class="composer-footer">
+                  <span>{{ aiAnswer.answerContent.length }} 字</span>
+                  <el-button type="primary" size="large" :loading="aiSubmitState.submitting" :disabled="aiSubmitState.submitting || aiAnswerDisabled" @click="submitAiAnswer">
+                    {{ aiSubmitState.submitting ? '正在评分' : '提交本题' }}
+                  </el-button>
+                </div>
+              </div>
+            </div>
+            <div v-else class="terminal-state" :class="{ rejected: processSummary.overallStatus === 'REJECTED' }">
+              <strong>{{ terminalStateTitle }}</strong>
+              <p>{{ terminalStateDescription }}</p>
+            </div>
+
+            <div v-if="aiSubmitState.submitting" class="processing-state">
+              <span class="processing-spinner"></span>
+              <div><strong>{{ aiSubmitState.message }}</strong><p>{{ aiSubmitOverlayHint }}</p></div>
+              <div v-if="isStreamMode && aiStreamText" class="ai-stream-log">{{ aiStreamText }}</div>
+            </div>
+
+            <section v-if="answeredAiRecords.length" class="answer-history">
+              <div class="history-heading"><h2>已完成题目</h2><span>{{ answeredAiRecords.length }} 题</span></div>
+              <details v-for="item in answeredAiRecords" :key="item.id" class="history-item">
+                <summary>
+                  <span>Q{{ item.sequenceNo }}</span>
+                  <strong>{{ item.questionContent }}</strong>
+                  <em>{{ item.averageScore ?? '-' }} 分</em>
+                </summary>
+                <div class="history-content">
+                  <div><span>你的回答</span><p>{{ item.answerContent }}</p></div>
+                  <div v-if="item.interviewerComment" class="feedback"><span>面试官反馈</span><p>{{ item.interviewerComment }}</p></div>
+                </div>
+              </details>
+            </section>
+          </section>
         </div>
 
-        <div class="surface ai-panel">
-          <h3>AI 面试</h3>
-          <div v-if="aiStatusText" class="ai-status-card" :class="{ busy: aiSubmitState.submitting }">
-            <span class="status-dot"></span>
-            <strong>{{ aiStatusText }}</strong>
-            <small>{{ aiStatusHint }}</small>
-          </div>
-          <div v-if="aiSubmitState.submitting" class="ai-submit-overlay">
-            <div class="ai-orbit"><span></span><span></span><span></span></div>
-            <strong>{{ aiSubmitState.message }}</strong>
-            <p>{{ aiSubmitOverlayHint }}</p>
-            <div v-if="isStreamMode && aiStreamText" class="ai-stream-log">
-              {{ aiStreamText }}
+        <section v-else-if="processSummary.currentStage === 'VIDEO'" class="video-workspace">
+          <div class="video-workspace-head">
+            <div><p class="page-eyebrow">Live interview</p><h2>视频面试</h2></div>
+            <div class="header-actions">
+              <el-button type="primary" @click="joinVideo">加入视频面试</el-button>
+              <el-button @click="stopRecording">结束并上传录制</el-button>
             </div>
           </div>
-          <div v-if="processSummary?.currentStage === 'AI'" class="ai-recording-card" :class="{ active: aiExamRecording.active }">
-            <div>
-              <strong>{{ aiExamRecordingStatusText }}</strong>
-              <p>AI答题期间必须开启摄像头和麦克风录像，未开始录像不能作答或提交。</p>
-            </div>
-            <video ref="aiExamVideo" autoplay muted playsinline></video>
+          <div class="video-grid">
+            <div class="video-box"><span>我的画面</span><video ref="localVideo" autoplay muted playsinline></video></div>
+            <div class="video-box"><span>面试官画面</span><video ref="remoteVideo" autoplay playsinline></video></div>
           </div>
-          <div v-if="currentQuestion" class="question-card highlighted-question">
-            <strong>当前问题 {{ currentQuestion.sequenceNo }}</strong>
-            <p>{{ currentQuestion.questionContent }}</p>
-            <small>知识域：{{ currentQuestion.knowledgePoint }}</small>
-          </div>
-          <div v-else-if="processSummary?.currentStage === 'AI'" class="empty-box">题目生成中</div>
-          <div v-if="aiRecords.length === 0" class="empty-box">暂无题目</div>
-          <div v-for="item in aiRecords" :key="item.id" class="question-card">
-            <strong>Q{{ item.sequenceNo }} {{ item.knowledgePoint }}</strong>
-            <p>{{ item.questionContent }}</p>
-            <small>单题均分：{{ item.averageScore ?? '-' }}</small>
-            <p>你的回答：{{ item.answerContent || '待回答' }}</p>
-            <p v-if="item.interviewerComment">面试官反馈：{{ item.interviewerComment }}</p>
-          </div>
-          <el-input v-model="aiAnswer.answerContent" type="textarea" :rows="4" placeholder="回答当前 AI 问题" :disabled="aiSubmitState.submitting || !currentQuestion || aiAnswerDisabled" @copy.prevent @cut.prevent @paste.prevent @drop.prevent />
-          <div class="link-row"><el-button type="primary" :loading="aiSubmitState.submitting" :disabled="aiSubmitState.submitting || !currentQuestion || aiAnswerDisabled" @click="submitAiAnswer">{{ aiSubmitState.submitting ? 'AI处理中' : '提交 AI 回答' }}</el-button></div>
-        </div>
-      </div>
-    </section>
+        </section>
+
+        <section v-else class="terminal-state"><strong>{{ processSummary.processStatusView }}</strong><p>当前面试流程已更新。</p></section>
+      </template>
+
+      <div v-else class="loading-state">正在加载面试流程...</div>
+      <p v-if="refreshState.retryCount > 0" class="retry-message">状态同步失败，正在进行第 {{ refreshState.retryCount }} 次重试：{{ refreshState.lastError }}</p>
+    </main>
   </div>
 </template>
 
@@ -117,6 +163,31 @@ let aiExamRecorder = null
 let aiExamRecordedChunks = []
 let aiExamRecordingStopInProgress = false
 
+const answeredAiRecords = computed(() => aiRecords.value.filter((item) => item.answerContent))
+const isAiTerminal = computed(() => processSummary.value?.currentStage === 'AI' && (
+  processSummary.value?.stageStatus === 'WAITING_APPROVAL'
+  || processSummary.value?.stageStatus === 'REJECTED'
+  || processSummary.value?.overallStatus !== 'IN_PROGRESS'
+))
+const stageLabel = computed(() => ({ AI: 'AI 面试', VIDEO: '视频面试', ONSITE: '线下面试' }[processSummary.value?.currentStage] || processSummary.value?.currentStage || '-'))
+const proctoringStatus = computed(() => {
+  if (processSummary.value?.currentStage !== 'AI') return '不适用'
+  if (aiExamRecording.uploading) return '录像上传中'
+  if (aiExamRecording.uploaded) return '录像已保存'
+  if (isAiTerminal.value) return '考试已结束'
+  return aiExamRecording.active ? '录像中' : '待开始'
+})
+const currentRoundLabel = computed(() => {
+  const maximum = processSummary.value?.aiMaxQuestionRounds || '-'
+  return currentQuestion.value ? `${currentQuestion.value.sequenceNo} / ${maximum}` : `${answeredAiRecords.value.length} / ${maximum}`
+})
+const terminalStateTitle = computed(() => processSummary.value?.overallStatus === 'REJECTED' ? '本轮面试已结束' : '答题已完成')
+const terminalStateDescription = computed(() => {
+  if (processSummary.value?.overallStatus === 'REJECTED') return processSummary.value?.processStatusView || '本次 AI 面试未达到进入下一阶段的要求。'
+  if (processSummary.value?.stageStatus === 'WAITING_APPROVAL') return '回答和录像正在等待 HR 审核，请留意报名记录中的状态更新。'
+  return '系统正在同步最终结果。'
+})
+
 const aiStatusText = computed(() => {
   if (aiSubmitState.submitting) return aiSubmitState.message || 'AI正在处理你的回答'
   if (aiPendingRefresh.active) return 'AI仍在后台处理中'
@@ -131,6 +202,7 @@ const aiStatusText = computed(() => {
 const aiStatusHint = computed(() => {
   if (aiSubmitState.submitting) return '评分、评价和下一题生成可能需要几十秒'
   if (aiPendingRefresh.active) return '请求已超时但不代表失败，系统会自动刷新最新面试状态'
+  if (processSummary.value?.overallStatus === 'REJECTED') return '你的回答与录像已保存，可返回报名记录查看流程状态'
   if (processSummary.value?.stageStatus === 'WAITING_APPROVAL') return '请保持关注流程状态，HR审批后会进入下一阶段'
   if (!currentQuestion.value && processSummary.value?.currentStage === 'AI') return '系统会自动刷新题目，请不要重复提交'
   return '提交后按钮会锁定，避免重复提交'
@@ -490,12 +562,12 @@ function shouldReportSwitch() {
 }
 
 function notifyAiFinishedIfNeeded() {
-  if (processSummary.value?.currentStage === 'AI' && processSummary.value?.stageStatus === 'WAITING_APPROVAL' && !antiCheat.aiEndNotified) {
+  if (isAiTerminal.value && !antiCheat.aiEndNotified) {
     antiCheat.aiEndNotified = true
     currentQuestion.value = null
     clearAiRefresh()
     stopAndUploadAiExamRecording().catch(fail)
-    ElMessageBox.alert(processSummary.value.processStatusView || 'AI面试已结束，请等待HR人工审批。', '面试结束', { confirmButtonText: '知道了' })
+    ElMessageBox.alert(processSummary.value.processStatusView || 'AI面试已结束，请留意报名记录中的状态。', '面试结束', { confirmButtonText: '知道了' })
   }
 }
 
@@ -725,35 +797,109 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.summary-box { margin-top: 16px; padding: 14px; border-radius: var(--radius-md); background: var(--surface); border: 1px solid var(--border); }
-.summary-box p { margin: 6px 0; }
-.ai-panel { position: relative; overflow: hidden; }
-.ai-status-card { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; margin-bottom: 14px; padding: 14px; border-radius: var(--radius-md); background: var(--surface-soft); border: 1px solid var(--border); }
-.ai-status-card small { grid-column: 2; color: var(--text-muted); }
-.ai-status-card.busy { background: var(--primary-soft); border-color: var(--primary); }
-.status-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--primary); box-shadow: 0 0 0 6px var(--primary-ring); }
-.ai-status-card.busy .status-dot { animation: pulse 1.2s ease-in-out infinite; }
-.ai-recording-card { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 160px); gap: 14px; align-items: center; margin-bottom: 14px; padding: 14px; border-radius: var(--radius-md); background: var(--danger-soft); border: 1px solid rgba(220, 38, 38, 0.18); }
-.ai-recording-card.active { background: rgba(22, 163, 74, 0.1); border-color: rgba(22, 163, 74, 0.25); }
-.ai-recording-card p { margin: 6px 0 0; color: var(--text-muted); line-height: 1.6; }
-.ai-recording-card video { width: 160px; height: 100px; object-fit: cover; background: #111; border-radius: var(--radius-md); }
-.ai-submit-overlay { position: absolute; inset: 0; z-index: 5; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; background: rgba(248, 250, 252, 0.88); backdrop-filter: blur(8px); }
-.ai-submit-overlay p { max-width: 360px; margin: 0; color: var(--text-muted); line-height: 1.7; }
-.ai-stream-log { width: min(520px, 100%); max-height: 220px; overflow: auto; padding: 12px; border-radius: var(--radius-sm); background: var(--surface); color: var(--ink-soft); text-align: left; line-height: 1.7; white-space: pre-wrap; }
-.ai-orbit { position: relative; width: 64px; height: 64px; border-radius: 999px; border: 2px solid var(--primary-ring); animation: spin 1.4s linear infinite; }
-.ai-orbit span { position: absolute; width: 12px; height: 12px; border-radius: 999px; background: var(--primary); }
-.ai-orbit span:nth-child(1) { top: -6px; left: 26px; }
-.ai-orbit span:nth-child(2) { right: 2px; bottom: 8px; background: var(--warning); }
-.ai-orbit span:nth-child(3) { left: 2px; bottom: 8px; background: var(--ink); }
-.empty-box { padding: 18px; border-radius: var(--radius-md); background: var(--surface-soft); color: var(--text-muted); }
-.question-card { display: grid; gap: 8px; padding: 16px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--border); margin-bottom: 14px; }
-.question-card p { margin: 0; line-height: 1.7; }
-.question-card small { color: var(--text-muted); }
-.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin-top: 18px; }
-.video-box { min-width: 0; background: var(--surface); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border); }
-.video-box span { display: block; margin-bottom: 8px; color: var(--text-muted); }
-.video-box video { width: 100%; min-height: 220px; background: #111; border-radius: var(--radius-md); }
+.interview-shell { min-height: 100vh; padding: 28px; background: #eef2ef; }
+.interview-workspace { width: min(1280px, 100%); margin: 0 auto; }
+.workspace-header, .video-workspace-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.workspace-header { margin-bottom: 22px; }
+.workspace-header h1, .video-workspace-head h2 { margin: 6px 0 0; font-size: 30px; line-height: 1.2; letter-spacing: 0; }
+.header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
+.stage-badge { padding: 8px 12px; border-radius: 999px; color: var(--primary-dark); background: #dcece5; border: 1px solid #bad5c8; font-size: 13px; font-weight: 700; }
+.status-rail { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-card); }
+.status-rail div { min-width: 0; padding: 15px 18px; border-right: 1px solid var(--border); }
+.status-rail div:last-child { border-right: 0; }
+.status-rail span, .exam-facts dt { display: block; color: var(--text-muted); font-size: 12px; }
+.status-rail strong { display: block; margin-top: 5px; overflow-wrap: anywhere; font-size: 16px; }
+.ai-workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
+.exam-sidebar { position: sticky; top: 16px; display: grid; gap: 12px; }
+.sidebar-section, .answer-workspace, .video-workspace { min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-card); }
+.sidebar-section { padding: 14px; }
+.section-heading, .question-meta, .history-heading, .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.section-heading { margin-bottom: 12px; font-size: 13px; font-weight: 700; }
+.recording-dot { width: 9px; height: 9px; border-radius: 999px; background: #a8b3ad; }
+.recording-dot.active { background: var(--danger); box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.12); }
+.proctor-video { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; background: #111; }
+.recording-label { display: block; margin-top: 10px; color: var(--ink-soft); font-size: 13px; }
+.compact-section { padding-bottom: 10px; }
+.round-track { display: flex; flex-wrap: wrap; gap: 7px; padding: 4px 0 14px; border-bottom: 1px solid var(--border); }
+.round-track span { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--text-muted); background: var(--surface); font-size: 12px; font-weight: 700; }
+.round-track span.done { color: #fff; border-color: var(--primary); background: var(--primary); }
+.round-track span.current { color: var(--primary-dark); border: 2px solid var(--primary); background: var(--primary-soft); }
+.exam-facts { display: grid; gap: 0; margin: 8px 0 0; }
+.exam-facts div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; }
+.exam-facts dd { margin: 0; color: var(--ink-soft); font-size: 13px; font-weight: 700; }
+.wide-action { width: 100%; margin-left: 0 !important; }
+.answer-workspace { position: relative; padding: 24px; }
+.ai-status-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; margin-bottom: 22px; padding: 13px 15px; border: 1px solid #cfe1d8; border-radius: 6px; background: #f2f8f5; }
+.ai-status-card.busy { border-color: #d7c69b; background: #fff9eb; }
+.ai-status-card.terminal { border-color: var(--border); background: var(--surface-soft); }
+.ai-status-card strong, .ai-status-card small { display: block; }
+.ai-status-card small { margin-top: 3px; color: var(--text-muted); line-height: 1.5; }
+.status-dot { width: 9px; height: 9px; border-radius: 999px; background: var(--primary); box-shadow: 0 0 0 4px var(--primary-ring); }
+.ai-status-card.busy .status-dot { background: var(--warning); box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.12); }
+.current-question { padding: 4px 2px 8px; }
+.question-meta { justify-content: flex-start; }
+.question-meta span, .question-meta em { padding: 6px 9px; border-radius: 4px; font-size: 12px; font-style: normal; font-weight: 700; }
+.question-meta span { color: #fff; background: var(--ink); }
+.question-meta em { color: var(--primary-dark); background: var(--primary-soft); }
+.current-question h2 { max-width: 920px; margin: 18px 0 24px; font-size: 23px; line-height: 1.55; letter-spacing: 0; }
+.answer-composer { overflow: hidden; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); }
+.answer-composer :deep(.el-textarea__inner) { min-height: 176px !important; padding: 16px; border: 0; border-radius: 0; box-shadow: none; resize: vertical; line-height: 1.8; }
+.composer-footer { padding: 10px 12px; border-top: 1px solid var(--border); background: var(--surface-soft); }
+.composer-footer > span { color: var(--text-muted); font-size: 12px; }
+.processing-state { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; margin-top: 16px; padding: 14px; border: 1px solid #ead9ad; border-radius: 6px; background: #fff9eb; }
+.processing-state p { margin: 4px 0 0; color: var(--text-muted); }
+.processing-spinner { width: 18px; height: 18px; border: 2px solid #ead9ad; border-top-color: var(--warning); border-radius: 999px; animation: spin 0.8s linear infinite; }
+.ai-stream-log { grid-column: 1 / -1; max-height: 180px; overflow: auto; padding: 12px; border-radius: 6px; background: var(--surface); color: var(--ink-soft); line-height: 1.7; white-space: pre-wrap; }
+.answer-history { margin-top: 30px; padding-top: 24px; border-top: 1px solid var(--border); }
+.history-heading { margin-bottom: 10px; }
+.history-heading h2 { margin: 0; font-size: 17px; }
+.history-heading span { color: var(--text-muted); font-size: 13px; }
+.history-item { border-bottom: 1px solid var(--border); }
+.history-item:first-of-type { border-top: 1px solid var(--border); }
+.history-item summary { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 15px 4px; cursor: pointer; list-style: none; }
+.history-item summary::-webkit-details-marker { display: none; }
+.history-item summary > span { color: var(--primary); font-size: 13px; font-weight: 800; }
+.history-item summary > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.history-item summary > em { color: var(--ink-soft); font-size: 13px; font-style: normal; font-weight: 700; }
+.history-content { display: grid; gap: 12px; padding: 0 4px 18px 46px; }
+.history-content > div { padding: 14px; border-left: 3px solid var(--border-strong); background: var(--surface-soft); }
+.history-content > div.feedback { border-left-color: var(--primary); background: #f2f8f5; }
+.history-content span { color: var(--text-muted); font-size: 12px; font-weight: 700; }
+.history-content p { margin: 7px 0 0; line-height: 1.75; }
+.terminal-state, .loading-state { padding: 42px 26px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); text-align: center; }
+.terminal-state strong { font-size: 20px; }
+.terminal-state p { margin: 8px 0 0; color: var(--text-muted); line-height: 1.7; }
+.terminal-state.rejected { border-color: #edcaca; background: #fff7f7; }
+.video-workspace { padding: 22px; }
+.video-workspace-head { margin-bottom: 18px; }
+.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.video-box { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); }
+.video-box span { display: block; margin-bottom: 8px; color: var(--text-muted); font-size: 13px; }
+.video-box video { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 6px; background: #111; }
+.retry-message { margin: 12px 0 0; color: var(--danger); font-size: 13px; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.45); opacity: 0.55; } }
-@media (max-width: 900px) { .video-grid, .ai-recording-card { grid-template-columns: 1fr; } }
+@media (max-width: 900px) {
+  .interview-shell { padding: 16px 12px 28px; }
+  .workspace-header, .video-workspace-head { align-items: flex-start; flex-direction: column; }
+  .header-actions { justify-content: flex-start; }
+  .workspace-header h1 { font-size: 26px; }
+  .status-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .status-rail div:nth-child(2) { border-right: 0; }
+  .status-rail div:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
+  .ai-workspace { grid-template-columns: 1fr; }
+  .exam-sidebar { position: static; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); }
+  .exam-sidebar .wide-action { grid-column: 1 / -1; }
+  .answer-workspace { padding: 18px; }
+  .current-question h2 { font-size: 20px; }
+  .video-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .status-rail { grid-template-columns: 1fr; }
+  .status-rail div, .status-rail div:nth-child(2) { border-right: 0; border-bottom: 1px solid var(--border); }
+  .status-rail div:last-child { border-bottom: 0; }
+  .exam-sidebar { grid-template-columns: 1fr; }
+  .history-item summary { grid-template-columns: 36px minmax(0, 1fr); }
+  .history-item summary > em { grid-column: 2; }
+  .history-content { padding-left: 0; }
+}
 </style>

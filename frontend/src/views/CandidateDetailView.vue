@@ -115,7 +115,7 @@ async function startCandidateInterview() {
       ElMessage.warning('未找到对应面试者账号，请先注册并完善资料')
       return
     }
-    const process = (await interviewApi.startProcess({ recruitmentCandidateId: candidate.value.id, intervieweeUserId: interviewee.id, jobId: candidate.value.jobId, aiThresholdScore: 70, aiMinQuestionRounds: 1, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })).data
+    const process = (await interviewApi.startProcess({ recruitmentCandidateId: candidate.value.id, intervieweeUserId: interviewee.id, jobId: candidate.value.jobId, aiThresholdScore: 70, aiFollowUpThreshold: 70, aiMinQuestionRounds: 5, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })).data
     ElMessage.success('面试流程已发起')
     candidate.value = (await recruitmentApi.getCandidate(candidate.value.id)).data
     if (process?.id) candidate.value.interviewProcessId = process.id

@@ -66,6 +66,13 @@ public class DatabaseConfig {
         if (hasText(activeDatabase.password())) {
             dataSource.setPassword(activeDatabase.password());
         }
+        if (activeDatabase.type() == DatabaseType.SQLITE) {
+            // SQLite permits only one writer. Serializing access at the pool prevents
+            // simultaneous HR/candidate recording uploads from failing with SQLITE_BUSY.
+            dataSource.setMaximumPoolSize(1);
+            dataSource.setMinimumIdle(1);
+            dataSource.setConnectionInitSql("PRAGMA busy_timeout=10000");
+        }
         return dataSource;
     }
 

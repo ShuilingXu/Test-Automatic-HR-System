@@ -36,6 +36,7 @@ public class InterviewVO {
     private String stageStatus;
     private String overallStatus;
     private Integer aiThresholdScore;
+    private Integer aiFollowUpThreshold;
     private Integer aiAverageScore;
     private Integer aiMinQuestionRounds;
     private Integer aiMaxQuestionRounds;

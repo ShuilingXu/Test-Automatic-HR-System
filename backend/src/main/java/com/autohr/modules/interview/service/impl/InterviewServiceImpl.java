@@ -370,7 +370,8 @@ public class InterviewServiceImpl implements InterviewService {
         process.setStageStatus("IN_PROGRESS");
         process.setOverallStatus("IN_PROGRESS");
         process.setAiThresholdScore(Objects.requireNonNullElse(request.getAiThresholdScore(), 70));
-        int minQuestionRounds = Math.max(Objects.requireNonNullElse(request.getAiMinQuestionRounds(), 1), 1);
+        process.setAiFollowUpThreshold(Math.max(0, Math.min(Objects.requireNonNullElse(request.getAiFollowUpThreshold(), 70), 100)));
+        int minQuestionRounds = Math.max(Objects.requireNonNullElse(request.getAiMinQuestionRounds(), 5), 1);
         int maxQuestionRounds = Math.max(Objects.requireNonNullElse(request.getAiMaxQuestionRounds(), 10), minQuestionRounds);
         process.setAiMinQuestionRounds(minQuestionRounds);
         process.setAiMaxQuestionRounds(maxQuestionRounds);
@@ -485,17 +486,24 @@ public class InterviewServiceImpl implements InterviewService {
         int currentAverage = Math.round(total / (float) count);
         process.setAiAverageScore(currentAverage);
         int answeredRounds = count;
-        int minQuestionRounds = Math.max(Objects.requireNonNullElse(process.getAiMinQuestionRounds(), 1), 1);
-        if (answeredRounds >= minQuestionRounds && currentAverage >= process.getAiThresholdScore()) {
+        int minQuestionRounds = Math.max(Objects.requireNonNullElse(process.getAiMinQuestionRounds(), 5), 1);
+        int maxQuestionRounds = Math.max(Objects.requireNonNullElse(process.getAiMaxQuestionRounds(), 10), 1);
+        int followUpThreshold = Math.max(0, Math.min(Objects.requireNonNullElse(process.getAiFollowUpThreshold(), 70), 100));
+        boolean needsFollowUp = averageScore < followUpThreshold && answeredRounds < maxQuestionRounds;
+        if (answeredRounds >= minQuestionRounds && currentAverage >= process.getAiThresholdScore() && !needsFollowUp) {
             process.setStageStatus("WAITING_APPROVAL");
             process.setProcessStatusView("AI待审批");
-        } else if (answeredRounds >= Math.max(Objects.requireNonNullElse(process.getAiMaxQuestionRounds(), 10), 1)) {
+        } else if (answeredRounds >= maxQuestionRounds) {
             process.setOverallStatus("REJECTED");
             process.setStageStatus("REJECTED");
             process.setProcessStatusView("AI未达标自动结束");
             auditLogService.log(process.getIntervieweeUserId(), "面试者", "INTERVIEWEE", "INTERVIEW", "AI_MAX_ROUNDS_REJECT", "INTERVIEW_PROCESS", String.valueOf(process.getId()), "AI均分" + currentAverage + "未达到阈值" + process.getAiThresholdScore() + "，已答" + answeredRounds + "轮达到最大轮数" + process.getAiMaxQuestionRounds());
         } else {
-            generateNextQuestion(process);
+            if (needsFollowUp) {
+                generateFollowUpQuestion(process, record, request.getAnswerContent(), interviewerEvaluation.nextQuestion());
+            } else {
+                generateNextQuestion(process);
+            }
         }
         processMapper.updateById(process);
         updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
@@ -1254,20 +1262,35 @@ public class InterviewServiceImpl implements InterviewService {
         return question;
     }
 
-    private synchronized void generateNextQuestion(InterviewProcess process, String nextQuestion) {
-        if (StrUtil.isBlank(nextQuestion)) {
-            generateNextQuestion(process);
-            return;
-        }
-        InterviewJobKnowledgeWeight weight = pickKnowledgeWeight(process);
+    private synchronized void generateFollowUpQuestion(InterviewProcess process, InterviewAiRecord previousRecord,
+                                                       String previousAnswer, String nextQuestion) {
+        String followUpQuestion = StrUtil.isBlank(nextQuestion)
+                ? callLlmFollowUpQuestion(previousRecord, previousAnswer, loadKnowledgeMaterials(previousRecord.getKnowledgeBaseId()), loadJobRequirements(process))
+                : nextQuestion;
         InterviewAiRecord record = new InterviewAiRecord();
         record.setId(nextId(aiRecordMapper.selectList(null).stream().map(InterviewAiRecord::getId).toList()));
         record.setProcessId(process.getId());
-        record.setKnowledgeBaseId(weight == null ? null : weight.getKnowledgeBaseId());
-        record.setKnowledgePoint(weight == null ? "通用沟通" : loadKnowledgeBaseName(weight.getKnowledgeBaseId()));
-        record.setQuestionContent(nextQuestion.replace("\n", " ").trim());
+        record.setKnowledgeBaseId(previousRecord.getKnowledgeBaseId());
+        record.setKnowledgePoint(previousRecord.getKnowledgePoint());
+        record.setQuestionContent(followUpQuestion.replace("\n", " ").trim());
         record.setSequenceNo(nextSequence(process.getId()));
         aiRecordMapper.insert(record);
+    }
+
+    private String callLlmFollowUpQuestion(InterviewAiRecord previousRecord, String previousAnswer, String materials, String jobRequirements) {
+        InterviewLlmConfig config = requireActiveLlmConfig("INTERVIEWER");
+        String systemPrompt = "你是一名严谨、友善的技术面试官。请针对候选人上一回答中不完整、含糊或错误的部分，生成一道中文深入追问题。"
+                + "追问必须与上一题属于同一知识域，并能由给定知识库材料和岗位要求支持。只输出一道问题，不要评分、解释或答案。";
+        String userPrompt = "知识域：" + StrUtil.blankToDefault(previousRecord.getKnowledgePoint(), "通用沟通")
+                + "\n\n知识库材料：\n" + StrUtil.blankToDefault(materials, "无补充材料")
+                + "\n\n岗位要求：\n" + StrUtil.blankToDefault(jobRequirements, "未填写")
+                + "\n\n上一题：" + previousRecord.getQuestionContent()
+                + "\n\n候选人回答：" + StrUtil.blankToDefault(previousAnswer, "未回答");
+        String question = callOpenAiChat(config, systemPrompt, userPrompt).replace("\n", " ").trim();
+        if (StrUtil.isBlank(question)) {
+            throw new BusinessException("LLM未返回追问题目内容");
+        }
+        return question;
     }
 
     private LlmEvaluation callLlmEvaluation(String question, String answer, String topic, String materials, String jobRequirements, String role, boolean needNextQuestion) {
@@ -1296,7 +1319,7 @@ public class InterviewServiceImpl implements InterviewService {
         String systemPrompt = basePrompt + "\n岗位要求：\n" + StrUtil.blankToDefault(jobRequirements, "未填写")
                 + "\n请严格基于上述知识库材料、岗位要求、当前问题和面试者回答完成评价。"
                 + "\n输出必须包含三部分：第一行只写整数分数；第二行写不少于20字的中文评价，评价要反馈回答是否完整、哪里正确或遗漏；第三行写下一道面试题。"
-                + "\n下一题必须基于知识库材料并结合岗位要求，可以自然改写和语义修饰，不必与知识点原句一模一样，但不能引入材料和岗位要求外的知识点。"
+                + "\n第三行的下一题必须是针对当前回答缺口的深入追问，保持当前知识库主题，不得切换知识域；可以自然改写，但不能引入材料和岗位要求外的知识点。"
                 + "\n本格式要求优先于旧配置中的'只返回整数'类要求，不能只输出分数，也不能只输出问题。";
         String response = chunkConsumer == null ? callOpenAiChat(config, systemPrompt, userPrompt) : callOpenAiChatStream(config, systemPrompt, userPrompt, chunkConsumer);
         return parseEvaluation(response);
@@ -1695,6 +1718,7 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setStageStatus(entity.getStageStatus());
         vo.setOverallStatus(entity.getOverallStatus());
         vo.setAiThresholdScore(entity.getAiThresholdScore());
+        vo.setAiFollowUpThreshold(entity.getAiFollowUpThreshold());
         vo.setAiAverageScore(entity.getAiAverageScore());
         vo.setAiMinQuestionRounds(entity.getAiMinQuestionRounds());
         vo.setAiMaxQuestionRounds(entity.getAiMaxQuestionRounds());
