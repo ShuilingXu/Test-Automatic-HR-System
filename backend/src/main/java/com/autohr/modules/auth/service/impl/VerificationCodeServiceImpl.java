@@ -4,6 +4,7 @@ import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import com.aliyun.dysmsapi20170525.Client;
 import com.aliyun.dysmsapi20170525.models.SendSmsRequest;
+import com.aliyun.dysmsapi20170525.models.SendSmsResponse;
 import com.aliyun.teaopenapi.models.Config;
 import com.autohr.common.exception.BusinessException;
 import com.autohr.modules.auth.service.VerificationCodeService;
@@ -91,7 +92,16 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
                     .setSignName(config.get("ALIYUN_SMS_SIGN_NAME"))
                     .setTemplateCode(config.get("ALIYUN_SMS_TEMPLATE_CODE"))
                     .setTemplateParam("{\"code\":\"" + code + "\"}");
-            client.sendSms(request);
+            SendSmsResponse response = client.sendSms(request);
+            String responseCode = response == null || response.getBody() == null ? null : response.getBody().getCode();
+            if (!StrUtil.equalsIgnoreCase(responseCode, "OK")) {
+                String responseMessage = response == null || response.getBody() == null ? "无响应内容" : response.getBody().getMessage();
+                String requestId = response == null || response.getBody() == null ? "" : response.getBody().getRequestId();
+                throw new BusinessException("短信验证码发送失败: " + StrUtil.blankToDefault(responseMessage, responseCode)
+                        + (StrUtil.isBlank(requestId) ? "" : " (RequestId: " + requestId + ")"));
+            }
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Throwable ex) {
             throw new BusinessException("短信验证码发送失败");
         }
