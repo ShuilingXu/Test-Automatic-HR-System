@@ -189,7 +189,15 @@
               <div class="video-box"><span>面试者远端视频</span><video ref="hrRemoteVideo" autoplay playsinline></video></div>
             </div>
             <div class="video-summary-box">
-              <span>音频转写/会议概要状态：{{ selectedProcess.summaryStatus || '未生成' }}</span>
+              <div class="summary-status-row">
+                <span>音频转写/会议概要状态：{{ selectedProcess.summaryStatus || '未生成' }}</span>
+                <el-button
+                  v-if="selectedProcess.recordingPath || selectedProcess.recordingFileName"
+                  size="small"
+                  :loading="retryingVideoSummary"
+                  @click="retryVideoSummary"
+                >重新生成</el-button>
+              </div>
               <p><strong>会议概要</strong>{{ selectedProcess.summaryText || '暂无概要，双侧录制完成后自动生成。' }}</p>
               <p><strong>转写文本</strong>{{ selectedProcess.transcriptText || '暂无转写文本' }}</p>
             </div>
@@ -298,6 +306,7 @@ const videoTranscriberLlmForm = reactive(createLlmForm('VIDEO_TRANSCRIBER'))
 const videoSummaryLlmForm = reactive(createLlmForm('VIDEO_SUMMARY'))
 const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 70, aiFollowUpThreshold: 70, aiMinQuestionRounds: 5, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5, aiOutputMode: 'NORMAL' })
 const processSearch = reactive({ keyword: '' })
+const retryingVideoSummary = ref(false)
 const systemConfig = reactive({
   ALIYUN_ACCESS_KEY_ID: '',
   ALIYUN_ACCESS_KEY_SECRET: '',
@@ -450,6 +459,28 @@ async function saveProcessRemark() {
     ElMessage.success('备注已保存')
     await loadAll()
   } catch (error) { fail(error) } finally { savingRemark.value = false }
+}
+
+async function retryVideoSummary() {
+  if (!selectedProcess.value || retryingVideoSummary.value) return
+  retryingVideoSummary.value = true
+  try {
+    selectedProcess.value = (await interviewApi.retryVideoSummary(selectedProcess.value.id)).data
+    ElMessage.success('已开始重新生成转写与会议概要')
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      const rows = (await interviewApi.listProcesses()).data
+      const latest = rows.find((item) => item.id === selectedProcess.value.id)
+      if (latest) selectedProcess.value = latest
+      if (!['PENDING', 'PROCESSING'].includes(latest?.summaryStatus)) break
+    }
+    if (selectedProcess.value.summaryStatus === 'COMPLETED') ElMessage.success('转写与会议概要已生成')
+    else if (selectedProcess.value.summaryStatus?.startsWith('FAILED')) ElMessage.error(selectedProcess.value.summaryStatus)
+  } catch (error) {
+    fail(error)
+  } finally {
+    retryingVideoSummary.value = false
+  }
 }
 
 async function copyVideoJoinLink() {
@@ -715,6 +746,7 @@ onMounted(loadAll)
 .video-box video { width: 100%; min-height: 220px; background: #111; border-radius: var(--radius-md); }
 .video-summary-box { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
 .video-summary-box span { color: var(--primary); font-weight: 800; }
+.summary-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .video-summary-box p { margin: 0; color: var(--ink-soft); line-height: 1.7; }
 .video-summary-box strong { display: block; margin-bottom: 4px; color: var(--ink); }
 .data-table { margin-top: 18px; }

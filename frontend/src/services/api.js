@@ -164,6 +164,7 @@ export const interviewApi = {
   },
   getRecordingUrl(processId) { return authenticatedFileUrl(`/api/interview/hr/video-recording/${processId}`) },
   getAiRecordingUrl(processId) { return authenticatedFileUrl(`/api/interview/hr/ai-recording/${processId}`) },
+  retryVideoSummary(processId) { return request.post(`/interview/hr/video-summary/${processId}/retry`) },
   intervieweeJoin(processId) { return request.post(`/interview/interviewee/video-join/${processId}`) },
   hrJoin(processId, params) { return request.post(`/interview/hr/video-join/${processId}`, null, { params }) },
   completeVideo(processId, params) { return request.post(`/interview/hr/video-complete/${processId}`, null, { params }) },

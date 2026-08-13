@@ -330,6 +330,11 @@ public class InterviewController {
         return FileDownloadSupport.buildInlineResponse(path, UploadPaths.RECORDING_DIR, fileName, "video/webm", "录制文件不可访问");
     }
 
+    @PostMapping("/hr/video-summary/{processId}/retry")
+    public ApiResponse<InterviewVO> retryVideoSummary(@PathVariable Long processId) {
+        return ApiResponse.success(interviewService.retryVideoSummary(processId));
+    }
+
     @GetMapping("/hr/ai-recording/{processId}")
     public ResponseEntity<Resource> downloadAiRecording(@PathVariable Long processId) {
         var process = interviewService.getProcess(processId);

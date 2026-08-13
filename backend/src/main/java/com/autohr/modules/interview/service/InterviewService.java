@@ -58,6 +58,7 @@ public interface InterviewService {
     InterviewVO reportAntiCheatEvent(AntiCheatEventRequest request, Long intervieweeUserId, String intervieweeName);
     InterviewVideoSession getVideoSession(Long processId);
     InterviewVideoSession getDownloadableVideoSession(Long processId);
+    InterviewVO retryVideoSummary(Long processId);
     InterviewVO approveAiToVideo(Long processId, InterviewDecisionRequest request);
     InterviewVO approveVideoToOnsite(Long processId, InterviewDecisionRequest request);
     InterviewVO decideOnsite(Long processId, InterviewDecisionRequest request);

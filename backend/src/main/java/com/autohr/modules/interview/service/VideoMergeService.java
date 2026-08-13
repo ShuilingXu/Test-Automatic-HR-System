@@ -55,11 +55,38 @@ public class VideoMergeService {
         }
         try {
             Files.createDirectories(UploadPaths.RECORDING_DIR);
-            Path output = UploadPaths.RECORDING_DIR.resolve(session.getVideoSerialNo() + "-audio.wav").normalize().toAbsolutePath();
+            Path output = UploadPaths.RECORDING_DIR.resolve(session.getVideoSerialNo() + "-audio.pcm").normalize().toAbsolutePath();
             if (!output.startsWith(UploadPaths.RECORDING_DIR)) {
                 throw new BusinessException("音频文件路径非法");
             }
-            runFfmpeg(List.of(ffmpegPath, "-y", "-i", source, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", output.toString()), "分离音频失败");
+            if (canMerge(session)) {
+                runFfmpeg(List.of(
+                        ffmpegPath,
+                        "-y",
+                        "-i", session.getHrRecordingPath(),
+                        "-i", session.getIntervieweeRecordingPath(),
+                        "-filter_complex", "[0:a:0][1:a:0]amix=inputs=2:duration=longest:dropout_transition=0,aresample=16000[a]",
+                        "-map", "[a]",
+                        "-ac", "1",
+                        "-ar", "16000",
+                        "-f", "s16le",
+                        "-c:a", "pcm_s16le",
+                        output.toString()
+                ), "混合双方音频失败");
+            } else {
+                runFfmpeg(List.of(
+                        ffmpegPath,
+                        "-y",
+                        "-i", source,
+                        "-map", "0:a:0",
+                        "-vn",
+                        "-ac", "1",
+                        "-ar", "16000",
+                        "-f", "s16le",
+                        "-c:a", "pcm_s16le",
+                        output.toString()
+                ), "分离音频失败");
+            }
             session.setAudioPath(output.toString());
             session.setAudioFileName(output.getFileName().toString());
         } catch (IOException ex) {
@@ -73,10 +100,9 @@ public class VideoMergeService {
                 "-y",
                 "-i", session.getHrRecordingPath(),
                 "-i", session.getIntervieweeRecordingPath(),
-                "-filter_complex", "[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];[1:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];[v0][v1]hstack=inputs=2[v]",
+                "-filter_complex", "[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];[1:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];[v0][v1]hstack=inputs=2[v];[0:a:0][1:a:0]amix=inputs=2:duration=longest:dropout_transition=0[a]",
                 "-map", "[v]",
-                "-map", "0:a?",
-                "-map", "1:a?",
+                "-map", "[a]",
                 "-c:v", videoCodec,
                 "-b:v", "1600k",
                 "-c:a", audioCodec,

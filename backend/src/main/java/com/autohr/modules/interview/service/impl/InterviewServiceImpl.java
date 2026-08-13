@@ -868,6 +868,26 @@ public class InterviewServiceImpl implements InterviewService {
 
     @Override
     @Transactional
+    public InterviewVO retryVideoSummary(Long processId) {
+        InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        if (!isReadableFile(StrUtil.blankToDefault(session.getMergedRecordingPath(), session.getRecordingPath()))) {
+            throw new BusinessException("没有可处理的视频录制文件");
+        }
+        if (StrUtil.equals(session.getSummaryStatus(), "PROCESSING")) {
+            throw new BusinessException("转写与会议概要正在生成，请稍候");
+        }
+        session.setAudioPath(null);
+        session.setAudioFileName(null);
+        session.setTranscriptText(null);
+        session.setSummaryText(null);
+        session.setSummaryStatus("PENDING");
+        videoSessionMapper.updateById(session);
+        runAfterCommit(() -> CompletableFuture.runAsync(() -> summarizeVideoSessionSafely(session.getId())));
+        return getProcess(processId);
+    }
+
+    @Override
+    @Transactional
     public VideoSignalVO uploadHrRecording(Long processId, String originalFileName, String contentType, MultipartFile file) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
         VideoSignalVO vo = storeRecording(session, originalFileName, contentType, file, "hr");
@@ -1377,10 +1397,8 @@ public class InterviewServiceImpl implements InterviewService {
         try {
             session.setSummaryStatus("PROCESSING");
             videoSessionMapper.updateById(session);
-            if (StrUtil.isBlank(session.getAudioPath())) {
-                videoMergeService.extractAudio(session);
-                videoSessionMapper.updateById(session);
-            }
+            videoMergeService.extractAudio(session);
+            videoSessionMapper.updateById(session);
             String transcript = callAudioTranscription(session.getAudioPath());
             session.setTranscriptText(abbreviate(transcript, 20000));
             String summary = callVideoSummaryLlm(transcript);
