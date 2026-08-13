@@ -37,7 +37,21 @@ chmod +x "$PACKAGE_DIR/start.sh"
 (
   cd "$RELEASE_DIR"
   rm -f "$PACKAGE_NAME.zip"
-  zip -qr "$PACKAGE_NAME.zip" "$PACKAGE_NAME"
+  if command -v zip >/dev/null 2>&1; then
+    zip -qr "$PACKAGE_NAME.zip" "$PACKAGE_NAME"
+  else
+    python3 - "$PACKAGE_NAME" "$PACKAGE_NAME.zip" <<'PY'
+import pathlib
+import sys
+import zipfile
+
+source = pathlib.Path(sys.argv[1])
+with zipfile.ZipFile(sys.argv[2], "w", zipfile.ZIP_DEFLATED) as archive:
+    for path in source.rglob("*"):
+        if path.is_file():
+            archive.write(path, path.as_posix())
+PY
+  fi
 )
 
 echo "Release package created: $RELEASE_DIR/$PACKAGE_NAME.zip"
