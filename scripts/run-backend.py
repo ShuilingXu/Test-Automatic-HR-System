@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import os
+import shutil
 import sys
+import time
 from pathlib import Path
 
 
@@ -13,6 +15,12 @@ if not env_path.is_file():
 if not jar_path.is_file():
     raise SystemExit(f"Missing backend artifact: {jar_path}")
 
+# Run an immutable copy so a later build cannot replace files used by this JVM.
+runtime_dir = project_root / "backend" / "runtime"
+runtime_dir.mkdir(parents=True, exist_ok=True)
+runtime_jar = runtime_dir / f"{jar_path.stem}-{os.getpid()}-{time.time_ns()}.jar"
+shutil.copy2(jar_path, runtime_jar)
+
 for raw_line in env_path.read_text(encoding="utf-8").splitlines():
     line = raw_line.strip()
     if not line or line.startswith("#") or "=" not in line:
@@ -22,4 +30,4 @@ for raw_line in env_path.read_text(encoding="utf-8").splitlines():
 
 extra_args = sys.argv[1:]
 os.chdir(project_root)
-os.execvp("java", ["java", "-jar", str(jar_path), *extra_args])
+os.execvp("java", ["java", "-jar", str(runtime_jar), *extra_args])
