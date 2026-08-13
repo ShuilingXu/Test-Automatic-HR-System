@@ -112,8 +112,9 @@ onMounted(async () => {
 <style scoped>
 .job-list { display: grid; gap: 12px; }
 .job-list strong, .job-list span, .job-list small { display: block; }
-.job-list span { margin: 6px 0; color: #61727d; }
-.job-list button { border-color: rgba(16, 37, 50, 0.08); background: rgba(255, 255, 255, 0.82); }
-.upload-tip { color: #6d7a83; margin-top: 8px; }
-.result-box { margin-top: 20px; padding: 16px; border-radius: 18px; background: linear-gradient(160deg, #102532 0%, #17394d 100%); color: #f4efe7; box-shadow: 0 16px 34px rgba(16, 37, 50, 0.16); }
+.job-list span { margin: 6px 0; color: var(--text-muted); }
+.upload-tip { color: var(--text-muted); margin-top: 8px; }
+.result-box { margin-top: 20px; padding: 20px; border-radius: var(--radius-md); background: var(--primary); color: #ffffff; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3); }
+.result-box h3 { color: #ffffff; margin: 0 0 12px; }
+.result-box p { color: rgba(255,255,255,0.88); margin: 6px 0; }
 </style>

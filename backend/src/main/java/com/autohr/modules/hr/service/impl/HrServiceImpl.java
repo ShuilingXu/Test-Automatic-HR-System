@@ -2,11 +2,8 @@ package com.autohr.modules.hr.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.autohr.common.exception.BusinessException;
-import com.autohr.modules.hr.dto.DepartmentDetailVO;
 import com.autohr.modules.hr.dto.DepartmentSaveRequest;
-import com.autohr.modules.hr.dto.DepartmentTreeNodeVO;
 import com.autohr.modules.hr.dto.DepartmentVO;
-import com.autohr.modules.hr.dto.EmployeeDetailVO;
 import com.autohr.modules.hr.dto.EmployeeSaveRequest;
 import com.autohr.modules.hr.dto.EmployeeVO;
 import com.autohr.modules.hr.dto.HrDashboardVO;
@@ -28,8 +25,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -77,54 +72,6 @@ public class HrServiceImpl implements HrService {
         Map<Long, Department> departmentMap = loadDepartmentMap();
         Map<Long, Employee> employeeMap = loadEmployeeMap();
         return departments.stream().map(item -> toDepartmentVO(item, departmentMap, employeeMap)).toList();
-    }
-
-    @Override
-    public DepartmentDetailVO getDepartmentDetail(Long id) {
-        Department department = requireDepartment(id);
-        Map<Long, Department> departmentMap = loadDepartmentMap();
-        Map<Long, Employee> employeeMap = loadEmployeeMap();
-        List<Employee> directEmployees = employeeMapper.selectList(new LambdaQueryWrapper<Employee>()
-                .eq(Employee::getDepartmentId, id)
-                .orderByAsc(Employee::getId));
-        DepartmentDetailVO detailVO = new DepartmentDetailVO();
-        detailVO.setDepartment(toDepartmentVO(department, departmentMap, employeeMap));
-        detailVO.setEmployeeCount(directEmployees.size());
-        detailVO.setDirectEmployees(directEmployees.stream().map(item -> toEmployeeVO(item, departmentMap, employeeMap)).toList());
-        return detailVO;
-    }
-
-    @Override
-    public List<DepartmentTreeNodeVO> getDepartmentTree() {
-        List<Department> departments = listDepartmentEntities();
-        Map<Long, Employee> employeeMap = loadEmployeeMap();
-        Map<Long, Long> employeeCountMap = employeeMapper.selectList(null).stream()
-                .collect(Collectors.groupingBy(Employee::getDepartmentId, Collectors.counting()));
-        Map<Long, DepartmentTreeNodeVO> nodeMap = new LinkedHashMap<>();
-        for (Department department : departments) {
-            DepartmentTreeNodeVO node = new DepartmentTreeNodeVO();
-            BeanUtils.copyProperties(department, node);
-            Employee manager = employeeMap.get(department.getManagerEmployeeId());
-            if (manager != null) {
-                node.setManagerEmployeeName(manager.getFullName());
-            }
-            node.setEmployeeCount(employeeCountMap.getOrDefault(department.getId(), 0L).intValue());
-            nodeMap.put(node.getId(), node);
-        }
-        List<DepartmentTreeNodeVO> roots = new ArrayList<>();
-        for (DepartmentTreeNodeVO node : nodeMap.values()) {
-            if (node.getParentDepartmentId() == null) {
-                roots.add(node);
-                continue;
-            }
-            DepartmentTreeNodeVO parent = nodeMap.get(node.getParentDepartmentId());
-            if (parent == null) {
-                roots.add(node);
-            } else {
-                parent.getChildren().add(node);
-            }
-        }
-        return roots;
     }
 
     @Override
@@ -178,25 +125,6 @@ public class HrServiceImpl implements HrService {
         Map<Long, Department> departmentMap = loadDepartmentMap();
         Map<Long, Employee> employeeMap = loadEmployeeMap();
         return employees.stream().map(item -> toEmployeeVO(item, departmentMap, employeeMap)).toList();
-    }
-
-    @Override
-    public EmployeeDetailVO getEmployeeDetail(Long id) {
-        Employee employee = requireEmployee(id);
-        Map<Long, Department> departmentMap = loadDepartmentMap();
-        Map<Long, Employee> employeeMap = loadEmployeeMap();
-        EmployeeDetailVO detailVO = new EmployeeDetailVO();
-        detailVO.setEmployee(toEmployeeVO(employee, departmentMap, employeeMap));
-        Department department = departmentMap.get(employee.getDepartmentId());
-        if (department != null) {
-            detailVO.setDepartment(toDepartmentVO(department, departmentMap, employeeMap));
-        }
-        Employee manager = employeeMap.get(employee.getManagerEmployeeId());
-        if (manager != null) {
-            detailVO.setManager(toEmployeeVO(manager, departmentMap, employeeMap));
-        }
-        detailVO.setBindings(listBindings(null, id, null));
-        return detailVO;
     }
 
     @Override
@@ -340,12 +268,6 @@ public class HrServiceImpl implements HrService {
             throw new BusinessException("绑定记录不存在: " + id);
         }
         return binding;
-    }
-
-    private List<Department> listDepartmentEntities() {
-        return departmentMapper.selectList(new LambdaQueryWrapper<Department>()
-                .orderByAsc(Department::getSortOrder)
-                .orderByAsc(Department::getId));
     }
 
     private Map<Long, Department> loadDepartmentMap() {

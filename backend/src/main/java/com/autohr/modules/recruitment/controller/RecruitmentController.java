@@ -56,11 +56,6 @@ public class RecruitmentController {
         return ApiResponse.success(recruitmentService.listJobs(status, departmentName, jobType, keyword));
     }
 
-    @GetMapping("/admin/jobs/{id}")
-    public ApiResponse<JobVO> getAdminJob(@PathVariable Long id) {
-        return ApiResponse.success(recruitmentService.getJob(id));
-    }
-
     @DeleteMapping("/admin/jobs/{id}")
     public ApiResponse<Void> deleteJob(Authentication authentication,
                                        @PathVariable Long id) {
@@ -92,15 +87,6 @@ public class RecruitmentController {
         return ApiResponse.success(rejected);
     }
 
-    @PostMapping("/admin/candidates/{id}/retry-resume-llm")
-    public ApiResponse<CandidateVO> retryResumeLlmEvaluation(Authentication authentication,
-                                                              @PathVariable Long id) {
-        CandidateVO candidate = recruitmentService.reevaluateResumeLlm(id);
-        SessionUserVO current = currentUser(authentication);
-        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "RECRUITMENT", "REEVALUATE_RESUME_LLM", "RECRUITMENT_CANDIDATE", String.valueOf(id), candidate.getFullName() + " AI简历重评");
-        return ApiResponse.success(candidate);
-    }
-
     @PostMapping("/admin/candidates/{id}/reevaluate-resume-llm")
     public ApiResponse<CandidateVO> reevaluateResumeLlm(Authentication authentication,
                                                         @PathVariable Long id) {
@@ -122,11 +108,6 @@ public class RecruitmentController {
     @GetMapping("/jobs")
     public ApiResponse<List<JobVO>> listOpenJobs(@RequestParam(required = false) String keyword) {
         return ApiResponse.success(recruitmentService.listJobs(1, null, null, keyword));
-    }
-
-    @GetMapping("/jobs/{id}")
-    public ApiResponse<JobVO> getOpenJob(@PathVariable Long id) {
-        return ApiResponse.success(recruitmentService.getJob(id));
     }
 
     @PostMapping("/candidates")

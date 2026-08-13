@@ -131,11 +131,6 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     @Override
-    public JobVO getJob(Long id) {
-        return toJobVO(requireJob(id));
-    }
-
-    @Override
     @Transactional
     public void deleteJob(Long id) {
         requireJob(id);

@@ -36,12 +36,9 @@ function authenticatedFileUrl(path) {
 export const hrApi = {
   getDashboard() { return request.get('/hr/dashboard') },
   listDepartments(params) { return request.get('/hr/departments', { params }) },
-  getDepartmentTree() { return request.get('/hr/departments/tree') },
-  getDepartmentDetail(id) { return request.get(`/hr/departments/${id}`) },
   saveDepartment(payload) { return request.post('/hr/departments', payload) },
   deleteDepartment(id) { return request.delete(`/hr/departments/${id}`) },
   listEmployees(params) { return request.get('/hr/employees', { params }) },
-  getEmployeeDetail(id) { return request.get(`/hr/employees/${id}`) },
   saveEmployee(payload) { return request.post('/hr/employees', payload) },
   deleteEmployee(id) { return request.delete(`/hr/employees/${id}`) },
   listBindings(params) { return request.get('/hr/bindings', { params }) },
@@ -51,7 +48,6 @@ export const hrApi = {
 export const recruitmentApi = {
   saveJob(payload) { return request.post('/recruitment/admin/jobs', payload) },
   listAdminJobs(params) { return request.get('/recruitment/admin/jobs', { params }) },
-  getAdminJob(id) { return request.get(`/recruitment/admin/jobs/${id}`) },
   deleteJob(id) { return request.delete(`/recruitment/admin/jobs/${id}`) },
   listCandidates(params) { return request.get('/recruitment/admin/candidates', { params }) },
   getCandidate(id) { return request.get(`/recruitment/admin/candidates/${id}`) },

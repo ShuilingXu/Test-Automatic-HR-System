@@ -4,11 +4,8 @@ import com.autohr.common.api.ApiResponse;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.service.AuthService;
 import com.autohr.modules.auth.service.AuditLogService;
-import com.autohr.modules.hr.dto.DepartmentDetailVO;
 import com.autohr.modules.hr.dto.DepartmentSaveRequest;
-import com.autohr.modules.hr.dto.DepartmentTreeNodeVO;
 import com.autohr.modules.hr.dto.DepartmentVO;
-import com.autohr.modules.hr.dto.EmployeeDetailVO;
 import com.autohr.modules.hr.dto.EmployeeSaveRequest;
 import com.autohr.modules.hr.dto.EmployeeVO;
 import com.autohr.modules.hr.dto.HrDashboardVO;
@@ -59,16 +56,6 @@ public class HrController {
         return ApiResponse.success(hrService.listDepartments(parentDepartmentId, status, keyword));
     }
 
-    @GetMapping("/departments/tree")
-    public ApiResponse<List<DepartmentTreeNodeVO>> getDepartmentTree() {
-        return ApiResponse.success(hrService.getDepartmentTree());
-    }
-
-    @GetMapping("/departments/{id}")
-    public ApiResponse<DepartmentDetailVO> getDepartmentDetail(@PathVariable Long id) {
-        return ApiResponse.success(hrService.getDepartmentDetail(id));
-    }
-
     @DeleteMapping("/departments/{id}")
     public ApiResponse<Void> deleteDepartment(Authentication authentication,
                                              @PathVariable Long id) {
@@ -92,11 +79,6 @@ public class HrController {
                                                        @RequestParam(required = false) Integer employmentStatus,
                                                        @RequestParam(required = false) String keyword) {
         return ApiResponse.success(hrService.listEmployees(departmentId, employmentStatus, keyword));
-    }
-
-    @GetMapping("/employees/{id}")
-    public ApiResponse<EmployeeDetailVO> getEmployeeDetail(@PathVariable Long id) {
-        return ApiResponse.success(hrService.getEmployeeDetail(id));
     }
 
     @DeleteMapping("/employees/{id}")

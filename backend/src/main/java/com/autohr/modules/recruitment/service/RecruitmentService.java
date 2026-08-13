@@ -16,8 +16,6 @@ public interface RecruitmentService {
 
     List<JobVO> listJobs(Integer status, String departmentName, String jobType, String keyword);
 
-    JobVO getJob(Long id);
-
     void deleteJob(Long id);
 
     CandidateVO apply(CandidateApplyRequest request, String intervieweeUsername);

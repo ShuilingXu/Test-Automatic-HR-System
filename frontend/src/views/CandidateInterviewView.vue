@@ -725,34 +725,34 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.summary-box { margin-top: 16px; padding: 14px; border-radius: 16px; background: rgba(255,255,255,0.82); }
+.summary-box { margin-top: 16px; padding: 14px; border-radius: var(--radius-md); background: var(--surface); border: 1px solid var(--border); }
 .summary-box p { margin: 6px 0; }
 .ai-panel { position: relative; overflow: hidden; }
-.ai-status-card { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; margin-bottom: 14px; padding: 14px; border-radius: 16px; background: rgba(16, 37, 50, 0.06); border: 1px solid rgba(16, 37, 50, 0.08); }
-.ai-status-card small { grid-column: 2; color: #6d7a83; }
-.ai-status-card.busy { background: rgba(15, 108, 143, 0.1); border-color: rgba(15, 108, 143, 0.22); }
-.status-dot { width: 10px; height: 10px; border-radius: 999px; background: #0f6c8f; box-shadow: 0 0 0 6px rgba(15, 108, 143, 0.12); }
+.ai-status-card { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; margin-bottom: 14px; padding: 14px; border-radius: var(--radius-md); background: var(--surface-soft); border: 1px solid var(--border); }
+.ai-status-card small { grid-column: 2; color: var(--text-muted); }
+.ai-status-card.busy { background: var(--primary-soft); border-color: var(--primary); }
+.status-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--primary); box-shadow: 0 0 0 6px var(--primary-ring); }
 .ai-status-card.busy .status-dot { animation: pulse 1.2s ease-in-out infinite; }
-.ai-recording-card { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 160px); gap: 14px; align-items: center; margin-bottom: 14px; padding: 14px; border-radius: 16px; background: rgba(143, 15, 15, 0.08); border: 1px solid rgba(143, 15, 15, 0.18); }
-.ai-recording-card.active { background: rgba(28, 120, 74, 0.1); border-color: rgba(28, 120, 74, 0.25); }
-.ai-recording-card p { margin: 6px 0 0; color: #6d7a83; line-height: 1.6; }
-.ai-recording-card video { width: 160px; height: 100px; object-fit: cover; background: #111; border-radius: 12px; }
-.ai-submit-overlay { position: absolute; inset: 0; z-index: 5; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; background: rgba(248, 245, 239, 0.88); backdrop-filter: blur(8px); }
-.ai-submit-overlay p { max-width: 360px; margin: 0; color: #6d7a83; line-height: 1.7; }
-.ai-stream-log { width: min(520px, 100%); max-height: 220px; overflow: auto; padding: 12px; border-radius: 14px; background: rgba(255,255,255,0.72); color: #42515b; text-align: left; line-height: 1.7; white-space: pre-wrap; }
-.ai-orbit { position: relative; width: 64px; height: 64px; border-radius: 999px; border: 2px solid rgba(15, 108, 143, 0.18); animation: spin 1.4s linear infinite; }
-.ai-orbit span { position: absolute; width: 12px; height: 12px; border-radius: 999px; background: #0f6c8f; }
+.ai-recording-card { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 160px); gap: 14px; align-items: center; margin-bottom: 14px; padding: 14px; border-radius: var(--radius-md); background: var(--danger-soft); border: 1px solid rgba(220, 38, 38, 0.18); }
+.ai-recording-card.active { background: rgba(22, 163, 74, 0.1); border-color: rgba(22, 163, 74, 0.25); }
+.ai-recording-card p { margin: 6px 0 0; color: var(--text-muted); line-height: 1.6; }
+.ai-recording-card video { width: 160px; height: 100px; object-fit: cover; background: #111; border-radius: var(--radius-md); }
+.ai-submit-overlay { position: absolute; inset: 0; z-index: 5; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 24px; text-align: center; background: rgba(248, 250, 252, 0.88); backdrop-filter: blur(8px); }
+.ai-submit-overlay p { max-width: 360px; margin: 0; color: var(--text-muted); line-height: 1.7; }
+.ai-stream-log { width: min(520px, 100%); max-height: 220px; overflow: auto; padding: 12px; border-radius: var(--radius-sm); background: var(--surface); color: var(--ink-soft); text-align: left; line-height: 1.7; white-space: pre-wrap; }
+.ai-orbit { position: relative; width: 64px; height: 64px; border-radius: 999px; border: 2px solid var(--primary-ring); animation: spin 1.4s linear infinite; }
+.ai-orbit span { position: absolute; width: 12px; height: 12px; border-radius: 999px; background: var(--primary); }
 .ai-orbit span:nth-child(1) { top: -6px; left: 26px; }
-.ai-orbit span:nth-child(2) { right: 2px; bottom: 8px; background: #f0b66f; }
-.ai-orbit span:nth-child(3) { left: 2px; bottom: 8px; background: #102532; }
-.empty-box { padding: 18px; border-radius: 16px; background: rgba(255,255,255,0.75); color: #6d7a83; }
-.question-card { display: grid; gap: 8px; padding: 16px; border-radius: 18px; background: rgba(255,255,255,0.82); margin-bottom: 14px; }
+.ai-orbit span:nth-child(2) { right: 2px; bottom: 8px; background: var(--warning); }
+.ai-orbit span:nth-child(3) { left: 2px; bottom: 8px; background: var(--ink); }
+.empty-box { padding: 18px; border-radius: var(--radius-md); background: var(--surface-soft); color: var(--text-muted); }
+.question-card { display: grid; gap: 8px; padding: 16px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--border); margin-bottom: 14px; }
 .question-card p { margin: 0; line-height: 1.7; }
-.question-card small { color: #6d7a83; }
+.question-card small { color: var(--text-muted); }
 .video-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin-top: 18px; }
-.video-box { min-width: 0; background: rgba(255,255,255,0.82); padding: 12px; border-radius: 16px; }
-.video-box span { display: block; margin-bottom: 8px; color: #6d7a83; }
-.video-box video { width: 100%; min-height: 220px; background: #111; border-radius: 12px; }
+.video-box { min-width: 0; background: var(--surface); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border); }
+.video-box span { display: block; margin-bottom: 8px; color: var(--text-muted); }
+.video-box video { width: 100%; min-height: 220px; background: #111; border-radius: var(--radius-md); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.45); opacity: 0.55; } }
 @media (max-width: 900px) { .video-grid, .ai-recording-card { grid-template-columns: 1fr; } }

@@ -139,13 +139,13 @@ watch(() => route.fullPath, syncRouteState)
 .application-panel { margin-top: 18px; }
 .section-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .application-list { display: grid; gap: 12px; margin-top: 12px; }
-.application-card { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 16px; border: 1px solid rgba(16, 37, 50, 0.07); border-radius: 18px; background: rgba(255, 255, 255, 0.82); transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease; }
-.application-card:hover { transform: translateY(-2px); border-color: rgba(15, 108, 143, 0.22); box-shadow: 0 12px 28px rgba(16, 37, 50, 0.07); }
-.application-card.selected { outline: 2px solid rgba(15, 108, 143, 0.35); background: rgba(220, 231, 236, 0.36); }
-.application-detail { margin-top: 18px; padding: 16px; border-radius: 18px; background: rgba(255, 255, 255, 0.82); }
+.application-card { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; cursor: pointer; }
+.application-card:hover { transform: translateY(-2px); border-color: var(--primary); box-shadow: var(--shadow-hover); }
+.application-card.selected { outline: 2px solid var(--primary); background: var(--primary-soft); }
+.application-detail { margin-top: 18px; padding: 16px; border-radius: var(--radius-md); background: var(--surface); border: 1px solid var(--border); }
 .application-card strong, .application-card span, .application-card small { display: block; }
-.application-card span { margin: 6px 0; color: #61727d; }
-.pending-chip { padding: 8px 12px; border-radius: 999px; background: #eef2f4; color: #61727d; white-space: nowrap; }
+.application-card span { margin: 6px 0; color: var(--text-muted); }
+.pending-chip { padding: 7px 12px; border-radius: 999px; background: var(--surface-soft); border: 1px solid var(--border); color: var(--text-muted); font-size: 13px; white-space: nowrap; }
 @media (max-width: 900px) { .topline { flex-direction: column; } }
 @media (max-width: 900px) { .section-head, .application-card { flex-direction: column; align-items: flex-start; } }
 </style>

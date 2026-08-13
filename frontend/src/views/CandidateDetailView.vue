@@ -145,13 +145,13 @@ onMounted(loadCandidate)
 .topline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 20px; }
 .detail-surface { padding: 18px; }
 .detail-head { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; margin-bottom: 18px; }
-.detail-head h2 { margin: 6px 0 0; font-size: 32px; }
-.score-card { min-width: 150px; border-radius: 18px; padding: 16px; background: #102532; color: #f8f5ef; }
-.score-card span { display: block; opacity: 0.76; margin-bottom: 6px; }
-.score-card strong { font-size: 34px; }
+.detail-head h2 { margin: 6px 0 0; font-size: 30px; }
+.score-card { min-width: 150px; border-radius: var(--radius-md); padding: 16px; background: var(--primary); color: #ffffff; }
+.score-card span { display: block; opacity: 0.82; margin-bottom: 6px; font-size: 13px; }
+.score-card strong { font-size: 32px; }
 .detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.detail-grid div, .intro-box { background: rgba(255,255,255,0.82); border-radius: 14px; padding: 12px; }
-.detail-grid span, .intro-box span { display: block; color: #6d7a83; margin-bottom: 6px; }
+.detail-grid div, .intro-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; }
+.detail-grid span, .intro-box span { display: block; color: var(--text-muted); font-size: 12px; margin-bottom: 5px; }
 .intro-box { margin: 12px 0; }
 .intro-box p { margin: 0; line-height: 1.7; }
 .action-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
