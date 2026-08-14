@@ -160,6 +160,8 @@ let pendingHrIce = []
 let recordingStopInProgress = false
 let handledRecordingEndSignal = ''
 let recordingEndTimer = null
+let videoPollInProgress = false
+let lastSwitchReportAt = 0
 let aiExamRecorder = null
 let aiExamRecordedChunks = []
 let aiExamRecordingStopInProgress = false
@@ -413,6 +415,7 @@ async function submitAiAnswerStream() {
       aiStreamText.value += text
       aiSubmitState.message = 'AI正在实时输出'
     }
+    if (event === 'done') aiSubmitState.message = 'AI处理完成'
   })
 }
 
@@ -532,20 +535,27 @@ function handleFullscreenChange() {
     return
   }
   if (shouldReportSwitch()) {
-    reportAntiCheat('FULLSCREEN_EXIT', `退出全屏，当前本地累计${antiCheat.switchCount + 1}次`)
+    reportSwitchEvent('FULLSCREEN_EXIT', `退出全屏，当前本地累计${antiCheat.switchCount + 1}次`)
   }
 }
 
 function handleVisibilityChange() {
   if (document.hidden && shouldReportSwitch()) {
-    reportAntiCheat('TAB_HIDDEN', `页面隐藏/切屏，当前本地累计${antiCheat.switchCount + 1}次`)
+    reportSwitchEvent('TAB_HIDDEN', `页面隐藏/切屏，当前本地累计${antiCheat.switchCount + 1}次`)
   }
 }
 
 function handleWindowBlur() {
   if (shouldReportSwitch()) {
-    reportAntiCheat('WINDOW_BLUR', `窗口失焦/切屏，当前本地累计${antiCheat.switchCount + 1}次`)
+    reportSwitchEvent('WINDOW_BLUR', `窗口失焦/切屏，当前本地累计${antiCheat.switchCount + 1}次`)
   }
+}
+
+function reportSwitchEvent(eventType, detail) {
+  const now = Date.now()
+  if (now - lastSwitchReportAt < 1000) return
+  lastSwitchReportAt = now
+  reportAntiCheat(eventType, detail)
 }
 
 function handleRestrictedShortcut(event) {
@@ -594,7 +604,7 @@ function handleClipboardBlocked(event) {
 }
 async function joinVideo() {
   try {
-    disconnectVideo()
+    await disconnectVideo()
     await interviewApi.intervieweeJoin(sessionForm.processId)
     const stream = await requestCameraAndMicrophone()
     if (componentDisposed) {
@@ -621,36 +631,44 @@ async function joinVideo() {
       }
     }
     pollTimer = setInterval(async () => {
-      const state = (await interviewApi.getVideoState(sessionForm.processId)).data
-      if (state.offerSdp && !peer.currentRemoteDescription) {
-        await peer.setRemoteDescription(JSON.parse(state.offerSdp))
-        await flushPendingHrIce()
-        const answer = await peer.createAnswer()
-        await peer.setLocalDescription(answer)
-        await interviewApi.submitVideoAnswer(sessionForm.processId, { answerSdp: JSON.stringify(answer) })
-      }
-      if (state.hrIceCandidates) {
-        const candidates = state.hrIceCandidates.split('\n').filter(Boolean)
-        for (const item of candidates) {
-          if (!addedHrIce.has(item)) {
-            addedHrIce.add(item)
-            await addHrIceCandidate(item)
+      if (videoPollInProgress) return
+      videoPollInProgress = true
+      try {
+        const state = (await interviewApi.getVideoState(sessionForm.processId)).data
+        if (state.offerSdp && !peer.currentRemoteDescription) {
+          await peer.setRemoteDescription(JSON.parse(state.offerSdp))
+          await flushPendingHrIce()
+          const answer = await peer.createAnswer()
+          await peer.setLocalDescription(answer)
+          await interviewApi.submitVideoAnswer(sessionForm.processId, { answerSdp: JSON.stringify(answer) })
+        }
+        if (state.hrIceCandidates) {
+          const candidates = state.hrIceCandidates.split('\n').filter(Boolean)
+          for (const item of candidates) {
+            if (!addedHrIce.has(item)) {
+              addedHrIce.add(item)
+              await addHrIceCandidate(item)
+            }
           }
         }
-      }
-      if (state.sessionStatus === 'RECORDING') {
-        startRecordingIfNeeded()
-      }
-      if (shouldHandleRecordingEnd(state)) {
-        handledRecordingEndSignal = recordingEndSignalKey(state)
-        clearInterval(pollTimer)
-        pollTimer = null
-        scheduleRecordingStop(state.recordingEndRequestedAt)
+        if (state.sessionStatus === 'RECORDING') {
+          startRecordingIfNeeded()
+        }
+        if (shouldHandleRecordingEnd(state)) {
+          handledRecordingEndSignal = recordingEndSignalKey(state)
+          clearInterval(pollTimer)
+          pollTimer = null
+          scheduleRecordingStop(state.recordingEndRequestedAt)
+        }
+      } catch (error) {
+        console.warn('同步视频状态失败', error)
+      } finally {
+        videoPollInProgress = false
       }
     }, 1000)
     ElMessage.success('已加入视频面，等待HR就绪后同步开始录制')
   } catch (error) {
-    disconnectVideo()
+    await disconnectVideo({ uploadRecording: false })
     ElMessage.error(buildMediaErrorMessage(error))
   }
 }
@@ -679,7 +697,7 @@ function scheduleRecordingStop(endAt) {
   recordingEndTimer = setTimeout(async () => {
     try {
       await stopAndUploadRecording()
-      disconnectVideo()
+      await disconnectVideo({ uploadRecording: false })
     } catch (error) {
       fail(error)
     }
@@ -717,24 +735,29 @@ async function stopAndUploadRecording() {
   }
 }
 
-function disconnectVideo() {
-  clearInterval(pollTimer)
-  clearTimeout(recordingEndTimer)
-  pollTimer = null
-  recordingEndTimer = null
-  peer?.getSenders?.().forEach((sender) => sender.track?.stop())
-  peer?.close()
-  peer = null
-  recorder = null
-  recordedChunks = []
-  recordingStopInProgress = false
-  handledRecordingEndSignal = ''
-  localStream?.getTracks().forEach((track) => track.stop())
-  localStream = null
-  remoteStream = null
-  pendingHrIce = []
-  if (localVideo.value) localVideo.value.srcObject = null
-  if (remoteVideo.value) remoteVideo.value.srcObject = null
+async function disconnectVideo({ uploadRecording = true } = {}) {
+  try {
+    if (uploadRecording) await stopAndUploadRecording()
+  } finally {
+    clearInterval(pollTimer)
+    clearTimeout(recordingEndTimer)
+    pollTimer = null
+    recordingEndTimer = null
+    peer?.getSenders?.().forEach((sender) => sender.track?.stop())
+    peer?.close()
+    peer = null
+    recorder = null
+    recordedChunks = []
+    recordingStopInProgress = false
+    handledRecordingEndSignal = ''
+    videoPollInProgress = false
+    localStream?.getTracks().forEach((track) => track.stop())
+    localStream = null
+    remoteStream = null
+    pendingHrIce = []
+    if (localVideo.value) localVideo.value.srcObject = null
+    if (remoteVideo.value) remoteVideo.value.srcObject = null
+  }
 }
 
 async function addHrIceCandidate(item) {
@@ -788,7 +811,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('paste', handleClipboardBlocked, true)
   document.removeEventListener('drop', handleClipboardBlocked, true)
   stopAndUploadAiExamRecording().catch(() => {})
-  disconnectVideo()
+  void disconnectVideo().catch(() => {})
 })
 
 onMounted(async () => {

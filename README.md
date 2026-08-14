@@ -369,6 +369,8 @@ spring:
       - optional:file:../.env[.properties]
 ```
 
+`.env` 使用 Java Properties 语法，由 Spring Boot 和系统配置服务统一解析；systemd 不再重复解析该文件。通过系统配置页面保存时会自动转义空格、反斜杠、`=`、`:`、`#` 和 `!`，因此密码、Token 和 Endpoint 中的特殊字符可在重启后原样生效。手工编辑时如需字面反斜杠，请写成 `\\`。
+
 常用变量：
 
 | 变量 | 默认值 | 说明 |

@@ -30,13 +30,6 @@ for stale_jar in runtime_dir.glob("*.jar"):
 runtime_jar = runtime_dir / f"{jar_path.stem}-{os.getpid()}-{time.time_ns()}.jar"
 shutil.copy2(jar_path, runtime_jar)
 
-for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-    line = raw_line.strip()
-    if not line or line.startswith("#") or "=" not in line:
-        continue
-    key, value = line.split("=", 1)
-    os.environ[key.strip()] = value.strip()
-
 extra_args = sys.argv[1:]
 os.chdir(project_root)
 os.execvp("java", ["java", "-jar", str(runtime_jar), *extra_args])

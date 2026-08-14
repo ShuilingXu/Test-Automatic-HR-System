@@ -5,6 +5,7 @@ import com.autohr.common.exception.BusinessException;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -15,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -22,7 +24,15 @@ import java.util.regex.Pattern;
 public class SystemConfigService {
 
     private static final Pattern ENV_KEY_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
-    private final Path envPath = Paths.get(".env");
+    private final Path envPath;
+
+    public SystemConfigService() {
+        this(Paths.get(".env"));
+    }
+
+    SystemConfigService(Path envPath) {
+        this.envPath = envPath;
+    }
 
     public synchronized Map<String, String> loadConfig(String... keys) {
         Map<String, String> envFile = readEnvFile();
@@ -48,7 +58,7 @@ public class SystemConfigService {
         for (String line : currentLines) {
             String key = parseKey(line);
             if (key != null && sanitizedUpdates.containsKey(key)) {
-                builder.append(key).append('=').append(sanitizedUpdates.get(key));
+                builder.append(key).append('=').append(serializeValue(sanitizedUpdates.get(key)));
                 pendingKeys.remove(key);
             } else {
                 builder.append(line);
@@ -56,7 +66,7 @@ public class SystemConfigService {
             builder.append(System.lineSeparator());
         }
         for (String key : pendingKeys) {
-            builder.append(key).append('=').append(sanitizedUpdates.get(key)).append(System.lineSeparator());
+            builder.append(key).append('=').append(serializeValue(sanitizedUpdates.get(key))).append(System.lineSeparator());
         }
         writeEnvFile(builder.toString());
     }
@@ -69,8 +79,7 @@ public class SystemConfigService {
         for (String line : readEnvLines()) {
             String key = parseKey(line);
             if (key != null) {
-                int index = line.indexOf('=');
-                values.put(key, line.substring(index + 1).trim());
+                values.put(key, parseValue(line, key));
             }
         }
         return values;
@@ -118,6 +127,29 @@ public class SystemConfigService {
         }
         String key = line.substring(0, index).trim();
         return ENV_KEY_PATTERN.matcher(key).matches() ? key : null;
+    }
+
+    private String parseValue(String line, String key) {
+        Properties properties = new Properties();
+        try {
+            properties.load(new StringReader(line));
+        } catch (IOException ex) {
+            throw new IllegalStateException("解析.env配置失败", ex);
+        }
+        return properties.getProperty(key, "");
+    }
+
+    private String serializeValue(String value) {
+        StringBuilder serialized = new StringBuilder(value.length());
+        for (int index = 0; index < value.length(); index++) {
+            char character = value.charAt(index);
+            if (character == '\\' || character == ' ' || character == '=' || character == ':'
+                    || character == '#' || character == '!') {
+                serialized.append('\\');
+            }
+            serialized.append(character);
+        }
+        return serialized.toString();
     }
 
     private boolean containsControlCharacter(String value) {

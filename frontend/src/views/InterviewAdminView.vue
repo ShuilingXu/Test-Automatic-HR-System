@@ -178,7 +178,7 @@
             <div><span>状态</span><strong>{{ processCandidatePreview.interviewStageStatus || processCandidatePreview.applicationStatus || '-' }}</strong></div>
           </div>
         </div>
-        <div class="link-row"><el-button type="primary" @click="startProcess">发起面试流程</el-button></div>
+        <div class="link-row"><el-button type="primary" :loading="startingProcess" @click="startProcess">发起面试流程</el-button></div>
         <el-table :data="processes" stripe class="data-table" @row-click="openProcess">
           <el-table-column prop="id" label="流程流水号" width="110" />
           <el-table-column prop="recruitmentCandidateId" label="候选人ID" />
@@ -192,8 +192,8 @@
           <el-table-column label="操作" min-width="250">
             <template #default="scope">
               <el-button text @click.stop="openProcess(scope.row)">进入面试界面</el-button>
-              <el-button v-if="isAiApprovalPending(scope.row)" text type="primary" @click.stop="approveAi(scope.row, 1)">AI审批通过</el-button>
-              <el-button v-if="isAiApprovalPending(scope.row)" text type="danger" @click.stop="approveAi(scope.row, 0)">AI审批不通过</el-button>
+              <el-button v-if="isAiApprovalPending(scope.row)" text type="primary" :loading="isProcessActionLoading(scope.row.id, 'approve-ai-1')" :disabled="processActionLoading" @click.stop="approveAi(scope.row, 1)">AI审批通过</el-button>
+              <el-button v-if="isAiApprovalPending(scope.row)" text type="danger" :loading="isProcessActionLoading(scope.row.id, 'approve-ai-0')" :disabled="processActionLoading" @click.stop="approveAi(scope.row, 0)">AI审批不通过</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -323,15 +323,15 @@
               </el-form-item>
             </el-form>
             <div class="action-button-grid">
-              <el-button v-if="canApproveAi" type="primary" @click="approveAi(selectedProcess, 1)">AI审批通过</el-button>
-              <el-button v-if="canApproveAi" type="danger" plain @click="approveAi(selectedProcess, 0)">AI审批不通过</el-button>
+              <el-button v-if="canApproveAi" type="primary" :loading="isProcessActionLoading(selectedProcess.id, 'approve-ai-1')" :disabled="processActionLoading" @click="approveAi(selectedProcess, 1)">AI审批通过</el-button>
+              <el-button v-if="canApproveAi" type="danger" plain :loading="isProcessActionLoading(selectedProcess.id, 'approve-ai-0')" :disabled="processActionLoading" @click="approveAi(selectedProcess, 0)">AI审批不通过</el-button>
               <el-button v-if="canStartVideo" @click="startHrVideoCall">开始视频面</el-button>
               <el-button v-if="canStopVideo" @click="stopHrRecording">结束并上传录制</el-button>
-              <el-button v-if="canApproveVideo" @click="approveVideo(1)">{{ selectedProcess.stageName || '视频面试' }}通过</el-button>
-              <el-button v-if="canApproveVideo" @click="approveVideo(0)">{{ selectedProcess.stageName || '视频面试' }}不通过</el-button>
-              <el-button v-if="canApproveOnsite" @click="approveOnsite(1)">线下面通过</el-button>
-              <el-button v-if="canApproveOnsite" @click="approveOnsite(0)">线下面不通过</el-button>
-              <el-button v-if="canTerminate" type="danger" @click="terminateProcess">终止流程</el-button>
+              <el-button v-if="canApproveVideo" :loading="isProcessActionLoading(selectedProcess.id, 'approve-video-1')" :disabled="processActionLoading" @click="approveVideo(1)">{{ selectedProcess.stageName || '视频面试' }}通过</el-button>
+              <el-button v-if="canApproveVideo" :loading="isProcessActionLoading(selectedProcess.id, 'approve-video-0')" :disabled="processActionLoading" @click="approveVideo(0)">{{ selectedProcess.stageName || '视频面试' }}不通过</el-button>
+              <el-button v-if="canApproveOnsite" :loading="isProcessActionLoading(selectedProcess.id, 'approve-onsite-1')" :disabled="processActionLoading" @click="approveOnsite(1)">线下面通过</el-button>
+              <el-button v-if="canApproveOnsite" :loading="isProcessActionLoading(selectedProcess.id, 'approve-onsite-0')" :disabled="processActionLoading" @click="approveOnsite(0)">线下面不通过</el-button>
+              <el-button v-if="canTerminate" type="danger" :loading="isProcessActionLoading(selectedProcess.id, 'terminate')" :disabled="processActionLoading" @click="terminateProcess">终止流程</el-button>
             </div>
             <div class="remark-box">
               <span>面试备注</span>
@@ -377,6 +377,9 @@ const videoActive = ref(false)
 const processRemark = ref('')
 const onboardingDepartmentId = ref(null)
 const savingRemark = ref(false)
+const startingProcess = ref(false)
+const processAction = reactive({ processId: null, type: '' })
+const processActionLoading = computed(() => processAction.processId !== null)
 const savingSystemConfig = ref(false)
 const configTab = ref('notifications')
 const modelTab = ref('INTERVIEWER')
@@ -399,6 +402,7 @@ let pendingIntervieweeIce = []
 let hrRecordingStopInProgress = false
 let handledHrRecordingEndSignal = ''
 let hrRecordingEndTimer = null
+let hrVideoPollInProgress = false
 
 const kbForm = reactive({ id: null, knowledgeBaseName: '', techCategory: '', jobCategory: '', status: 1 })
 const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '', knowledgeContent: '', status: 1 })
@@ -605,7 +609,24 @@ function syncLlmForms() {
   Object.assign(videoSummaryLlmForm, videoSummary ? { ...videoSummary, apiKey: '' } : createLlmForm('VIDEO_SUMMARY'))
 }
 async function syncIntervieweeByCandidate(candidateId) { const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId); processForm.intervieweeUserId = candidate?.intervieweeUserId ? String(candidate.intervieweeUserId) : ''; processForm.jobId = candidate?.jobId || null }
-async function startProcess() { try { if (!processForm.recruitmentCandidateId) { ElMessage.warning('请先选择候选人投递记录'); return } if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到候选人账号'); return } if (!processForm.jobId) { ElMessage.warning('投递记录未绑定岗位'); return } if (processForm.aiMaxQuestionRounds < processForm.aiMinQuestionRounds) { ElMessage.warning('AI最多问答轮数不能小于最少问答轮数'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
+async function startProcess() {
+  if (startingProcess.value) return
+  if (!processForm.recruitmentCandidateId) { ElMessage.warning('请先选择候选人投递记录'); return }
+  if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到候选人账号'); return }
+  if (!processForm.jobId) { ElMessage.warning('投递记录未绑定岗位'); return }
+  if (processForm.aiMaxQuestionRounds < processForm.aiMinQuestionRounds) { ElMessage.warning('AI最多问答轮数不能小于最少问答轮数'); return }
+  startingProcess.value = true
+  try {
+    const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) })
+    selectedProcess.value = response.data
+    ElMessage.success('面试流程已发起')
+    await loadAll()
+  } catch (error) {
+    fail(error)
+  } finally {
+    startingProcess.value = false
+  }
+}
 async function loadProcessDetail(row) {
   selectedProcess.value = row
   processRemark.value = row?.remark || ''
@@ -627,10 +648,62 @@ async function decisionPayload(process, approved) {
   }
   return { approved, departmentId }
 }
-async function approveAi(process, approved) { try { const payload = await decisionPayload(process, approved); if (!payload) return; await interviewApi.approveAi(process.id, payload); ElMessage.success(`${process.stageName || 'AI面试'}审批完成`); await loadAll() } catch (error) { fail(error) } }
-async function approveVideo(approved) { try { const payload = await decisionPayload(selectedProcess.value, approved); if (!payload) return; await interviewApi.approveVideo(selectedProcess.value.id, payload); ElMessage.success(`${selectedProcess.value?.stageName || '视频面试'}审批完成`); await loadAll() } catch (error) { fail(error) } }
-async function approveOnsite(approved) { try { const payload = await decisionPayload(selectedProcess.value, approved); if (!payload) return; await interviewApi.approveOnsite(selectedProcess.value.id, payload); ElMessage.success('线下面审批完成'); await loadAll() } catch (error) { fail(error) } }
-async function terminateProcess() { try { await interviewApi.terminateProcess(selectedProcess.value.id, { approved: 0 }); ElMessage.success('流程已终止'); await loadAll() } catch (error) { fail(error) } }
+function isProcessActionLoading(processId, type) {
+  return processAction.processId === processId && processAction.type === type
+}
+async function runProcessAction(processId, type, action) {
+  if (processActionLoading.value) return
+  processAction.processId = processId
+  processAction.type = type
+  try {
+    await action()
+  } catch (error) {
+    fail(error)
+  } finally {
+    processAction.processId = null
+    processAction.type = ''
+  }
+}
+async function approveAi(process, approved) {
+  await runProcessAction(process.id, `approve-ai-${approved}`, async () => {
+    const payload = await decisionPayload(process, approved)
+    if (!payload) return
+    await interviewApi.approveAi(process.id, payload)
+    ElMessage.success(`${process.stageName || 'AI面试'}审批完成`)
+    await loadAll()
+  })
+}
+async function approveVideo(approved) {
+  const process = selectedProcess.value
+  if (!process) return
+  await runProcessAction(process.id, `approve-video-${approved}`, async () => {
+    const payload = await decisionPayload(process, approved)
+    if (!payload) return
+    await interviewApi.approveVideo(process.id, payload)
+    ElMessage.success(`${process.stageName || '视频面试'}审批完成`)
+    await loadAll()
+  })
+}
+async function approveOnsite(approved) {
+  const process = selectedProcess.value
+  if (!process) return
+  await runProcessAction(process.id, `approve-onsite-${approved}`, async () => {
+    const payload = await decisionPayload(process, approved)
+    if (!payload) return
+    await interviewApi.approveOnsite(process.id, payload)
+    ElMessage.success('线下面审批完成')
+    await loadAll()
+  })
+}
+async function terminateProcess() {
+  const process = selectedProcess.value
+  if (!process) return
+  await runProcessAction(process.id, 'terminate', async () => {
+    await interviewApi.terminateProcess(process.id, { approved: 0 })
+    ElMessage.success('流程已终止')
+    await loadAll()
+  })
+}
 async function saveProcessRemark() {
   if (!selectedProcess.value) return
   savingRemark.value = true
@@ -678,7 +751,7 @@ async function copyVideoJoinLink() {
 async function startHrVideoCall() {
   if (!selectedProcess.value) return
   try {
-    disconnectHrVideo()
+    await disconnectHrVideo()
     const sessionResponse = await interviewApi.createVideoSession(selectedProcess.value.id)
     selectedProcess.value.videoJoinLink = sessionResponse.data?.videoJoinLink || selectedProcess.value.videoJoinLink
     const stream = await requestCameraAndMicrophone()
@@ -711,33 +784,41 @@ async function startHrVideoCall() {
     await interviewApi.hrJoin(selectedProcess.value.id)
     videoActive.value = true
     hrPollTimer = setInterval(async () => {
-      const state = (await interviewApi.getHrVideoState(selectedProcess.value.id)).data
-      if (state.answerSdp && !hrPeer.currentRemoteDescription) {
-        await hrPeer.setRemoteDescription(JSON.parse(state.answerSdp))
-        await flushPendingIntervieweeIce()
-      }
-      if (state.intervieweeIceCandidates) {
-        const candidates = state.intervieweeIceCandidates.split('\n').filter(Boolean)
-        for (const item of candidates) {
-          if (!addedIntervieweeIce.has(item)) {
-            addedIntervieweeIce.add(item)
-            await addIntervieweeIceCandidate(item)
+      if (hrVideoPollInProgress) return
+      hrVideoPollInProgress = true
+      try {
+        const state = (await interviewApi.getHrVideoState(selectedProcess.value.id)).data
+        if (state.answerSdp && !hrPeer.currentRemoteDescription) {
+          await hrPeer.setRemoteDescription(JSON.parse(state.answerSdp))
+          await flushPendingIntervieweeIce()
+        }
+        if (state.intervieweeIceCandidates) {
+          const candidates = state.intervieweeIceCandidates.split('\n').filter(Boolean)
+          for (const item of candidates) {
+            if (!addedIntervieweeIce.has(item)) {
+              addedIntervieweeIce.add(item)
+              await addIntervieweeIceCandidate(item)
+            }
           }
         }
-      }
-      if (state.sessionStatus === 'RECORDING') {
-        startHrRecordingIfNeeded()
-      }
-      if (shouldHandleHrRecordingEnd(state)) {
-        handledHrRecordingEndSignal = hrRecordingEndSignalKey(state)
-        clearInterval(hrPollTimer)
-        hrPollTimer = null
-        scheduleHrRecordingStop(state.recordingEndRequestedAt)
+        if (state.sessionStatus === 'RECORDING') {
+          startHrRecordingIfNeeded()
+        }
+        if (shouldHandleHrRecordingEnd(state)) {
+          handledHrRecordingEndSignal = hrRecordingEndSignalKey(state)
+          clearInterval(hrPollTimer)
+          hrPollTimer = null
+          scheduleHrRecordingStop(state.recordingEndRequestedAt)
+        }
+      } catch (error) {
+        console.warn('同步HR视频状态失败', error)
+      } finally {
+        hrVideoPollInProgress = false
       }
     }, 1000)
     ElMessage.success('HR视频已就绪，等待面试者加入后同步开始录制')
   } catch (error) {
-    disconnectHrVideo()
+    await disconnectHrVideo({ uploadRecording: false })
     ElMessage.error(buildMediaErrorMessage(error))
   }
 }
@@ -770,7 +851,7 @@ function scheduleHrRecordingStop(endAt) {
   hrRecordingEndTimer = setTimeout(async () => {
     try {
       await stopAndUploadHrRecording()
-      disconnectHrVideo()
+      await disconnectHrVideo({ uploadRecording: false })
       await loadAll()
     } catch (error) {
       fail(error)
@@ -812,25 +893,30 @@ async function stopAndUploadHrRecording() {
   }
 }
 
-function disconnectHrVideo() {
-  clearInterval(hrPollTimer)
-  clearTimeout(hrRecordingEndTimer)
-  hrPollTimer = null
-  hrRecordingEndTimer = null
-  hrPeer?.getSenders?.().forEach((sender) => sender.track?.stop())
-  hrPeer?.close()
-  hrPeer = null
-  hrRecorder = null
-  hrRecordedChunks = []
-  hrRecordingStopInProgress = false
-  handledHrRecordingEndSignal = ''
-  hrLocalStream?.getTracks().forEach((track) => track.stop())
-  hrLocalStream = null
-  hrRemoteStream = null
-  pendingIntervieweeIce = []
-  if (hrLocalVideo.value) hrLocalVideo.value.srcObject = null
-  if (hrRemoteVideo.value) hrRemoteVideo.value.srcObject = null
-  videoActive.value = false
+async function disconnectHrVideo({ uploadRecording = true } = {}) {
+  try {
+    if (uploadRecording) await stopAndUploadHrRecording()
+  } finally {
+    clearInterval(hrPollTimer)
+    clearTimeout(hrRecordingEndTimer)
+    hrPollTimer = null
+    hrRecordingEndTimer = null
+    hrPeer?.getSenders?.().forEach((sender) => sender.track?.stop())
+    hrPeer?.close()
+    hrPeer = null
+    hrRecorder = null
+    hrRecordedChunks = []
+    hrRecordingStopInProgress = false
+    handledHrRecordingEndSignal = ''
+    hrVideoPollInProgress = false
+    hrLocalStream?.getTracks().forEach((track) => track.stop())
+    hrLocalStream = null
+    hrRemoteStream = null
+    pendingIntervieweeIce = []
+    if (hrLocalVideo.value) hrLocalVideo.value.srcObject = null
+    if (hrRemoteVideo.value) hrRemoteVideo.value.srcObject = null
+    videoActive.value = false
+  }
 }
 
 async function addIntervieweeIceCandidate(item) {
@@ -864,7 +950,7 @@ async function loadIceServers() {
 
 onBeforeUnmount(() => {
   componentDisposed = true
-  disconnectHrVideo()
+  void disconnectHrVideo().catch(() => {})
 })
 
 async function syncRouteState() {
@@ -925,8 +1011,8 @@ onMounted(loadAll)
 .question-number-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .question-number { border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 7px 12px; font-weight: 700; }
 .question-number.answered { background: var(--primary); color: #ffffff; border-color: var(--primary); }
-.ai-stage-review-list { display: grid; gap: 24px; margin-top: 18px; }
-.ai-stage-review { padding-top: 18px; border-top: 1px solid var(--border); }
+.ai-stage-review-list { display: grid; min-width: 0; max-width: 100%; gap: 24px; margin-top: 18px; }
+.ai-stage-review { min-width: 0; max-width: 100%; padding-top: 18px; border-top: 1px solid var(--border); }
 .ai-stage-review:first-child { padding-top: 0; border-top: 0; }
 .ai-stage-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
 .ai-stage-heading h4 { margin: 4px 0 0; color: var(--ink); font-size: 17px; }
@@ -936,7 +1022,6 @@ onMounted(loadAll)
 .ai-question-panel, .action-panel { grid-column: 1 / -1; }
 .ai-question-panel { display: grid; gap: 16px; overflow: hidden; }
 .ai-review-scroll { min-width: 0; max-width: 100%; max-height: min(58vh, 720px); padding-right: 8px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.ai-stage-review-list { min-width: max-content; }
 .compact-ai-table { min-width: 960px; margin-top: 8px; }
 .compact-ai-table :deep(.el-table__body-wrapper) { overflow-x: auto; }
 .compact-ai-table :deep(.cell) { overflow-wrap: anywhere; }

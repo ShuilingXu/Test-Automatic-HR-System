@@ -1631,6 +1631,11 @@ public class InterviewServiceImpl implements InterviewService {
         session.setIntervieweeRecordingFileName(null);
         session.setMergedRecordingPath(null);
         session.setMergedRecordingFileName(null);
+        session.setAudioPath(null);
+        session.setAudioFileName(null);
+        session.setTranscriptText(null);
+        session.setSummaryText(null);
+        session.setSummaryStatus(null);
         session.setHrOfferSdp(null);
         session.setIntervieweeAnswerSdp(null);
         session.setHrIceCandidates(null);

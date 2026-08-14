@@ -204,34 +204,66 @@ export const interviewApi = {
   async submitAiAnswerStream(payload, onEvent) {
     const token = window.localStorage.getItem('demo-token')
     const streamUrl = `${apiBaseUrl.replace(/\/$/, '')}/interview/interviewee/ai-answer/stream`
-    const response = await fetch(streamUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(payload),
-    })
-    if (!response.ok || !response.body) {
-      throw new Error(await response.text() || '流式提交失败')
-    }
-    const reader = response.body.getReader()
+    const abortController = new AbortController()
+    let timedOut = false
+    let reader = null
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true
+      abortController.abort()
+    }, 185000)
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const chunks = buffer.split('\n\n')
-      buffer = chunks.pop() || ''
-      chunks.forEach((chunk) => {
-        const streamEvent = { event: 'message', data: '' }
-        chunk.split('\n').forEach((line) => {
-          if (line.startsWith('event:')) streamEvent.event = line.slice(6).trim()
-          if (line.startsWith('data:')) streamEvent.data += line.slice(5).replace(/^ /, '')
-        })
-        if (streamEvent.data) onEvent?.(streamEvent)
+
+    const dispatchChunk = (chunk) => {
+      if (!chunk.trim()) return
+      const streamEvent = { event: 'message', data: '' }
+      chunk.split('\n').forEach((line) => {
+        if (line.startsWith('event:')) streamEvent.event = line.slice(6).trim()
+        if (line.startsWith('data:')) streamEvent.data += line.slice(5).replace(/^ /, '')
       })
+      if (streamEvent.data) onEvent?.(streamEvent)
+    }
+    const dispatchBufferedEvents = (flush = false) => {
+      const chunks = buffer.replace(/\r\n/g, '\n').split('\n\n')
+      const tail = chunks.pop() || ''
+      buffer = flush ? '' : tail
+      chunks.forEach(dispatchChunk)
+      if (flush && tail.trim()) dispatchChunk(tail)
+    }
+
+    try {
+      const response = await fetch(streamUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+        signal: abortController.signal,
+      })
+      if (!response.ok || !response.body) {
+        throw new Error(await response.text() || '流式提交失败')
+      }
+      reader = response.body.getReader()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        dispatchBufferedEvents()
+      }
+      buffer += decoder.decode()
+      dispatchBufferedEvents(true)
+    } catch (error) {
+      abortController.abort()
+      if (timedOut) {
+        const timeoutError = new Error('AI stream request timed out')
+        timeoutError.code = 'ECONNABORTED'
+        throw timeoutError
+      }
+      throw error
+    } finally {
+      window.clearTimeout(timeoutId)
+      reader?.releaseLock()
     }
   },
 }
