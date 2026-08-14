@@ -21,6 +21,9 @@ public class DatabaseConfig {
     @Bean
     public ActiveDatabase activeDatabase(AppDatabaseProperties properties) {
         DatabaseType requestedType = DatabaseType.from(properties.getType());
+        if (requestedType != DatabaseType.SQLITE && !hasText(properties.getUrl())) {
+            throw new IllegalStateException("DB_URL must be configured when DB_TYPE is " + requestedType);
+        }
         ActiveDatabase requested = new ActiveDatabase(
                 requestedType,
                 resolveUrl(requestedType, properties.getUrl(), properties.getSqliteFallbackUrl()),

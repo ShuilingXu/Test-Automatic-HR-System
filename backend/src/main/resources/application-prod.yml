@@ -7,4 +7,5 @@ jwt:
 
 app:
   database:
+    type: ${DB_TYPE}
     fallback-enabled: ${DB_FALLBACK_ENABLED:false}

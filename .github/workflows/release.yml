@@ -85,11 +85,23 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
           DEPLOY_WEB_ROOT: ${{ secrets.DEPLOY_WEB_ROOT }}
+          DEPLOY_INITIAL_ENV: ${{ secrets.DEPLOY_INITIAL_ENV }}
         run: |
+          DEPLOY_WEB_ROOT_B64="$(printf '%s' "$DEPLOY_WEB_ROOT" | base64 | tr -d '\n')"
+          DEPLOY_INITIAL_ENV_B64="$(printf '%s' "$DEPLOY_INITIAL_ENV" | base64 | tr -d '\n')"
           scp -P "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new auto-hr-release.zip "$DEPLOY_USER@$DEPLOY_HOST:/tmp/auto-hr-release.zip"
-          ssh -p "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" "DEPLOY_WEB_ROOT='$DEPLOY_WEB_ROOT' bash -s" <<'REMOTE'
+          ssh -p "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" "DEPLOY_WEB_ROOT_B64='$DEPLOY_WEB_ROOT_B64' DEPLOY_INITIAL_ENV_B64='$DEPLOY_INITIAL_ENV_B64' bash -s" <<'REMOTE'
             set -euo pipefail
+            DEPLOY_WEB_ROOT="$(printf '%s' "$DEPLOY_WEB_ROOT_B64" | base64 --decode)"
             sudo install -d -m 0755 /opt/auto-hr "$DEPLOY_WEB_ROOT"
+            if [ ! -f /opt/auto-hr/.env ]; then
+              if [ -z "$DEPLOY_INITIAL_ENV_B64" ]; then
+                echo "First deployment requires the DEPLOY_INITIAL_ENV repository secret." >&2
+                exit 1
+              fi
+              printf '%s' "$DEPLOY_INITIAL_ENV_B64" | base64 --decode | sudo tee /opt/auto-hr/.env >/dev/null
+              sudo chmod 0600 /opt/auto-hr/.env
+            fi
             sudo rm -rf /tmp/auto-hr-release
             sudo python3 -c 'import zipfile; zipfile.ZipFile("/tmp/auto-hr-release.zip").extractall("/tmp/auto-hr-release")'
             sudo cp -a /tmp/auto-hr-release/auto-hr-release/. /opt/auto-hr/
