@@ -53,22 +53,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ format('build-{0}', github.run_number) }}
         run: |
-          releases_json=''
-          for attempt in $(seq 1 15); do
-            releases_json="$(gh api --paginate --slurp \
-              -H 'Accept: application/vnd.github+json' \
-              "/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-              --jq '[.[][] | select(.prerelease == true and .draft == false)] | sort_by(.created_at) | reverse')"
-            if jq -e --arg tag "$RELEASE_TAG" 'any(.[]; .tag_name == $tag)' <<<"$releases_json" >/dev/null; then
-              break
-            fi
-            sleep 2
-          done
-          if ! jq -e --arg tag "$RELEASE_TAG" 'any(.[]; .tag_name == $tag)' <<<"$releases_json" >/dev/null; then
-            echo "Release $RELEASE_TAG was not visible before retention cleanup." >&2
-            exit 1
-          fi
-          mapfile -t expired_tags < <(jq -r '.[5:] | .[].tag_name' <<<"$releases_json")
+          mapfile -t expired_tags < <(gh release list --limit 100 \
+            --json tagName,createdAt,isPrerelease,isDraft \
+            --jq "map(select(.isPrerelease == true and .isDraft == false and .tagName != \"$RELEASE_TAG\")) | sort_by(.createdAt) | reverse | .[4:] | .[].tagName")
           for tag in "${expired_tags[@]}"; do
             gh release delete "$tag" --cleanup-tag --yes
           done
