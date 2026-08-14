@@ -15,6 +15,7 @@ public class InterviewVideoSession {
     @TableId(type = IdType.INPUT)
     private Long id;
     private Long processId;
+    private Long processStageId;
     private String videoSerialNo;
     private String videoJoinLink;
     private Long approverUserId;

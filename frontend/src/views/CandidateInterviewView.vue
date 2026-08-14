@@ -101,7 +101,7 @@
 
         <section v-else-if="processSummary.currentStage === 'VIDEO'" class="video-workspace">
           <div class="video-workspace-head">
-            <div><p class="page-eyebrow">Live interview</p><h2>视频面试</h2></div>
+            <div><p class="page-eyebrow">Live interview</p><h2>{{ stageLabel }}</h2></div>
             <div class="header-actions">
               <el-button type="primary" @click="joinVideo">加入视频面试</el-button>
               <el-button @click="stopRecording">结束并上传录制</el-button>
@@ -163,13 +163,16 @@ let aiExamRecorder = null
 let aiExamRecordedChunks = []
 let aiExamRecordingStopInProgress = false
 
-const answeredAiRecords = computed(() => aiRecords.value.filter((item) => item.answerContent))
+const currentAiRecords = computed(() => processSummary.value?.processStageId
+  ? aiRecords.value.filter((item) => item.processStageId === processSummary.value.processStageId)
+  : aiRecords.value)
+const answeredAiRecords = computed(() => currentAiRecords.value.filter((item) => item.answerContent))
 const isAiTerminal = computed(() => processSummary.value?.currentStage === 'AI' && (
   processSummary.value?.stageStatus === 'WAITING_APPROVAL'
   || processSummary.value?.stageStatus === 'REJECTED'
   || processSummary.value?.overallStatus !== 'IN_PROGRESS'
 ))
-const stageLabel = computed(() => ({ AI: 'AI 面试', VIDEO: '视频面试', ONSITE: '线下面试' }[processSummary.value?.currentStage] || processSummary.value?.currentStage || '-'))
+const stageLabel = computed(() => processSummary.value?.stageName || ({ AI: 'AI 面试', VIDEO: '视频面试', ONSITE: '线下面试' }[processSummary.value?.currentStage] || processSummary.value?.currentStage || '-'))
 const proctoringStatus = computed(() => {
   if (processSummary.value?.currentStage !== 'AI') return '不适用'
   if (aiExamRecording.uploading) return '录像上传中'
@@ -192,7 +195,7 @@ const aiStatusText = computed(() => {
   if (aiSubmitState.submitting) return aiSubmitState.message || 'AI正在处理你的回答'
   if (aiPendingRefresh.active) return 'AI仍在后台处理中'
   if (processSummary.value?.currentStage !== 'AI') return ''
-  if (processSummary.value?.stageStatus === 'WAITING_APPROVAL') return 'AI面试已完成，等待HR审批'
+  if (processSummary.value?.stageStatus === 'WAITING_APPROVAL') return `${stageLabel.value}已完成，等待HR审批`
   if (processSummary.value?.stageStatus === 'REJECTED' || processSummary.value?.overallStatus === 'REJECTED') return 'AI面试已结束'
   if (refreshState.loading) return '正在同步面试状态'
   if (!currentQuestion.value) return '正在生成下一道题'

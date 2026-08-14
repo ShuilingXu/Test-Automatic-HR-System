@@ -10,32 +10,20 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("interview_process")
-public class InterviewProcess {
+@TableName("interview_process_stage")
+public class InterviewProcessStage {
     @TableId(type = IdType.INPUT)
     private Long id;
-    private Long recruitmentCandidateId;
-    private Long intervieweeUserId;
-    private Long jobId;
-    private Long templateId;
-    private String templateName;
-    private String currentStage;
+    private Long processId;
+    private Long templateStageId;
+    private String stageName;
+    private String stageType;
+    private Long knowledgeBaseId;
+    private Integer sequenceNo;
     private String stageStatus;
-    private String overallStatus;
-    private Integer aiThresholdScore;
-    private Integer aiFollowUpThreshold;
-    private Integer aiAverageScore;
-    private Integer aiMinQuestionRounds;
-    private Integer aiMaxQuestionRounds;
-    private Integer antiCheatSwitchLimit;
-    private Integer antiCheatSwitchCount;
-    private String aiOutputMode;
-    private Integer videoApproved;
-    private Integer onsiteApproved;
+    private Integer approved;
     private Long approvedHrUserId;
     private String approvedHrName;
-    private String processStatusView;
-    private String remark;
     private String aiRecordingPath;
     private String aiRecordingFileName;
     @TableField(fill = FieldFill.INSERT)

@@ -12,6 +12,7 @@
       <div class="sub-tabs">
         <RouterLink class="link-chip" :class="{ active: activeTab === 'kb' }" to="/interview/hr/knowledge-bases">知识库</RouterLink>
         <RouterLink class="link-chip" :class="{ active: activeTab === 'weights' }" to="/interview/hr/weights">岗位权重</RouterLink>
+        <RouterLink class="link-chip" :class="{ active: activeTab === 'template' }" to="/interview/hr/templates">流程模板</RouterLink>
         <RouterLink v-if="isItAdmin" class="link-chip" :class="{ active: activeTab === 'system' }" to="/interview/hr/system">系统配置</RouterLink>
         <RouterLink class="link-chip" :class="{ active: activeTab === 'process' }" to="/interview/hr/processes">面试流程</RouterLink>
       </div>
@@ -107,6 +108,44 @@
         </template>
       </section>
 
+      <section v-if="activeTab === 'template'" class="surface">
+        <div class="template-heading">
+          <div><h3>面试流程模板</h3><p class="serial-line">配置可重复使用的 AI 与视频面试顺序；候选人发起后会生成独立快照。</p></div>
+          <el-button @click="resetTemplateForm">新建模板</el-button>
+        </div>
+        <div class="template-editor">
+          <el-form :model="templateForm" label-position="top" class="form-grid">
+            <el-form-item label="模板名称"><el-input v-model="templateForm.templateName" maxlength="128" show-word-limit placeholder="例如：研发岗位三轮面试" /></el-form-item>
+            <el-form-item label="状态"><el-select v-model="templateForm.status"><el-option label="启用" :value="1" /><el-option label="停用" :value="0" /></el-select></el-form-item>
+            <el-form-item label="模板说明" class="wide"><el-input v-model="templateForm.description" type="textarea" :rows="2" maxlength="1000" show-word-limit placeholder="说明该流程的适用岗位或使用场景" /></el-form-item>
+          </el-form>
+          <div class="stage-list-head"><div><h4>面试阶段</h4><span>按顺序执行，可重复添加 AI 或视频面试。</span></div><el-button type="primary" @click="addTemplateStage">添加阶段</el-button></div>
+          <div v-if="templateForm.stages.length" class="template-stage-list">
+            <div v-for="(stage, index) in templateForm.stages" :key="stage.key" class="template-stage-row">
+              <span class="stage-order">{{ index + 1 }}</span>
+              <el-input v-model="stage.stageName" maxlength="128" placeholder="自定义阶段名称" />
+              <el-radio-group v-model="stage.stageType" class="stage-type-switch"><el-radio-button label="AI">AI 面试</el-radio-button><el-radio-button label="VIDEO">视频面试</el-radio-button></el-radio-group>
+              <el-select v-if="stage.stageType === 'AI'" v-model="stage.knowledgeBaseId" placeholder="选择题库"><el-option v-for="item in enabledKnowledgeBases" :key="item.id" :label="item.knowledgeBaseName" :value="item.id" /></el-select>
+              <span v-else class="human-stage-note">由 HR 发起并完成视频面试</span>
+              <div class="stage-row-actions">
+                <el-button text :disabled="index === 0" @click="moveTemplateStage(index, -1)">上移</el-button>
+                <el-button text :disabled="index === templateForm.stages.length - 1" @click="moveTemplateStage(index, 1)">下移</el-button>
+                <el-button text type="danger" @click="removeTemplateStage(index)">删除</el-button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty-box">请添加至少一个 AI 面试或视频面试阶段。</div>
+          <div class="action-row"><el-button type="primary" :loading="savingTemplate" @click="saveProcessTemplate">保存模板</el-button><el-button @click="resetTemplateForm">清空</el-button></div>
+        </div>
+        <el-table :data="processTemplates" stripe class="data-table" @row-click="editProcessTemplate">
+          <el-table-column prop="templateName" label="模板名称" min-width="180" />
+          <el-table-column prop="description" label="说明" min-width="220" />
+          <el-table-column label="流程阶段" min-width="260"><template #default="scope"><span class="template-stage-summary">{{ templateStageSummary(scope.row) }}</span></template></el-table-column>
+          <el-table-column label="状态" width="90"><template #default="scope"><el-tag :type="scope.row.status === 1 ? 'success' : 'info'">{{ scope.row.status === 1 ? '启用' : '停用' }}</el-tag></template></el-table-column>
+          <el-table-column label="操作" width="160"><template #default="scope"><el-button text @click.stop="editProcessTemplate(scope.row)">编辑</el-button><el-button text type="danger" @click.stop="deleteProcessTemplate(scope.row.id)">删除</el-button></template></el-table-column>
+        </el-table>
+      </section>
+
       <section v-if="activeTab === 'process' && !isProcessDetail" class="surface">
         <h3>候选人面试流程</h3>
         <el-form :model="processSearch" label-position="top" class="form-grid">
@@ -116,6 +155,7 @@
           <el-form-item label="候选人投递记录"><el-select v-model="processForm.recruitmentCandidateId" filterable clearable @change="syncIntervieweeByCandidate"><el-option v-for="item in filteredProcessCandidates" :key="item.id" :label="`ID ${item.id} / ${item.fullName} / ${item.jobTitle || '未绑定岗位'}`" :value="item.id" /></el-select></el-form-item>
           <el-form-item label="投递岗位"><el-select v-model="processForm.jobId" disabled><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
           <el-form-item label="候选人唯一ID"><el-input :model-value="processCandidatePreview?.id || '-'" disabled /></el-form-item>
+          <el-form-item label="流程模板"><el-select v-model="processForm.templateId" clearable placeholder="选择模板（不选则沿用旧流程）"><el-option v-for="item in enabledProcessTemplates" :key="item.id" :label="item.templateName" :value="item.id"><span>{{ item.templateName }}</span><small class="template-option-detail">{{ templateStageSummary(item) }}</small></el-option></el-select></el-form-item>
           <el-form-item label="AI通过阈值"><el-input-number v-model="processForm.aiThresholdScore" :min="1" /></el-form-item>
           <el-form-item label="低分追问阈值"><el-input-number v-model="processForm.aiFollowUpThreshold" :min="0" :max="100" /></el-form-item>
           <el-form-item label="AI最少问答轮数"><el-input-number v-model="processForm.aiMinQuestionRounds" :min="1" /></el-form-item>
@@ -142,6 +182,7 @@
           <el-table-column prop="recruitmentCandidateId" label="候选人ID" />
           <el-table-column prop="candidateName" label="候选人姓名" />
           <el-table-column prop="questionTitle" label="投递岗位" />
+          <el-table-column prop="templateName" label="流程模板" min-width="140"><template #default="scope">{{ scope.row.templateName || '旧版固定流程' }}</template></el-table-column>
           <el-table-column prop="currentStage" label="当前轮次" />
           <el-table-column prop="processStatusView" label="状态展示" />
           <el-table-column prop="aiAverageScore" label="AI均分" />
@@ -177,12 +218,22 @@
               <p>{{ selectedCandidate?.resumeLlmComment || '暂无简历AI评价' }}</p>
             </div>
           </section>
+          <section v-if="selectedProcess.stages?.length" class="workbench-panel stage-overview-panel">
+            <div class="panel-title-row"><h3>流程阶段</h3><span>{{ selectedProcess.templateName || '流程模板' }}</span></div>
+            <ol class="process-stage-timeline">
+              <li v-for="stage in selectedProcess.stages" :key="stage.processStageId || stage.id" :class="{ active: stage.processStageId === selectedProcess.processStageId, complete: ['PASSED', 'REJECTED'].includes(stage.stageStatus) }">
+                <span class="timeline-index">{{ stage.sequenceNo }}</span>
+                <div><strong>{{ stage.stageName }}</strong><small>{{ stage.stageType === 'AI' ? `AI 面试${stage.knowledgeBaseName ? ` · ${stage.knowledgeBaseName}` : ''}` : '视频面试 · HR 主持' }}</small></div>
+                <el-tag size="small" :type="stageStatusTagType(stage.stageStatus)">{{ stageStatusLabel(stage.stageStatus) }}</el-tag>
+              </li>
+            </ol>
+          </section>
           <section class="workbench-panel video-panel">
             <div class="panel-title-row"><h3>视频面试</h3><span>{{ selectedProcess.sessionStatus || '未开始' }}</span></div>
             <div v-if="selectedProcess.videoJoinLink || selectedProcess.videoSerialNo" class="serial-line">
               <span v-if="selectedProcess.videoSerialNo">视频流水号：{{ selectedProcess.videoSerialNo }}</span>
               <el-button v-if="selectedProcess.videoJoinLink" text class="video-link" @click="copyVideoJoinLink">复制候选人视频链接</el-button>
-              <a v-if="selectedProcess.recordingPath || selectedProcess.recordingFileName" :href="interviewApi.getRecordingUrl(selectedProcess.id)" target="_blank" class="video-link">查看合并录制文件</a>
+              <a v-if="selectedProcess.recordingPath || selectedProcess.recordingFileName" :href="interviewApi.getRecordingUrl(selectedProcess.id, selectedProcess.processStageId)" target="_blank" class="video-link">查看合并录制文件</a>
             </div>
             <div class="video-grid">
               <div class="video-box"><span>HR本地视频</span><video ref="hrLocalVideo" autoplay muted playsinline></video></div>
@@ -215,12 +266,13 @@
           <section class="workbench-panel ai-question-panel">
             <div class="panel-title-row">
               <h3>AI问答题号</h3>
-              <a v-if="selectedProcess.aiRecordingPath || selectedProcess.aiRecordingFileName" :href="interviewApi.getAiRecordingUrl(selectedProcess.id)" target="_blank" class="video-link">查看AI问答视频</a>
+              <a v-if="selectedProcess.aiRecordingPath || selectedProcess.aiRecordingFileName" :href="interviewApi.getAiRecordingUrl(selectedProcess.id, selectedProcess.processStageId)" target="_blank" class="video-link">查看AI问答视频</a>
             </div>
             <div class="question-number-grid">
               <button v-for="item in aiRecords" :key="item.id" class="question-number" :class="{ answered: item.answerContent }">Q{{ item.sequenceNo }}</button>
             </div>
             <el-table :data="aiRecords" stripe class="data-table compact-ai-table">
+              <el-table-column v-if="selectedProcess.stages?.length" prop="stageName" label="阶段" min-width="120" />
               <el-table-column prop="sequenceNo" label="题号" width="70" />
               <el-table-column prop="knowledgePoint" label="知识点" min-width="120" />
               <el-table-column prop="questionContent" label="提问" min-width="220" />
@@ -239,12 +291,12 @@
               <p>切屏次数：{{ selectedProcess.antiCheatSwitchCount || 0 }} / {{ selectedProcess.antiCheatSwitchLimit || 5 }}</p>
             </div>
             <div class="action-button-grid">
-              <el-button v-if="canApproveAi" @click="approveAi(1)">AI/反作弊人工通过并生成视频任务</el-button>
-              <el-button v-if="canApproveAi" @click="approveAi(0)">AI/反作弊人工不通过</el-button>
+              <el-button v-if="canApproveAi" @click="approveAi(1)">{{ selectedProcess.stageName || 'AI 面试' }}人工通过</el-button>
+              <el-button v-if="canApproveAi" @click="approveAi(0)">{{ selectedProcess.stageName || 'AI 面试' }}人工不通过</el-button>
               <el-button v-if="canStartVideo" @click="startHrVideoCall">开始视频面</el-button>
               <el-button v-if="canStopVideo" @click="stopHrRecording">结束并上传录制</el-button>
-              <el-button v-if="canApproveVideo" @click="approveVideo(1)">视频面通过进线下面</el-button>
-              <el-button v-if="canApproveVideo" @click="approveVideo(0)">视频面不通过</el-button>
+              <el-button v-if="canApproveVideo" @click="approveVideo(1)">{{ selectedProcess.stageName || '视频面试' }}通过</el-button>
+              <el-button v-if="canApproveVideo" @click="approveVideo(0)">{{ selectedProcess.stageName || '视频面试' }}不通过</el-button>
               <el-button v-if="canApproveOnsite" @click="approveOnsite(1)">线下面通过</el-button>
               <el-button v-if="canApproveOnsite" @click="approveOnsite(0)">线下面不通过</el-button>
               <el-button v-if="canTerminate" type="danger" @click="terminateProcess">终止流程</el-button>
@@ -282,6 +334,7 @@ const llmConfigs = ref([])
 const jobs = ref([])
 const recruitmentCandidates = ref([])
 const processes = ref([])
+const processTemplates = ref([])
 const aiRecords = ref([])
 const selectedProcess = ref(null)
 const selectedCandidate = ref(null)
@@ -314,8 +367,10 @@ const scorerLlmForm = reactive(createLlmForm('SCORER'))
 const resumeReviewLlmForm = reactive(createLlmForm('RESUME_REVIEW'))
 const videoTranscriberLlmForm = reactive(createLlmForm('VIDEO_TRANSCRIBER'))
 const videoSummaryLlmForm = reactive(createLlmForm('VIDEO_SUMMARY'))
-const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, aiThresholdScore: 70, aiFollowUpThreshold: 70, aiMinQuestionRounds: 5, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5, aiOutputMode: 'NORMAL' })
+const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, templateId: null, aiThresholdScore: 70, aiFollowUpThreshold: 70, aiMinQuestionRounds: 5, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5, aiOutputMode: 'NORMAL' })
 const processSearch = reactive({ keyword: '' })
+const templateForm = reactive(createTemplateForm())
+const savingTemplate = ref(false)
 const retryingVideoSummary = ref(false)
 const systemConfig = reactive({
   ALIYUN_ACCESS_KEY_ID: '',
@@ -374,11 +429,13 @@ const modelTabs = [
 const currentModel = computed(() => modelTabs.find((item) => item.role === modelTab.value) || modelTabs[0])
 
 const canTerminate = computed(() => selectedProcess.value?.overallStatus === 'IN_PROGRESS')
-const canApproveAi = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'AI')
+const canApproveAi = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'AI' && selectedProcess.value?.stageStatus === 'WAITING_APPROVAL')
 const canStartVideo = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'VIDEO' && selectedProcess.value?.videoJoinLink && !videoActive.value)
 const canStopVideo = computed(() => videoActive.value)
 const canApproveVideo = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'VIDEO' && ['WAITING_APPROVAL', 'RECORDED'].includes(selectedProcess.value?.sessionStatus))
 const canApproveOnsite = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'ONSITE')
+const enabledKnowledgeBases = computed(() => knowledgeBases.value.filter((item) => item.status === 1))
+const enabledProcessTemplates = computed(() => processTemplates.value.filter((item) => item.status === 1))
 const filteredProcessCandidates = computed(() => {
   const keyword = processSearch.keyword.trim().toLowerCase()
   const candidates = recruitmentCandidates.value.filter((item) => !item.interviewProcessId && item.applicationStatus !== 'REJECTED')
@@ -411,6 +468,7 @@ async function loadAll() {
     }
     jobs.value = (await recruitmentApi.listAdminJobs()).data
     recruitmentCandidates.value = (await recruitmentApi.listCandidates()).data
+    processTemplates.value = (await interviewApi.listProcessTemplates()).data
     processes.value = (await interviewApi.listProcesses()).data
     if (selectedProcess.value) {
       selectedProcess.value = processes.value.find((item) => item.id === selectedProcess.value.id) || selectedProcess.value
@@ -440,6 +498,18 @@ async function deleteWeight(id) { try { await interviewApi.deleteJobKnowledgeWei
 async function saveRoleLlmConfig(form, role) { try { await interviewApi.saveLlmConfig({ ...form, modelRole: role }); ElMessage.success('LLM配置已保存'); form.apiKey = ''; await loadAll() } catch (error) { fail(error) } }
 async function deleteLlmConfig(id) { try { await interviewApi.deleteLlmConfig(id); ElMessage.success('LLM配置已删除'); await loadAll() } catch (error) { fail(error) } }
 async function saveSystemConfig() { savingSystemConfig.value = true; try { await systemApi.saveConfig({ ...systemConfig }); ElMessage.success('系统配置已保存'); Object.assign(systemConfig, (await systemApi.getConfig()).data) } catch (error) { fail(error) } finally { savingSystemConfig.value = false } }
+function createTemplateForm() { return { id: null, templateName: '', description: '', status: 1, stages: [] } }
+function createTemplateStage() { return { key: `${Date.now()}-${Math.random()}`, stageName: '', stageType: 'AI', knowledgeBaseId: null } }
+function resetTemplateForm() { Object.assign(templateForm, createTemplateForm()) }
+function addTemplateStage() { templateForm.stages.push(createTemplateStage()) }
+function removeTemplateStage(index) { templateForm.stages.splice(index, 1) }
+function moveTemplateStage(index, offset) { const target = index + offset; if (target < 0 || target >= templateForm.stages.length) return; const [stage] = templateForm.stages.splice(index, 1); templateForm.stages.splice(target, 0, stage) }
+function templateStageSummary(template) { return (template?.stages || []).map((stage) => stage.stageName || (stage.stageType === 'AI' ? 'AI 面试' : '视频面试')).join(' -> ') || '暂无阶段' }
+function stageStatusLabel(status) { return ({ PENDING: '待开始', READY: '待开始', IN_PROGRESS: '进行中', UPLOADING: '上传中', WAITING_APPROVAL: '待审批', PASSED: '已通过', REJECTED: '未通过' })[status] || status || '-' }
+function stageStatusTagType(status) { return ({ PASSED: 'success', REJECTED: 'danger', WAITING_APPROVAL: 'warning', IN_PROGRESS: 'primary', UPLOADING: 'warning' })[status] || 'info' }
+async function editProcessTemplate(row) { try { const template = (await interviewApi.getProcessTemplate(row.id)).data; Object.assign(templateForm, { id: template.id, templateName: template.templateName, description: template.description || '', status: template.status ?? 1, stages: (template.stages || []).map((stage) => ({ key: `${stage.id}-${Date.now()}`, stageName: stage.stageName, stageType: stage.stageType, knowledgeBaseId: stage.knowledgeBaseId || null })) }); } catch (error) { fail(error) } }
+async function saveProcessTemplate() { if (!templateForm.templateName.trim()) { ElMessage.warning('请填写模板名称'); return } if (!templateForm.stages.length) { ElMessage.warning('请至少添加一个面试阶段'); return } const invalidAiStage = templateForm.stages.find((stage) => stage.stageType === 'AI' && !stage.knowledgeBaseId); if (invalidAiStage) { ElMessage.warning(`请为“${invalidAiStage.stageName || 'AI 面试'}”选择题库`); return } const invalidName = templateForm.stages.find((stage) => !stage.stageName.trim()); if (invalidName) { ElMessage.warning('请填写每个阶段的展示名称'); return } savingTemplate.value = true; try { const saved = (await interviewApi.saveProcessTemplate({ id: templateForm.id, templateName: templateForm.templateName.trim(), description: templateForm.description.trim(), status: templateForm.status, stages: templateForm.stages.map((stage, index) => ({ stageName: stage.stageName.trim(), stageType: stage.stageType, knowledgeBaseId: stage.stageType === 'AI' ? stage.knowledgeBaseId : null, sequenceNo: index + 1 })) })).data; ElMessage.success('流程模板已保存'); await loadAll(); await editProcessTemplate(saved) } catch (error) { fail(error) } finally { savingTemplate.value = false } }
+async function deleteProcessTemplate(id) { try { await interviewApi.deleteProcessTemplate(id); ElMessage.success('流程模板已删除'); if (templateForm.id === id) resetTemplateForm(); await loadAll() } catch (error) { fail(error) } }
 function editLlmConfig(row) { Object.assign(llmFormByRole(row.modelRole), { ...row, apiKey: '' }) }
 function createLlmForm(role) { return { id: null, configName: role === 'SCORER' ? '评分模型' : role === 'RESUME_REVIEW' ? '简历初筛模型' : role === 'VIDEO_TRANSCRIBER' ? '阿里云视频语音转文字' : role === 'VIDEO_SUMMARY' ? '视频会议概要模型' : '面试官模型', modelRole: role, baseUrl: role === 'VIDEO_TRANSCRIBER' ? 'wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1' : '', apiKey: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 } }
 function llmFormByRole(role) { return role === 'SCORER' ? scorerLlmForm : role === 'RESUME_REVIEW' ? resumeReviewLlmForm : role === 'VIDEO_TRANSCRIBER' ? videoTranscriberLlmForm : role === 'VIDEO_SUMMARY' ? videoSummaryLlmForm : interviewerLlmForm }
@@ -456,15 +526,15 @@ function syncLlmForms() {
   Object.assign(videoSummaryLlmForm, videoSummary ? { ...videoSummary, apiKey: '' } : createLlmForm('VIDEO_SUMMARY'))
 }
 async function syncIntervieweeByCandidate(candidateId) { const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId); processForm.intervieweeUserId = candidate?.intervieweeUserId ? String(candidate.intervieweeUserId) : ''; processForm.jobId = candidate?.jobId || null }
-async function startProcess() { try { if (!processForm.recruitmentCandidateId) { ElMessage.warning('请先选择候选人投递记录'); return } if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到候选人账号'); return } if (!processForm.jobId) { ElMessage.warning('投递记录未绑定岗位'); return } if (processForm.aiMaxQuestionRounds < processForm.aiMinQuestionRounds) { ElMessage.warning('AI最多问答轮数不能小于最少问答轮数'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
+async function startProcess() { try { if (!processForm.recruitmentCandidateId) { ElMessage.warning('请先选择候选人投递记录'); return } if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到候选人账号'); return } if (!processForm.jobId) { ElMessage.warning('投递记录未绑定岗位'); return } if (!processForm.templateId) { ElMessage.warning('请选择流程模板'); return } if (processForm.aiMaxQuestionRounds < processForm.aiMinQuestionRounds) { ElMessage.warning('AI最多问答轮数不能小于最少问答轮数'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
 async function loadProcessDetail(row) {
   selectedProcess.value = row
   processRemark.value = row?.remark || ''
   aiRecords.value = (await interviewApi.listAiRecords({ processId: row.id })).data
   selectedCandidate.value = row.recruitmentCandidateId ? (await recruitmentApi.getCandidate(row.recruitmentCandidateId)).data : null
 }
-async function approveAi(approved) { try { await interviewApi.approveAi(selectedProcess.value.id, { approved }); ElMessage.success('AI审批完成'); await loadAll() } catch (error) { fail(error) } }
-async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved }); ElMessage.success('视频面审批完成'); await loadAll() } catch (error) { fail(error) } }
+async function approveAi(approved) { try { await interviewApi.approveAi(selectedProcess.value.id, { approved }); ElMessage.success(`${selectedProcess.value?.stageName || 'AI面试'}审批完成`); await loadAll() } catch (error) { fail(error) } }
+async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved }); ElMessage.success(`${selectedProcess.value?.stageName || '视频面试'}审批完成`); await loadAll() } catch (error) { fail(error) } }
 async function approveOnsite(approved) { try { await interviewApi.approveOnsite(selectedProcess.value.id, { approved }); ElMessage.success('线下面审批完成'); await loadAll() } catch (error) { fail(error) } }
 async function terminateProcess() { try { await interviewApi.terminateProcess(selectedProcess.value.id, { approved: 0 }); ElMessage.success('流程已终止'); await loadAll() } catch (error) { fail(error) } }
 async function saveProcessRemark() {
@@ -748,6 +818,7 @@ onMounted(loadAll)
 .process-stats { display: grid; gap: 4px; margin-bottom: 12px; }
 .process-stats p { margin: 0; color: var(--ink-soft); }
 .action-button-grid { min-width: 0; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.template-heading, .stage-list-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }.template-heading { margin-bottom: 18px; }.template-heading h3, .stage-list-head h4 { margin: 0; }.stage-list-head { margin: 18px 0 12px; }.stage-list-head span, .template-option-detail, .human-stage-note { color: var(--text-muted); font-size: 12px; }.template-stage-list { display: grid; gap: 10px; }.template-stage-row { display: grid; grid-template-columns: 32px minmax(150px, 1.2fr) minmax(180px, .9fr) minmax(180px, 1fr) auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-soft); }.stage-order { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #dceee7; color: #175c50; font-weight: 800; font-size: 13px; }.stage-type-switch { white-space: nowrap; }.human-stage-note { min-width: 160px; }.stage-row-actions { display: flex; gap: 2px; white-space: nowrap; }.template-stage-summary { color: var(--text-muted); line-height: 1.6; }.template-option-detail { display: block; margin-top: 3px; }.stage-overview-panel { grid-column: 1 / -1; }.process-stage-timeline { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }.process-stage-timeline li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }.process-stage-timeline li:last-child { border-bottom: 0; }.process-stage-timeline li.active { color: var(--primary); }.process-stage-timeline li.complete { opacity: .72; }.timeline-index { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #e9edf0; color: #66737c; font-size: 12px; font-weight: 800; }.process-stage-timeline li.active .timeline-index { background: #dceee7; color: #175c50; }.process-stage-timeline strong, .process-stage-timeline small { display: block; }.process-stage-timeline small { margin-top: 3px; color: var(--text-muted); font-size: 12px; }
 .remark-box { display: grid; gap: 10px; }
 .csv-import-box { grid-column: 1 / -1; }
 .serial-line { min-width: 0; margin: 8px 0 14px; color: var(--ink-soft); overflow-wrap: anywhere; }
@@ -776,5 +847,6 @@ onMounted(loadAll)
 .config-tabs, .model-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0; padding-bottom: 12px; border-bottom: 1px solid var(--border); }.config-tabs button, .model-tabs button { padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink-soft); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }.config-tabs button:hover, .model-tabs button:hover { color: var(--primary); border-color: var(--primary); }.config-tabs button.active, .model-tabs button.active { color: #fff; background: var(--primary); border-color: var(--primary); }
 .config-panel-head { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin: 6px 0 18px; }.config-panel-head p { margin: 7px 0 0; color: var(--text-muted); line-height: 1.6; }.config-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }.model-editor { max-width: 880px; }.key-state { color: var(--text-muted); font-size: 13px; }.model-editor .action-row { margin-top: 18px; }
 @media (max-width: 900px) { .topline, .detail-headline { flex-direction: column; } .form-grid, .video-grid, .llm-config-grid, .preview-grid, .process-workbench, .candidate-info-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .template-stage-row { grid-template-columns: 32px 1fr; }.stage-type-switch, .template-stage-row > .el-select, .human-stage-note, .stage-row-actions { grid-column: 2; }.stage-row-actions { flex-wrap: wrap; } }
 @media (max-width: 700px) { .config-form-grid { grid-template-columns: 1fr; } .config-heading, .config-panel-head { flex-direction: column; } }
 </style>

@@ -61,6 +61,12 @@
         </section>
       </template>
     </section>
+    <el-dialog v-model="templateDialogVisible" title="选择面试流程" width="min(560px, calc(100vw - 32px))" destroy-on-close>
+      <p class="dialog-intro">选择流程模板后，系统会为该候选人创建独立的面试阶段快照。</p>
+      <el-form label-position="top"><el-form-item label="流程模板"><el-select v-model="selectedTemplateId" placeholder="请选择流程模板"><el-option v-for="item in enabledTemplates" :key="item.id" :label="item.templateName" :value="item.id"><span>{{ item.templateName }}</span><small class="template-option-detail">{{ templateStageSummary(item) }}</small></el-option></el-select></el-form-item></el-form>
+      <div v-if="selectedTemplate" class="template-preview"><strong>{{ selectedTemplate.templateName }}</strong><span>{{ templateStageSummary(selectedTemplate) }}</span></div>
+      <template #footer><el-button @click="templateDialogVisible = false">取消</el-button><el-button type="primary" :loading="startingInterview" @click="confirmStartCandidateInterview">发起面试</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
@@ -76,8 +82,13 @@ const candidate = ref(null)
 const reevaluating = ref(false)
 const startingInterview = ref(false)
 const rejectingResume = ref(false)
+const templates = ref([])
+const templateDialogVisible = ref(false)
+const selectedTemplateId = ref(null)
 const canReevaluateResumeLlm = computed(() => candidate.value?.resumeLlmStatus !== 'PENDING')
 const resumeLlmReevaluateLabel = computed(() => canReevaluateResumeLlm.value ? 'AI简历重评' : '评分中不可重评')
+const enabledTemplates = computed(() => templates.value.filter((item) => item.status === 1))
+const selectedTemplate = computed(() => enabledTemplates.value.find((item) => item.id === selectedTemplateId.value) || null)
 
 function resumeUrl(id) { return recruitmentApi.getResumeUrl(id) }
 function resumeLlmStatusLabel(status) { return ({ PENDING: '评分中', COMPLETED: '已完成', FAILED: '评分失败' })[status] || '-' }
@@ -86,6 +97,7 @@ async function loadCandidate() {
   loading.value = true
   try {
     candidate.value = (await recruitmentApi.getCandidate(route.params.id)).data
+    templates.value = (await interviewApi.listProcessTemplates({ status: 1 })).data
   } catch (error) {
     ElMessage.error(error.message || '候选人加载失败')
     candidate.value = null
@@ -107,6 +119,18 @@ async function reevaluateResumeLlm() {
 }
 
 async function startCandidateInterview() {
+  if (!enabledTemplates.value.length) {
+    ElMessage.warning('请先在流程模板中创建并启用至少一个模板')
+    return
+  }
+  selectedTemplateId.value = enabledTemplates.value[0]?.id || null
+  templateDialogVisible.value = true
+}
+
+function templateStageSummary(template) { return (template?.stages || []).map((stage) => stage.stageName || (stage.stageType === 'AI' ? 'AI 面试' : '视频面试')).join(' -> ') || '暂无阶段' }
+
+async function confirmStartCandidateInterview() {
+  if (!selectedTemplateId.value) { ElMessage.warning('请选择流程模板'); return }
   startingInterview.value = true
   try {
     const userList = (await authApi.listUsers({ roleCode: 'INTERVIEWEE', keyword: candidate.value.mobilePhone })).data
@@ -115,8 +139,9 @@ async function startCandidateInterview() {
       ElMessage.warning('未找到对应面试者账号，请先注册并完善资料')
       return
     }
-    const process = (await interviewApi.startProcess({ recruitmentCandidateId: candidate.value.id, intervieweeUserId: interviewee.id, jobId: candidate.value.jobId, aiThresholdScore: 70, aiFollowUpThreshold: 70, aiMinQuestionRounds: 5, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })).data
+    const process = (await interviewApi.startProcess({ recruitmentCandidateId: candidate.value.id, intervieweeUserId: interviewee.id, jobId: candidate.value.jobId, templateId: selectedTemplateId.value, aiThresholdScore: 70, aiFollowUpThreshold: 70, aiMinQuestionRounds: 5, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })).data
     ElMessage.success('面试流程已发起')
+    templateDialogVisible.value = false
     candidate.value = (await recruitmentApi.getCandidate(candidate.value.id)).data
     if (process?.id) candidate.value.interviewProcessId = process.id
   } catch (error) {
@@ -155,5 +180,9 @@ onMounted(loadCandidate)
 .intro-box { margin: 12px 0; }
 .intro-box p { margin: 0; line-height: 1.7; }
 .action-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.dialog-intro { margin: 0 0 18px; color: var(--text-muted); line-height: 1.7; }
+.template-preview { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-soft); }
+.template-preview span, .template-option-detail { color: var(--text-muted); font-size: 12px; }
+.template-option-detail { display: block; margin-top: 3px; }
 @media (max-width: 980px) { .detail-head { display: block; } .score-card { margin-top: 12px; } .detail-grid { grid-template-columns: 1fr; } }
 </style>

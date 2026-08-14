@@ -49,7 +49,9 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
                 execute(statement, sql);
             }
             migrateInterviewProcessColumns(connection, statement);
+            migrateInterviewAiRecordColumns(connection, statement);
             migrateInterviewVideoSessionColumns(connection, statement);
+            migrateInterviewProcessStageColumns(connection, statement);
             migrateRecruitmentCandidateColumns(connection, statement);
         }
         log.info("Database migration completed for {}", activeDatabase.type());
@@ -113,6 +115,12 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "interview_process", "remark", "VARCHAR(2000)");
         addColumnIfMissing(connection, statement, "interview_process", "ai_recording_path", "VARCHAR(500)");
         addColumnIfMissing(connection, statement, "interview_process", "ai_recording_file_name", "VARCHAR(255)");
+        addColumnIfMissing(connection, statement, "interview_process", "template_id", "INTEGER");
+        addColumnIfMissing(connection, statement, "interview_process", "template_name", "VARCHAR(128)");
+    }
+
+    private void migrateInterviewAiRecordColumns(Connection connection, Statement statement) throws SQLException {
+        addColumnIfMissing(connection, statement, "interview_ai_record", "process_stage_id", "INTEGER");
     }
 
     private void migrateInterviewVideoSessionColumns(Connection connection, Statement statement) throws SQLException {
@@ -141,6 +149,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "interview_video_session", "hr_ice_candidates", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_ice_candidates", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "recording_file_name", "VARCHAR(255)");
+        addColumnIfMissing(connection, statement, "interview_video_session", "process_stage_id", "INTEGER");
     }
 
     private String dateTimeType() {
@@ -172,6 +181,11 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         try (ResultSet columns = metaData.getColumns(null, null, table.toUpperCase(), column.toUpperCase())) {
             return columns.next();
         }
+    }
+
+    private void migrateInterviewProcessStageColumns(Connection connection, Statement statement) throws SQLException {
+        addColumnIfMissing(connection, statement, "interview_process_stage", "ai_recording_path", "VARCHAR(500)");
+        addColumnIfMissing(connection, statement, "interview_process_stage", "ai_recording_file_name", "VARCHAR(255)");
     }
 
     private void widenColumnIfNeeded(Statement statement, String table, String column, String definition) throws SQLException {

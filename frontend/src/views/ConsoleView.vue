@@ -207,6 +207,12 @@
         </template>
       </section>
     </main>
+    <el-dialog v-model="templateDialogVisible" title="选择面试流程" width="min(560px, calc(100vw - 32px))" destroy-on-close>
+      <p class="dialog-intro">选择流程模板后，系统会为该候选人创建独立的面试阶段快照。</p>
+      <el-form label-position="top"><el-form-item label="流程模板"><el-select v-model="selectedTemplateId" placeholder="请选择流程模板"><el-option v-for="item in enabledProcessTemplates" :key="item.id" :label="item.templateName" :value="item.id"><span>{{ item.templateName }}</span><small class="template-option-detail">{{ templateStageSummary(item) }}</small></el-option></el-select></el-form-item></el-form>
+      <div v-if="selectedProcessTemplate" class="template-preview"><strong>{{ selectedProcessTemplate.templateName }}</strong><span>{{ templateStageSummary(selectedProcessTemplate) }}</span></div>
+      <template #footer><el-button @click="templateDialogVisible = false">取消</el-button><el-button type="primary" :loading="startingInterview" @click="confirmStartCandidateInterview">发起面试</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
@@ -248,6 +254,11 @@ const jobs = ref([])
 const candidates = ref([])
 const users = ref([])
 const auditLogs = ref([])
+const processTemplates = ref([])
+const templateDialogVisible = ref(false)
+const selectedTemplateId = ref(null)
+const selectedInterviewCandidate = ref(null)
+const startingInterview = ref(false)
 
 const userForm = reactive({ id: null, username: '', displayName: '', roleCode: 'HR_USER', status: 1, mobilePhone: '', email: '', newPassword: '' })
 const departmentForm = reactive({ id: null, departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '', sortOrder: 0, status: 1 })
@@ -325,6 +336,8 @@ const metrics = computed(() => [
   { label: '首页信息', value: contentItems.value.length },
 ])
 const availableParentDepartments = computed(() => departments.value.filter((item) => item.id !== departmentForm.id))
+const enabledProcessTemplates = computed(() => processTemplates.value.filter((item) => item.status === 1))
+const selectedProcessTemplate = computed(() => enabledProcessTemplates.value.find((item) => item.id === selectedTemplateId.value) || null)
 const auditGroups = computed(() => [
   { key: 'admin', title: '后台管理日志', items: auditLogs.value.filter((item) => !['INTERVIEW', 'RECRUITMENT'].includes(item.moduleCode)) },
   { key: 'interview', title: '面试流程日志', items: auditLogs.value.filter((item) => item.moduleCode === 'INTERVIEW') },
@@ -349,7 +362,8 @@ async function loadCandidates() { try { candidates.value = (await recruitmentApi
 async function loadRecruitment() { await Promise.all([loadJobs(), loadCandidates()]) }
 async function loadUsers() { if (!(isItAdmin.value || isHrAdmin.value)) return; try { users.value = (await authApi.listUsers()).data } catch (error) { fail(error) } }
 async function loadAuditLogs() { if (!(isItAdmin.value || isHrAdmin.value)) return; try { const params = cleanParams({ ...auditFilter, actionCode: resolveActionCode(auditFilter.actionCode) }); auditLogs.value = (await authApi.listAuditLogs(params)).data } catch (error) { fail(error) } }
-async function loadAll() { await Promise.all([loadSession(), loadDashboard(), loadDepartments(), loadEmployees(), loadRecruitment(), loadContent()]); if (isItAdmin.value || isHrAdmin.value) { await Promise.all([loadUsers(), loadAuditLogs()]) } syncRouteState() }
+async function loadAll() { await Promise.all([loadSession(), loadDashboard(), loadDepartments(), loadEmployees(), loadRecruitment(), loadContent(), loadProcessTemplates()]); if (isItAdmin.value || isHrAdmin.value) { await Promise.all([loadUsers(), loadAuditLogs()]) } syncRouteState() }
+async function loadProcessTemplates() { try { processTemplates.value = (await interviewApi.listProcessTemplates({ status: 1 })).data } catch (error) { fail(error) } }
 async function saveDepartment() { try { await hrApi.saveDepartment({ ...departmentForm }); ElMessage.success('部门已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveEmployee() { try { await hrApi.saveEmployee({ ...employeeForm }); ElMessage.success('员工已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveContent() { try { const saved = (await siteContentApi.save({ ...contentForm })).data; Object.assign(contentForm, saved); ElMessage.success(contentForm.published ? '内容已发布' : '草稿已保存'); await loadContent() } catch (error) { fail(error) } }
@@ -384,6 +398,22 @@ function resumeLlmStatusLabel(status) { return ({ PENDING: '评分中', COMPLETE
 function canReevaluateResumeLlm(candidate) { return candidate?.resumeLlmStatus !== 'PENDING' }
 function resumeLlmReevaluateLabel(candidate) { return canReevaluateResumeLlm(candidate) ? 'AI简历重评' : '评分中不可重评' }
 async function startCandidateInterview(candidate) {
+  if (!enabledProcessTemplates.value.length) {
+    await loadProcessTemplates()
+  }
+  if (!enabledProcessTemplates.value.length) {
+    ElMessage.warning('请先在流程模板中创建并启用至少一个模板')
+    return
+  }
+  selectedInterviewCandidate.value = candidate
+  selectedTemplateId.value = enabledProcessTemplates.value[0]?.id || null
+  templateDialogVisible.value = true
+}
+function templateStageSummary(template) { return (template?.stages || []).map((stage) => stage.stageName || (stage.stageType === 'AI' ? 'AI 面试' : '视频面试')).join(' -> ') || '暂无阶段' }
+async function confirmStartCandidateInterview() {
+  const candidate = selectedInterviewCandidate.value
+  if (!candidate || !selectedTemplateId.value) { ElMessage.warning('请选择流程模板'); return }
+  startingInterview.value = true
   try {
     const userList = (await authApi.listUsers({ roleCode: 'INTERVIEWEE', keyword: candidate.mobilePhone })).data
     const interviewee = userList.find((item) => item.mobilePhone === candidate.mobilePhone)
@@ -391,10 +421,11 @@ async function startCandidateInterview(candidate) {
       ElMessage.warning('未找到对应面试者账号，请先注册并完善资料')
       return
     }
-    await interviewApi.startProcess({ recruitmentCandidateId: candidate.id, intervieweeUserId: interviewee.id, jobId: candidate.jobId, aiThresholdScore: 70, aiFollowUpThreshold: 70, aiMinQuestionRounds: 5, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })
+    await interviewApi.startProcess({ recruitmentCandidateId: candidate.id, intervieweeUserId: interviewee.id, jobId: candidate.jobId, templateId: selectedTemplateId.value, aiThresholdScore: 70, aiFollowUpThreshold: 70, aiMinQuestionRounds: 5, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5 })
     ElMessage.success('面试流程已发起')
+    templateDialogVisible.value = false
     await loadRecruitment()
-  } catch (error) { fail(error) }
+  } catch (error) { fail(error) } finally { startingInterview.value = false }
 }
 async function rejectCandidateResume(id) {
   try {
@@ -495,6 +526,7 @@ function syncRouteState() {
 .content-preview { min-width: 0; min-height: 280px; padding: 22px; border: 1px solid #cbd7d1; border-radius: var(--radius-md); background: #f5f8f5; }
 .preview-label { color: #175c50; font-size: 11px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }.preview-date { margin: 34px 0 12px; color: #7b8781; font-size: 12px; }.content-preview h3 { margin: 0 0 11px; font-size: 22px; }.content-preview p:not(.preview-date) { color: #68766f; line-height: 1.7; }.publish-state { display: inline-flex; margin-top: 22px; padding: 5px 9px; border-radius: 999px; background: #e9edf0; color: #66737c; font-size: 12px; }.publish-state.published { color: #175c50; background: #dceee7; }
 .content-table-head { display: flex; align-items: center; justify-content: space-between; margin-top: 30px; }.content-table-head h3 { margin: 0; }.content-table-head span { color: var(--text-muted); font-size: 13px; }
+.dialog-intro { margin: 0 0 18px; color: var(--text-muted); line-height: 1.7; }.template-preview { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-soft); }.template-preview span, .template-option-detail { color: var(--text-muted); font-size: 12px; }.template-option-detail { display: block; margin-top: 3px; }
 @media (max-width: 1200px) { .audit-grid { grid-template-columns: 1fr; } }
 @media (max-width: 1200px) { .metric-grid { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
 @media (max-width: 980px) { .console-shell { grid-template-columns: 1fr; } .console-side { position: relative; top: auto; min-height: auto; } .form-grid, .content-editor-layout { grid-template-columns: 1fr; } }

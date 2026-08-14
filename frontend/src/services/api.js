@@ -29,10 +29,12 @@ request.interceptors.response.use(
   },
 )
 
-function authenticatedFileUrl(path) {
+function authenticatedFileUrl(path, params = {}) {
   const token = window.localStorage.getItem('demo-token')
   const normalizedPath = path.startsWith('/api') ? path.slice(4) : path
-  const url = `${apiBaseUrl.replace(/\/$/, '')}${normalizedPath}`
+  const baseUrl = `${apiBaseUrl.replace(/\/$/, '')}${normalizedPath}`
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== null && value !== undefined && value !== '')).toString()
+  const url = query ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${query}` : baseUrl
   return token ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : url
 }
 
@@ -121,6 +123,10 @@ export const interviewApi = {
   saveLlmConfig(payload) { return request.post('/interview/it/llm-configs', payload) },
   listLlmConfigs(params) { return request.get('/interview/it/llm-configs', { params }) },
   deleteLlmConfig(id) { return request.post(`/interview/it/llm-configs/${id}/delete`) },
+  saveProcessTemplate(payload) { return request.post('/interview/hr/process-templates', payload) },
+  listProcessTemplates(params) { return request.get('/interview/hr/process-templates', { params }) },
+  getProcessTemplate(id) { return request.get(`/interview/hr/process-templates/${id}`) },
+  deleteProcessTemplate(id) { return request.post(`/interview/hr/process-templates/${id}/delete`) },
   startProcess(payload) { return request.post('/interview/hr/processes', payload) },
   listProcesses(params) { return request.get('/interview/hr/processes', { params }) },
   getIntervieweeProcess(processId) { return request.get(`/interview/interviewee/process/${processId}`) },
@@ -162,8 +168,8 @@ export const interviewApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
-  getRecordingUrl(processId) { return authenticatedFileUrl(`/api/interview/hr/video-recording/${processId}`) },
-  getAiRecordingUrl(processId) { return authenticatedFileUrl(`/api/interview/hr/ai-recording/${processId}`) },
+  getRecordingUrl(processId, processStageId) { return authenticatedFileUrl(`/api/interview/hr/video-recording/${processId}`, { processStageId }) },
+  getAiRecordingUrl(processId, processStageId) { return authenticatedFileUrl(`/api/interview/hr/ai-recording/${processId}`, { processStageId }) },
   retryVideoSummary(processId) { return request.post(`/interview/hr/video-summary/${processId}/retry`) },
   intervieweeJoin(processId) { return request.post(`/interview/interviewee/video-join/${processId}`) },
   hrJoin(processId, params) { return request.post(`/interview/hr/video-join/${processId}`, null, { params }) },

@@ -11,6 +11,7 @@ public class StartInterviewProcessRequest {
     private Long intervieweeUserId;
     @NotNull(message = "岗位必填")
     private Long jobId;
+    private Long templateId;
     private Integer aiThresholdScore;
     private Integer aiFollowUpThreshold;
     private Integer aiMinQuestionRounds;

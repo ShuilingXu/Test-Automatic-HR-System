@@ -261,6 +261,8 @@ CREATE TABLE IF NOT EXISTS interview_process (
     recruitment_candidate_id INTEGER NOT NULL,
     interviewee_user_id INTEGER,
     job_id INTEGER NOT NULL,
+    template_id INTEGER,
+    template_name VARCHAR(128),
     current_stage VARCHAR(32) NOT NULL,
     stage_status VARCHAR(32) NOT NULL,
     overall_status VARCHAR(32) NOT NULL,
@@ -287,6 +289,7 @@ CREATE TABLE IF NOT EXISTS interview_process (
 CREATE TABLE IF NOT EXISTS interview_ai_record (
     id INTEGER PRIMARY KEY,
     process_id INTEGER NOT NULL,
+    process_stage_id INTEGER,
     knowledge_base_id INTEGER,
     knowledge_point VARCHAR(255),
     question_content VARCHAR(5000) NOT NULL,
@@ -303,6 +306,7 @@ CREATE TABLE IF NOT EXISTS interview_ai_record (
 CREATE TABLE IF NOT EXISTS interview_video_session (
     id INTEGER PRIMARY KEY,
     process_id INTEGER NOT NULL,
+    process_stage_id INTEGER,
     video_serial_no VARCHAR(128) NOT NULL,
     video_join_link VARCHAR(500) NOT NULL,
     approver_user_id INTEGER,
@@ -334,7 +338,50 @@ CREATE TABLE IF NOT EXISTS interview_video_session (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS interview_process_template (
+    id INTEGER PRIMARY KEY,
+    template_name VARCHAR(128) NOT NULL,
+    description VARCHAR(1000),
+    status INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_process_template_stage (
+    id INTEGER PRIMARY KEY,
+    template_id INTEGER NOT NULL,
+    stage_name VARCHAR(128) NOT NULL,
+    stage_type VARCHAR(32) NOT NULL,
+    knowledge_base_id INTEGER,
+    sequence_no INTEGER NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_process_stage (
+    id INTEGER PRIMARY KEY,
+    process_id INTEGER NOT NULL,
+    template_stage_id INTEGER,
+    stage_name VARCHAR(128) NOT NULL,
+    stage_type VARCHAR(32) NOT NULL,
+    knowledge_base_id INTEGER,
+    sequence_no INTEGER NOT NULL,
+    stage_status VARCHAR(32) NOT NULL,
+    approved INTEGER,
+    approved_hr_user_id INTEGER,
+    approved_hr_name VARCHAR(64),
+    ai_recording_path VARCHAR(500),
+    ai_recording_file_name VARCHAR(255),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_interview_process_candidate_id ON interview_process(recruitment_candidate_id);
+CREATE INDEX IF NOT EXISTS idx_interview_process_template_id ON interview_process(template_id);
 CREATE INDEX IF NOT EXISTS idx_interview_process_stage ON interview_process(current_stage);
 CREATE INDEX IF NOT EXISTS idx_interview_ai_record_process_id ON interview_ai_record(process_id);
+CREATE INDEX IF NOT EXISTS idx_interview_ai_record_process_stage_id ON interview_ai_record(process_stage_id);
 CREATE INDEX IF NOT EXISTS idx_interview_video_session_process_id ON interview_video_session(process_id);
+CREATE INDEX IF NOT EXISTS idx_interview_video_session_process_stage_id ON interview_video_session(process_stage_id);
+CREATE INDEX IF NOT EXISTS idx_interview_process_template_stage_template_id ON interview_process_template_stage(template_id);
+CREATE INDEX IF NOT EXISTS idx_interview_process_stage_process_id ON interview_process_stage(process_id);

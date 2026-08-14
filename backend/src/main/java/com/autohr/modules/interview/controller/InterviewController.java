@@ -8,6 +8,7 @@ import com.autohr.modules.auth.service.AuthService;
 import com.autohr.modules.interview.dto.AiAnswerRequest;
 import com.autohr.modules.interview.dto.AntiCheatEventRequest;
 import com.autohr.modules.interview.dto.InterviewDecisionRequest;
+import com.autohr.modules.interview.dto.InterviewProcessTemplateSaveRequest;
 import com.autohr.modules.interview.dto.IceServerVO;
 import com.autohr.modules.interview.dto.InterviewVO;
 import com.autohr.modules.interview.dto.JobKnowledgeWeightSaveRequest;
@@ -149,6 +150,28 @@ public class InterviewController {
     @PostMapping("/it/llm-configs/{id}/delete")
     public ApiResponse<Void> deleteLlmConfig(@PathVariable Long id) {
         interviewService.deleteLlmConfig(id);
+        return ApiResponse.success("deleted", null);
+    }
+
+    @PostMapping("/hr/process-templates")
+    public ApiResponse<InterviewVO> saveProcessTemplate(@Valid @RequestBody InterviewProcessTemplateSaveRequest request) {
+        return ApiResponse.success(interviewService.saveProcessTemplate(request));
+    }
+
+    @GetMapping("/hr/process-templates")
+    public ApiResponse<List<InterviewVO>> listProcessTemplates(@RequestParam(required = false) Integer status,
+                                                                 @RequestParam(required = false) String keyword) {
+        return ApiResponse.success(interviewService.listProcessTemplates(status, keyword));
+    }
+
+    @GetMapping("/hr/process-templates/{id}")
+    public ApiResponse<InterviewVO> getProcessTemplate(@PathVariable Long id) {
+        return ApiResponse.success(interviewService.getProcessTemplate(id));
+    }
+
+    @PostMapping("/hr/process-templates/{id}/delete")
+    public ApiResponse<Void> deleteProcessTemplate(@PathVariable Long id) {
+        interviewService.deleteProcessTemplate(id);
         return ApiResponse.success("deleted", null);
     }
 
@@ -323,8 +346,9 @@ public class InterviewController {
     }
 
     @GetMapping("/hr/video-recording/{processId}")
-    public ResponseEntity<Resource> downloadRecording(@PathVariable Long processId) {
-        var session = interviewService.getDownloadableVideoSession(processId);
+    public ResponseEntity<Resource> downloadRecording(@PathVariable Long processId,
+                                                       @RequestParam(required = false) Long processStageId) {
+        var session = interviewService.getDownloadableVideoSession(processId, processStageId);
         String path = session.getMergedRecordingPath() == null ? session.getRecordingPath() : session.getMergedRecordingPath();
         String fileName = session.getMergedRecordingFileName() == null ? session.getRecordingFileName() : session.getMergedRecordingFileName();
         return FileDownloadSupport.buildInlineResponse(path, UploadPaths.RECORDING_DIR, fileName, "video/webm", "录制文件不可访问");
@@ -336,8 +360,9 @@ public class InterviewController {
     }
 
     @GetMapping("/hr/ai-recording/{processId}")
-    public ResponseEntity<Resource> downloadAiRecording(@PathVariable Long processId) {
-        var process = interviewService.getProcess(processId);
+    public ResponseEntity<Resource> downloadAiRecording(@PathVariable Long processId,
+                                                         @RequestParam(required = false) Long processStageId) {
+        var process = processStageId == null ? interviewService.getProcess(processId) : interviewService.getProcessStage(processId, processStageId);
         return FileDownloadSupport.buildInlineResponse(process.getAiRecordingPath(), UploadPaths.RECORDING_DIR, process.getAiRecordingFileName(), "video/webm", "AI问答视频不可访问");
     }
 

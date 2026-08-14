@@ -10,21 +10,13 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("interview_ai_record")
-public class InterviewAiRecord {
+@TableName("interview_process_template")
+public class InterviewProcessTemplate {
     @TableId(type = IdType.INPUT)
     private Long id;
-    private Long processId;
-    private Long processStageId;
-    private Long knowledgeBaseId;
-    private String knowledgePoint;
-    private String questionContent;
-    private String answerContent;
-    private Integer interviewerScore;
-    private Integer scorerScore;
-    private Integer averageScore;
-    private String interviewerComment;
-    private Integer sequenceNo;
+    private String templateName;
+    private String description;
+    private Integer status;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE)

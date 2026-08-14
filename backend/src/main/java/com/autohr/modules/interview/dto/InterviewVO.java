@@ -3,6 +3,7 @@ package com.autohr.modules.interview.dto;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 public class InterviewVO {
@@ -32,6 +33,12 @@ public class InterviewVO {
     private String scoringRulePrompt;
 
     private Long processId;
+    private Long templateId;
+    private String templateName;
+    private Long processStageId;
+    private String stageName;
+    private String stageType;
+    private List<InterviewVO> stages;
     private String currentStage;
     private String stageStatus;
     private String overallStatus;
