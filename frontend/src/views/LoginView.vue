@@ -80,7 +80,7 @@ async function login() {
     localStorage.setItem('demo-token', response.data.token)
     localStorage.setItem('session-user', JSON.stringify(response.data.user))
     ElMessage.success('登录成功')
-    router.push(targetByRole(response.data.user.roleCode))
+    router.push(Number(response.data.user.mustChangePassword) === 1 ? '/change-password' : targetByRole(response.data.user.roleCode))
   } catch (error) {
     ElMessage.error(error.message || '登录失败')
     await loadLoginCaptcha()

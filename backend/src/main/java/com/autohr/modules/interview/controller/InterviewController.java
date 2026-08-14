@@ -2,6 +2,7 @@ package com.autohr.modules.interview.controller;
 
 import com.autohr.common.api.ApiResponse;
 import com.autohr.common.file.FileDownloadSupport;
+import com.autohr.common.file.S3ObjectStorageService;
 import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.service.AuthService;
@@ -45,6 +46,7 @@ public class InterviewController {
 
     private final InterviewService interviewService;
     private final AuthService authService;
+    private final S3ObjectStorageService s3ObjectStorageService;
 
     @Value("${interview.webrtc.stun-urls:stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478}")
     private String stunUrls;
@@ -236,13 +238,9 @@ public class InterviewController {
 
     @PostMapping("/hr/video-session/{processId}")
     public ApiResponse<InterviewVO> createVideoSession(Authentication authentication,
-                                                       @PathVariable Long processId,
-                                                       @RequestParam(required = false) Long approverUserId,
-                                                       @RequestParam(required = false) String approverName) {
+                                                       @PathVariable Long processId) {
         SessionUserVO current = currentUser(authentication);
-        approverUserId = approverUserId == null ? current.getId() : approverUserId;
-        approverName = approverName == null || approverName.isBlank() ? current.getDisplayName() : approverName;
-        return ApiResponse.success(interviewService.createVideoSession(processId, approverUserId, approverName));
+        return ApiResponse.success(interviewService.createVideoSession(processId, current.getId(), current.getDisplayName()));
     }
 
     @PostMapping("/interviewee/video-join/{processId}")
@@ -254,13 +252,9 @@ public class InterviewController {
 
     @PostMapping("/hr/video-join/{processId}")
     public ApiResponse<InterviewVO> hrJoin(Authentication authentication,
-                                           @PathVariable Long processId,
-                                           @RequestParam(required = false) Long approverUserId,
-                                           @RequestParam(required = false) String approverName) {
+                                           @PathVariable Long processId) {
         SessionUserVO current = currentUser(authentication);
-        approverUserId = approverUserId == null ? current.getId() : approverUserId;
-        approverName = approverName == null || approverName.isBlank() ? current.getDisplayName() : approverName;
-        return ApiResponse.success(interviewService.hrJoinVideo(processId, approverUserId, approverName));
+        return ApiResponse.success(interviewService.hrJoinVideo(processId, current.getId(), current.getDisplayName()));
     }
 
     @PostMapping("/hr/video-complete/{processId}")
@@ -351,7 +345,10 @@ public class InterviewController {
         var session = interviewService.getDownloadableVideoSession(processId, processStageId);
         String path = session.getMergedRecordingPath() == null ? session.getRecordingPath() : session.getMergedRecordingPath();
         String fileName = session.getMergedRecordingFileName() == null ? session.getRecordingFileName() : session.getMergedRecordingFileName();
-        return FileDownloadSupport.buildInlineResponse(path, UploadPaths.RECORDING_DIR, fileName, "video/webm", "录制文件不可访问");
+        return s3ObjectStorageService.presignExternalDownloadIfAvailable("interview-recordings/" + fileName)
+                .<ResponseEntity<Resource>>map(url -> ResponseEntity.status(302).location(url).build())
+                .orElseGet(() -> FileDownloadSupport.buildInlineResponse(
+                        path, UploadPaths.RECORDING_DIR, fileName, "video/webm", "录制文件不可访问"));
     }
 
     @PostMapping("/hr/video-summary/{processId}/retry")
@@ -363,7 +360,11 @@ public class InterviewController {
     public ResponseEntity<Resource> downloadAiRecording(@PathVariable Long processId,
                                                          @RequestParam(required = false) Long processStageId) {
         var process = processStageId == null ? interviewService.getProcess(processId) : interviewService.getProcessStage(processId, processStageId);
-        return FileDownloadSupport.buildInlineResponse(process.getAiRecordingPath(), UploadPaths.RECORDING_DIR, process.getAiRecordingFileName(), "video/webm", "AI问答视频不可访问");
+        return s3ObjectStorageService.presignExternalDownloadIfAvailable("interview-recordings/" + process.getAiRecordingFileName())
+                .<ResponseEntity<Resource>>map(url -> ResponseEntity.status(302).location(url).build())
+                .orElseGet(() -> FileDownloadSupport.buildInlineResponse(
+                        process.getAiRecordingPath(), UploadPaths.RECORDING_DIR, process.getAiRecordingFileName(),
+                        "video/webm", "AI问答视频不可访问"));
     }
 
     @PostMapping("/hr/approve-ai/{processId}")

@@ -2,6 +2,7 @@ package com.autohr.modules.recruitment.controller;
 
 import com.autohr.common.api.ApiResponse;
 import com.autohr.common.file.FileDownloadSupport;
+import com.autohr.common.file.S3ObjectStorageService;
 import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.service.AuthService;
@@ -38,6 +39,7 @@ public class RecruitmentController {
     private final RecruitmentService recruitmentService;
     private final AuthService authService;
     private final AuditLogService auditLogService;
+    private final S3ObjectStorageService s3ObjectStorageService;
 
     @PostMapping("/admin/jobs")
     public ApiResponse<JobVO> saveJob(Authentication authentication,
@@ -134,7 +136,11 @@ public class RecruitmentController {
         SessionUserVO current = currentUser(authentication);
         boolean privileged = List.of("IT_ADMIN", "HR_ADMIN", "HR_USER").contains(current.getRoleCode());
         RecruitmentResumeFile resumeFile = recruitmentService.getResumeFile(id, authentication.getName(), privileged);
-        return FileDownloadSupport.buildAttachmentResponse(resumeFile.getFilePath(), UploadPaths.RESUME_DIR, resumeFile.getOriginalFileName(), resumeFile.getContentType(), "简历文件不可访问");
+        return s3ObjectStorageService.presignExternalDownloadIfAvailable("resumes/" + resumeFile.getStoredFileName())
+                .<ResponseEntity<Resource>>map(url -> ResponseEntity.status(302).location(url).build())
+                .orElseGet(() -> FileDownloadSupport.buildAttachmentResponse(
+                        resumeFile.getFilePath(), UploadPaths.RESUME_DIR, resumeFile.getOriginalFileName(),
+                        resumeFile.getContentType(), "简历文件不可访问"));
     }
 
     private SessionUserVO currentUser(Authentication authentication) {

@@ -38,6 +38,7 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
 
     @Override
     public void sendRegisterCode(String mobilePhone, String email, String captchaId, String captchaCode) {
+        cleanupExpiredCodes();
         captchaService.verifyCaptcha(captchaId, captchaCode);
         String target = normalizeTarget(mobilePhone, email);
         CodeRecord oldRecord = codeStore.get(target);
@@ -56,9 +57,14 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
 
     @Override
     public void verifyRegisterCode(String mobilePhone, String email, String code) {
+        cleanupExpiredCodes();
         String target = normalizeTarget(mobilePhone, email);
         CodeRecord record = codeStore.get(target);
-        if (record == null || record.expiresAt().isBefore(LocalDateTime.now())) {
+        if (record == null) {
+            throw new BusinessException("验证码已过期，请重新获取");
+        }
+        if (record.expiresAt().isBefore(LocalDateTime.now())) {
+            codeStore.remove(target, record);
             throw new BusinessException("验证码已过期，请重新获取");
         }
         if (!StrUtil.equals(record.code(), code)) {
@@ -119,7 +125,7 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
         requireConfig(config, "SMTP_PASSWORD", "SMTP密码未配置");
         JavaMailSenderImpl sender = new JavaMailSenderImpl();
         sender.setHost(config.get("SMTP_HOST"));
-        sender.setPort(Integer.parseInt(config.get("SMTP_PORT")));
+        sender.setPort(parseSmtpPort(config.get("SMTP_PORT")));
         sender.setUsername(config.get("SMTP_USERNAME"));
         sender.setPassword(config.get("SMTP_PASSWORD"));
         Properties props = sender.getJavaMailProperties();
@@ -146,6 +152,23 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
 
     private String firstNonBlank(String preferred, String fallback) {
         return StrUtil.isNotBlank(preferred) ? preferred : StrUtil.blankToDefault(fallback, "");
+    }
+
+    private int parseSmtpPort(String value) {
+        try {
+            int port = Integer.parseInt(value);
+            if (port < 1 || port > 65535) {
+                throw new NumberFormatException("out of range");
+            }
+            return port;
+        } catch (NumberFormatException ex) {
+            throw new BusinessException("SMTP端口必须是 1 到 65535 的整数");
+        }
+    }
+
+    private void cleanupExpiredCodes() {
+        LocalDateTime now = LocalDateTime.now();
+        codeStore.entrySet().removeIf(entry -> entry.getValue().expiresAt().isBefore(now));
     }
 
     private record CodeRecord(String code, LocalDateTime sentAt, LocalDateTime expiresAt) {}

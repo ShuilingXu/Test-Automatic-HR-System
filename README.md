@@ -516,7 +516,11 @@ npm run format
 保留在本地，以供视频处理、转写和受权限保护的下载使用；归档连接或鉴权失败只会记录
 告警，不会删除本地上传文件，也不会中断面试流程。
 
-在系统配置的“对象存储”页签或 `.env` 中配置 `S3_ENABLED`、`S3_ENDPOINT`、
-`S3_REGION`、`S3_BUCKET`、`S3_ACCESS_KEY_ID`、`S3_SECRET_ACCESS_KEY`、
-`S3_SESSION_TOKEN`、`S3_PREFIX` 和 `S3_PATH_STYLE_ACCESS`。该身份需要对指定
-Bucket 与前缀拥有 `s3:PutObject` 权限。短信、语音转写和 S3 均使用独立凭据。
+在系统配置的“对象存储”页签或 `.env` 中配置 `S3_ENABLED`、外网
+`S3_ENDPOINT`、`S3_REGION`、`S3_BUCKET`、`S3_ACCESS_KEY_ID`、
+`S3_SECRET_ACCESS_KEY`、`S3_SESSION_TOKEN`、`S3_PREFIX` 和
+`S3_PATH_STYLE_ACCESS`。开启 `S3_INTERNAL_ENDPOINT_ENABLED` 后还必须配置
+`S3_INTERNAL_ENDPOINT`：服务端上传通过该内网/VPC 地址发送，浏览器访问始终签发
+到外网 `S3_ENDPOINT`；关闭该开关时上传和访问均使用外网 Endpoint。归档对象不可用
+时下载自动回退至本地文件。该身份需要对指定 Bucket 与前缀拥有
+`s3:PutObject`、`s3:GetObject` 和 `s3:HeadObject` 权限。短信、语音转写和 S3 均使用独立凭据。

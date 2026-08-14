@@ -414,7 +414,7 @@ const systemConfig = reactive({
   SMTP_SSL_ENABLED: '',
   SMTP_STARTTLS_ENABLED: '',
   ALIYUN_STT_ACCESS_KEY_ID: '', ALIYUN_STT_ACCESS_KEY_SECRET: '', ALIYUN_STT_APP_KEY: '', ALIYUN_STT_ENDPOINT: '',
-  S3_ENABLED: '', S3_ENDPOINT: '', S3_REGION: '', S3_BUCKET: '', S3_ACCESS_KEY_ID: '', S3_SECRET_ACCESS_KEY: '', S3_SESSION_TOKEN: '', S3_PREFIX: '', S3_PATH_STYLE_ACCESS: '',
+  S3_ENABLED: '', S3_ENDPOINT: '', S3_INTERNAL_ENDPOINT_ENABLED: '', S3_INTERNAL_ENDPOINT: '', S3_REGION: '', S3_BUCKET: '', S3_ACCESS_KEY_ID: '', S3_SECRET_ACCESS_KEY: '', S3_SESSION_TOKEN: '', S3_PREFIX: '', S3_PATH_STYLE_ACCESS: '',
   DB_TYPE: '', DB_URL: '', DB_USERNAME: '', DB_PASSWORD: '', JWT_SECRET: '',
   INTERVIEW_VIDEO_FFMPEG_PATH: '', INTERVIEW_VIDEO_VIDEO_CODEC: '', INTERVIEW_VIDEO_AUDIO_CODEC: '',
   INTERVIEW_STUN_URLS: '', INTERVIEW_TURN_URLS: '', INTERVIEW_TURN_USERNAME: '', INTERVIEW_TURN_CREDENTIAL: '',
@@ -438,8 +438,8 @@ const configGroups = {
   notifications: { title: '通知服务', description: '短信验证码和注册邮件使用的独立服务凭据。', fields: [
     { key: 'ALIYUN_SMS_ACCESS_KEY_ID', label: '阿里云短信 AccessKey ID' }, { key: 'ALIYUN_SMS_ACCESS_KEY_SECRET', label: '阿里云短信 AccessKey Secret', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_SMS_ENDPOINT', label: '阿里云短信 Endpoint', placeholder: 'dysmsapi.aliyuncs.com' }, { key: 'ALIYUN_SMS_SIGN_NAME', label: '短信签名' }, { key: 'ALIYUN_SMS_TEMPLATE_CODE', label: '短信模板 Code' }, { key: 'SMTP_HOST', label: 'SMTP 服务器', placeholder: 'smtp.example.com' }, { key: 'SMTP_PORT', label: 'SMTP 端口', placeholder: '587' }, { key: 'SMTP_USERNAME', label: 'SMTP 用户名' }, { key: 'SMTP_PASSWORD', label: 'SMTP 密码', secret: true, placeholder: '留空则不覆盖' }, { key: 'SMTP_FROM', label: '发件人' }, { key: 'SMTP_SSL_ENABLED', label: 'SSL 启用', options: booleanOptions }, { key: 'SMTP_STARTTLS_ENABLED', label: 'STARTTLS 启用', options: booleanOptions },
   ] },
-  storage: { title: 'S3 兼容对象存储', description: '简历和面试媒体先保存到本地，再同步归档到 S3、MinIO 或 OSS 的 S3 兼容端点；归档失败时本地文件继续可用。', fields: [
-    { key: 'S3_ENABLED', label: '启用归档', options: booleanOptions }, { key: 'S3_ENDPOINT', label: 'S3 Endpoint', placeholder: 'https://s3.example.com' }, { key: 'S3_REGION', label: 'Region', placeholder: 'us-east-1' }, { key: 'S3_BUCKET', label: 'Bucket' }, { key: 'S3_ACCESS_KEY_ID', label: 'Access Key ID' }, { key: 'S3_SECRET_ACCESS_KEY', label: 'Secret Access Key', secret: true, placeholder: '留空则不覆盖' }, { key: 'S3_SESSION_TOKEN', label: 'Session Token（可选）', secret: true, placeholder: '临时凭据时填写' }, { key: 'S3_PREFIX', label: '对象前缀', placeholder: 'autohr' }, { key: 'S3_PATH_STYLE_ACCESS', label: 'Path Style Access', options: booleanOptions },
+  storage: { title: 'S3 兼容对象存储', description: '外网 Endpoint 始终供浏览器访问已归档文件。启用内网上传后，服务端上传只走内网 Endpoint；关闭后上传和访问均使用外网 Endpoint。归档或访问失败会回退到本地文件。', fields: [
+    { key: 'S3_ENABLED', label: '启用归档', options: booleanOptions }, { key: 'S3_ENDPOINT', label: '外网 S3 Endpoint', placeholder: 'https://s3.example.com' }, { key: 'S3_INTERNAL_ENDPOINT_ENABLED', label: '使用内网上传 Endpoint', options: booleanOptions }, { key: 'S3_INTERNAL_ENDPOINT', label: '内网上传 Endpoint', placeholder: 'http://s3.internal.example.com' }, { key: 'S3_REGION', label: 'Region', placeholder: 'us-east-1' }, { key: 'S3_BUCKET', label: 'Bucket' }, { key: 'S3_ACCESS_KEY_ID', label: 'Access Key ID' }, { key: 'S3_SECRET_ACCESS_KEY', label: 'Secret Access Key', secret: true, placeholder: '留空则不覆盖' }, { key: 'S3_SESSION_TOKEN', label: 'Session Token（可选）', secret: true, placeholder: '临时凭据时填写' }, { key: 'S3_PREFIX', label: '对象前缀', placeholder: 'autohr' }, { key: 'S3_PATH_STYLE_ACCESS', label: 'Path Style Access', options: booleanOptions },
   ] },
   media: { title: '面试媒体', description: '视频编码、WebRTC 网络和阿里云语音转文字使用的独立参数。', fields: [
     { key: 'INTERVIEW_VIDEO_FFMPEG_PATH', label: 'FFmpeg 路径', placeholder: 'ffmpeg' }, { key: 'INTERVIEW_VIDEO_VIDEO_CODEC', label: '视频编码器' }, { key: 'INTERVIEW_VIDEO_AUDIO_CODEC', label: '音频编码器' }, { key: 'INTERVIEW_STUN_URLS', label: 'STUN 地址' }, { key: 'INTERVIEW_TURN_URLS', label: 'TURN 地址' }, { key: 'INTERVIEW_TURN_USERNAME', label: 'TURN 用户名' }, { key: 'INTERVIEW_TURN_CREDENTIAL', label: 'TURN 凭证', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_STT_ACCESS_KEY_ID', label: '阿里云语音 AccessKey ID' }, { key: 'ALIYUN_STT_ACCESS_KEY_SECRET', label: '阿里云语音 AccessKey Secret', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_STT_APP_KEY', label: '阿里云语音 AppKey' }, { key: 'ALIYUN_STT_ENDPOINT', label: '阿里云语音 Endpoint', placeholder: 'wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1' }, { key: 'TURN_HOST', label: 'TURN 主机' }, { key: 'TURN_EXTERNAL_IP', label: 'TURN 外部 IP' }, { key: 'TURN_PRIVATE_IP', label: 'TURN 内部 IP' }, { key: 'TURN_REALM', label: 'TURN Realm' }, { key: 'TURN_MIN_PORT', label: 'TURN 最小端口' }, { key: 'TURN_MAX_PORT', label: 'TURN 最大端口' },
@@ -589,7 +589,7 @@ function syncLlmForms() {
   Object.assign(videoSummaryLlmForm, videoSummary ? { ...videoSummary, apiKey: '' } : createLlmForm('VIDEO_SUMMARY'))
 }
 async function syncIntervieweeByCandidate(candidateId) { const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId); processForm.intervieweeUserId = candidate?.intervieweeUserId ? String(candidate.intervieweeUserId) : ''; processForm.jobId = candidate?.jobId || null }
-async function startProcess() { try { if (!processForm.recruitmentCandidateId) { ElMessage.warning('请先选择候选人投递记录'); return } if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到候选人账号'); return } if (!processForm.jobId) { ElMessage.warning('投递记录未绑定岗位'); return } if (!processForm.templateId) { ElMessage.warning('请选择流程模板'); return } if (processForm.aiMaxQuestionRounds < processForm.aiMinQuestionRounds) { ElMessage.warning('AI最多问答轮数不能小于最少问答轮数'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
+async function startProcess() { try { if (!processForm.recruitmentCandidateId) { ElMessage.warning('请先选择候选人投递记录'); return } if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到候选人账号'); return } if (!processForm.jobId) { ElMessage.warning('投递记录未绑定岗位'); return } if (processForm.aiMaxQuestionRounds < processForm.aiMinQuestionRounds) { ElMessage.warning('AI最多问答轮数不能小于最少问答轮数'); return } const response = await interviewApi.startProcess({ ...processForm, intervieweeUserId: Number(processForm.intervieweeUserId) }); selectedProcess.value = response.data; ElMessage.success('面试流程已发起'); await loadAll() } catch (error) { fail(error) } }
 async function loadProcessDetail(row) {
   selectedProcess.value = row
   processRemark.value = row?.remark || ''
@@ -616,13 +616,13 @@ async function retryVideoSummary() {
   retryingVideoSummary.value = true
   try {
     selectedProcess.value = (await interviewApi.retryVideoSummary(selectedProcess.value.id)).data
-    ElMessage.success('已开始重新生成转写与会议概要')
+    ElMessage.success(selectedProcess.value.summaryStatus === 'PENDING_MERGE' ? '已开始重新合并录像并生成概要' : '已开始重新生成转写与会议概要')
     for (let attempt = 0; attempt < 90; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 2000))
       const rows = (await interviewApi.listProcesses()).data
       const latest = rows.find((item) => item.id === selectedProcess.value.id)
       if (latest) selectedProcess.value = latest
-      if (!['PENDING', 'PROCESSING'].includes(latest?.summaryStatus)) break
+      if (!['PENDING_MERGE', 'PENDING', 'PROCESSING'].includes(latest?.summaryStatus)) break
     }
     if (selectedProcess.value.summaryStatus === 'COMPLETED') ElMessage.success('转写与会议概要已生成')
     else if (selectedProcess.value.summaryStatus?.startsWith('FAILED')) ElMessage.error(selectedProcess.value.summaryStatus)
@@ -648,10 +648,7 @@ async function startHrVideoCall() {
   if (!selectedProcess.value) return
   try {
     disconnectHrVideo()
-    const sessionResponse = await interviewApi.createVideoSession(selectedProcess.value.id, {
-      approverUserId: sessionUser.value?.id,
-      approverName: sessionUser.value?.displayName || sessionUser.value?.username,
-    })
+    const sessionResponse = await interviewApi.createVideoSession(selectedProcess.value.id)
     selectedProcess.value.videoJoinLink = sessionResponse.data?.videoJoinLink || selectedProcess.value.videoJoinLink
     const stream = await requestCameraAndMicrophone()
     if (componentDisposed) {
@@ -891,8 +888,12 @@ onMounted(loadAll)
 .ai-stage-kicker { color: var(--primary); font-size: 12px; font-weight: 800; letter-spacing: .04em; }
 .ai-stage-count { color: var(--text-muted); font-size: 13px; }
 .empty-stage-review { margin: 14px 0 0; color: var(--text-muted); }
-.compact-ai-table { margin-top: 8px; }
-.ai-interviewer-feedback { margin: 0; white-space: pre-wrap; line-height: 1.6; color: var(--ink-soft); }
+.ai-question-panel, .action-panel { grid-column: 1 / -1; }
+.ai-question-panel { overflow: hidden; }
+.compact-ai-table { width: 100%; margin-top: 8px; }
+.compact-ai-table :deep(.el-table__body-wrapper) { overflow-x: auto; }
+.compact-ai-table :deep(.cell) { overflow-wrap: anywhere; }
+.ai-interviewer-feedback { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.6; color: var(--ink-soft); }
 .process-stats { display: grid; gap: 4px; margin-bottom: 12px; }
 .process-stats p { margin: 0; color: var(--ink-soft); }
 .action-button-grid { min-width: 0; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }

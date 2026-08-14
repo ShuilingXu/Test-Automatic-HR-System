@@ -6,6 +6,7 @@ import com.autohr.modules.auth.dto.CandidateProfileUpdateRequest;
 import com.autohr.modules.auth.dto.CandidateRegisterRequest;
 import com.autohr.modules.auth.dto.LoginRequest;
 import com.autohr.modules.auth.dto.LoginResponse;
+import com.autohr.modules.auth.dto.PasswordChangeRequest;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.dto.UserAdminUpdateRequest;
 import com.autohr.modules.auth.entity.SysUser;
@@ -47,7 +48,7 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException("用户名或密码错误");
         }
         if (!Objects.equals(user.getStatus(), 1)) {
-            throw new BusinessException("账号已停用");
+            throw new BusinessException("用户名或密码错误");
         }
         LoginResponse response = new LoginResponse();
         response.setToken(jwtService.generateToken(user));
@@ -77,6 +78,7 @@ public class AuthServiceImpl implements AuthService {
         user.setStatus(1);
         user.setProfileCompleted(0);
         user.setTokenVersion(0);
+        user.setMustChangePassword(0);
         sysUserMapper.insert(user);
         return toSessionUser(user);
     }
@@ -154,9 +156,30 @@ public class AuthServiceImpl implements AuthService {
             }
             user.setPassword(passwordEncoder.encode(request.getNewPassword()));
             user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
+            user.setMustChangePassword(1);
         }
         sysUserMapper.updateById(user);
         return toSessionUser(user);
+    }
+
+    @Override
+    @Transactional
+    public LoginResponse changePassword(String username, PasswordChangeRequest request) {
+        SysUser user = requireUserByUsername(username);
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            throw new BusinessException("当前密码错误");
+        }
+        if (passwordEncoder.matches(request.getNewPassword(), user.getPassword())) {
+            throw new BusinessException("新密码不能与当前密码相同");
+        }
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        user.setMustChangePassword(0);
+        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
+        sysUserMapper.updateById(user);
+        LoginResponse response = new LoginResponse();
+        response.setToken(jwtService.generateToken(user));
+        response.setUser(toSessionUser(user));
+        return response;
     }
 
     @Override

@@ -4,6 +4,7 @@ import com.autohr.modules.auth.dto.CandidateProfileUpdateRequest;
 import com.autohr.modules.auth.dto.CandidateRegisterRequest;
 import com.autohr.modules.auth.dto.LoginRequest;
 import com.autohr.modules.auth.dto.LoginResponse;
+import com.autohr.modules.auth.dto.PasswordChangeRequest;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.dto.UserAdminUpdateRequest;
 
@@ -17,5 +18,6 @@ public interface AuthService {
     SessionUserVO loadUserByUsername(String username);
     List<SessionUserVO> listUsers(String roleCode, Integer status, String keyword, String operatorRoleCode);
     SessionUserVO updateUserByAdmin(Long id, UserAdminUpdateRequest request, String operatorRoleCode);
+    LoginResponse changePassword(String username, PasswordChangeRequest request);
     void logout(String username);
 }

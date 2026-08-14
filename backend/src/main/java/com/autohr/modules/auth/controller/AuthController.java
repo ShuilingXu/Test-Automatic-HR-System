@@ -7,6 +7,7 @@ import com.autohr.modules.auth.dto.CaptchaVO;
 import com.autohr.modules.auth.dto.AuditLogVO;
 import com.autohr.modules.auth.dto.LoginRequest;
 import com.autohr.modules.auth.dto.LoginResponse;
+import com.autohr.modules.auth.dto.PasswordChangeRequest;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.dto.UserAdminUpdateRequest;
 import com.autohr.modules.auth.dto.VerificationCodeRequest;
@@ -67,6 +68,12 @@ public class AuthController {
     public ApiResponse<Void> logout(Authentication authentication) {
         authService.logout(authentication.getName());
         return ApiResponse.success("logged out", null);
+    }
+
+    @PostMapping("/change-password")
+    public ApiResponse<LoginResponse> changePassword(Authentication authentication,
+                                                     @Valid @RequestBody PasswordChangeRequest request) {
+        return ApiResponse.success(authService.changePassword(authentication.getName(), request));
     }
 
     @PostMapping("/profile")

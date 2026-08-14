@@ -7,6 +7,7 @@ import CandidateInterviewView from '../views/CandidateInterviewView.vue'
 import CandidateDetailView from '../views/CandidateDetailView.vue'
 import InterviewAdminView from '../views/InterviewAdminView.vue'
 import UserPortalView from '../views/UserPortalView.vue'
+import ForcePasswordChangeView from '../views/ForcePasswordChangeView.vue'
 import { readSessionUser } from '../utils/session'
 
 const KNOWN_ROLES = new Set(['IT_ADMIN', 'HR_ADMIN', 'HR_USER', 'INTERVIEWEE'])
@@ -14,6 +15,7 @@ const KNOWN_ROLES = new Set(['IT_ADMIN', 'HR_ADMIN', 'HR_USER', 'INTERVIEWEE'])
 const routes = [
   { path: '/', name: 'home', component: HomeView },
   { path: '/login', name: 'login', component: LoginView },
+  { path: '/change-password', name: 'change-password', component: ForcePasswordChangeView, meta: { requiresAuth: true } },
   { path: '/admin', redirect: '/admin/dashboard' },
   { path: '/admin/dashboard', name: 'admin-dashboard', component: ConsoleView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'], consoleTab: 'dashboard' } },
   { path: '/admin/audit', name: 'admin-audit', component: ConsoleView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN'], consoleTab: 'audit' } },
@@ -63,6 +65,12 @@ router.beforeEach((to) => {
   const session = readSessionUser()
   if (!session || !KNOWN_ROLES.has(session.roleCode)) {
     return '/login'
+  }
+  if (Number(session.mustChangePassword) === 1 && to.name !== 'change-password') {
+    return '/change-password'
+  }
+  if (Number(session.mustChangePassword) !== 1 && to.name === 'change-password') {
+    return session.roleCode === 'INTERVIEWEE' ? '/user' : '/admin'
   }
   if (to.meta.roles && !to.meta.roles.includes(session.roleCode)) {
     return session.roleCode === 'INTERVIEWEE' ? '/user' : '/admin'

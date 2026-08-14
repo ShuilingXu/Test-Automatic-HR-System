@@ -1,6 +1,7 @@
 package com.autohr.config;
 
 import com.autohr.modules.auth.config.JwtAuthenticationFilter;
+import com.autohr.modules.auth.config.PasswordChangeRequiredFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,6 +20,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final PasswordChangeRequiredFilter passwordChangeRequiredFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -37,9 +39,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/interview/it/**").hasAnyAuthority("ROLE_IT_ADMIN", "IT_ADMIN")
                         .requestMatchers("/api/interview/hr/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "ROLE_HR_USER", "IT_ADMIN", "HR_ADMIN", "HR_USER")
                         .requestMatchers("/api/interview/interviewee/**").hasAnyAuthority("ROLE_INTERVIEWEE", "INTERVIEWEE")
-                        .requestMatchers("/api/auth/me", "/api/auth/profile", "/api/auth/logout").authenticated()
+                        .requestMatchers("/api/auth/me", "/api/auth/profile", "/api/auth/logout", "/api/auth/change-password").authenticated()
                         .anyRequest().authenticated())
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(passwordChangeRequiredFilter, JwtAuthenticationFilter.class);
         return http.build();
     }
 

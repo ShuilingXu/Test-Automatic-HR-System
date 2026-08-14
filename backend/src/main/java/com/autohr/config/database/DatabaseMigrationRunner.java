@@ -53,6 +53,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
             migrateInterviewVideoSessionColumns(connection, statement);
             migrateInterviewProcessStageColumns(connection, statement);
             migrateRecruitmentCandidateColumns(connection, statement);
+            migrateSysUserColumns(connection, statement);
             for (String sql : statements.stream().filter(this::isCreateIndex).toList()) {
                 execute(statement, sql);
             }
@@ -188,6 +189,10 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         try (ResultSet columns = metaData.getColumns(null, null, table.toUpperCase(), column.toUpperCase())) {
             return columns.next();
         }
+    }
+
+    private void migrateSysUserColumns(Connection connection, Statement statement) throws SQLException {
+        addColumnIfMissing(connection, statement, "sys_user", "must_change_password", "INTEGER NOT NULL DEFAULT 0");
     }
 
     private void migrateInterviewProcessStageColumns(Connection connection, Statement statement) throws SQLException {

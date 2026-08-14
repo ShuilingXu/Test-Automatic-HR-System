@@ -62,8 +62,8 @@
       </template>
     </section>
     <el-dialog v-model="templateDialogVisible" title="选择面试流程" width="min(560px, calc(100vw - 32px))" destroy-on-close>
-      <p class="dialog-intro">选择流程模板后，系统会为该候选人创建独立的面试阶段快照。</p>
-      <el-form label-position="top"><el-form-item label="流程模板"><el-select v-model="selectedTemplateId" placeholder="请选择流程模板"><el-option v-for="item in enabledTemplates" :key="item.id" :label="item.templateName" :value="item.id"><span>{{ item.templateName }}</span><small class="template-option-detail">{{ templateStageSummary(item) }}</small></el-option></el-select></el-form-item></el-form>
+      <p class="dialog-intro">选择流程模板后，系统会为该候选人创建独立的面试阶段快照；留空则沿用旧流程。</p>
+      <el-form label-position="top"><el-form-item label="流程模板（可选）"><el-select v-model="selectedTemplateId" clearable placeholder="不选择则沿用旧流程"><el-option v-for="item in enabledTemplates" :key="item.id" :label="item.templateName" :value="item.id"><span>{{ item.templateName }}</span><small class="template-option-detail">{{ templateStageSummary(item) }}</small></el-option></el-select></el-form-item></el-form>
       <div v-if="selectedTemplate" class="template-preview"><strong>{{ selectedTemplate.templateName }}</strong><span>{{ templateStageSummary(selectedTemplate) }}</span></div>
       <template #footer><el-button @click="templateDialogVisible = false">取消</el-button><el-button type="primary" :loading="startingInterview" @click="confirmStartCandidateInterview">发起面试</el-button></template>
     </el-dialog>
@@ -119,18 +119,13 @@ async function reevaluateResumeLlm() {
 }
 
 async function startCandidateInterview() {
-  if (!enabledTemplates.value.length) {
-    ElMessage.warning('请先在流程模板中创建并启用至少一个模板')
-    return
-  }
-  selectedTemplateId.value = enabledTemplates.value[0]?.id || null
+  selectedTemplateId.value = null
   templateDialogVisible.value = true
 }
 
 function templateStageSummary(template) { return (template?.stages || []).map((stage) => stage.stageName || (stage.stageType === 'AI' ? 'AI 面试' : '视频面试')).join(' -> ') || '暂无阶段' }
 
 async function confirmStartCandidateInterview() {
-  if (!selectedTemplateId.value) { ElMessage.warning('请选择流程模板'); return }
   startingInterview.value = true
   try {
     const userList = (await authApi.listUsers({ roleCode: 'INTERVIEWEE', keyword: candidate.value.mobilePhone })).data

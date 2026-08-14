@@ -25,6 +25,7 @@ public class SysUser {
     private Integer status;
     private Integer profileCompleted;
     private Integer tokenVersion;
+    private Integer mustChangePassword;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

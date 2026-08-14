@@ -121,6 +121,7 @@ public class InterviewServiceImpl implements InterviewService {
     private boolean llmDebug;
 
     private static final long MAX_RECORDING_SIZE = 100 * 1024 * 1024;
+    private static final int VIDEO_MERGE_MAX_ATTEMPTS = 3;
     private static final Set<String> ALLOWED_RECORDING_CONTENT_TYPES = Set.of("video/webm", "application/octet-stream");
 
     @Override
@@ -488,7 +489,7 @@ public class InterviewServiceImpl implements InterviewService {
     public List<InterviewVO> listProcesses(String overallStatus, String stageStatus, String keyword) {
         return processMapper.selectList(new LambdaQueryWrapper<InterviewProcess>()
                 .eq(StrUtil.isNotBlank(overallStatus), InterviewProcess::getOverallStatus, overallStatus)
-                .eq(StrUtil.isNotBlank(stageStatus), InterviewProcess::getCurrentStage, stageStatus)
+                .eq(StrUtil.isNotBlank(stageStatus), InterviewProcess::getStageStatus, stageStatus)
                 .and(StrUtil.isNotBlank(keyword), q -> q.like(InterviewProcess::getProcessStatusView, keyword)
                         .or().like(InterviewProcess::getApprovedHrName, keyword))
                 .orderByDesc(InterviewProcess::getId)).stream().map(this::toProcessVO).toList();
@@ -835,24 +836,15 @@ public class InterviewServiceImpl implements InterviewService {
         InterviewProcess process = requireProcess(processId);
         if (StrUtil.equals(process.getCurrentStage(), "VIDEO") && StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
             if (videoMergeService.canMerge(session)) {
-                try {
-                    videoMergeService.mergeRecordings(session);
-                } catch (BusinessException ignored) {
-                    session.setSessionStatus("RECORDED");
-                    videoSessionMapper.updateById(session);
-                }
-                session.setSessionStatus("RECORDED");
-                session.setSummaryStatus("PENDING");
+                prepareVideoMerge(session);
                 videoSessionMapper.updateById(session);
-                runAfterCommit(() -> CompletableFuture.runAsync(() -> summarizeVideoSessionSafely(session.getId())));
-                process.setStageStatus("WAITING_APPROVAL");
-                process.setProcessStatusView("视频待审批");
+                scheduleVideoMergeAndSummary(session.getId());
             } else {
                 process.setStageStatus("UPLOADING");
                 process.setProcessStatusView("视频录制上传中");
+                processMapper.updateById(process);
+                updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
             }
-            processMapper.updateById(process);
-            updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
         }
         return toVideoSessionVO(session);
     }
@@ -891,21 +883,14 @@ public class InterviewServiceImpl implements InterviewService {
             videoSessionMapper.updateById(session);
         }
         if (videoMergeService.canMerge(session)) {
-            try {
-                videoMergeService.mergeRecordings(session);
-            } catch (BusinessException ignored) {
-                // The recording is still available for HR review when merging is unavailable.
-            }
-            session.setSessionStatus("RECORDED");
-            session.setSummaryStatus("PENDING");
+            prepareVideoMerge(session);
             videoSessionMapper.updateById(session);
-            runAfterCommit(() -> CompletableFuture.runAsync(() -> summarizeVideoSessionSafely(session.getId())));
-            setTemplateStageStatus(process, stage, "WAITING_APPROVAL");
+            scheduleVideoMergeAndSummary(session.getId());
         } else {
             setTemplateStageStatus(process, stage, "UPLOADING");
+            processMapper.updateById(process);
+            updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
         }
-        processMapper.updateById(process);
-        updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
         return toVideoSessionVO(session);
     }
 
@@ -1152,10 +1137,9 @@ public class InterviewServiceImpl implements InterviewService {
     public InterviewVideoSession getDownloadableVideoSession(Long processId, Long processStageId) {
         InterviewVideoSession session = processStageId == null ? requireVideoSessionByProcess(processId) : requireVideoSessionForStage(processId, processStageId);
         if (videoMergeService.canMerge(session) && !isReadableFile(session.getMergedRecordingPath())) {
-            videoMergeService.mergeRecordings(session);
-            session.setSummaryStatus("PENDING");
+            prepareVideoMerge(session);
             videoSessionMapper.updateById(session);
-            runAfterCommit(() -> CompletableFuture.runAsync(() -> summarizeVideoSessionSafely(session.getId())));
+            scheduleVideoMergeAndSummary(session.getId());
         }
         return session;
     }
@@ -1164,6 +1148,15 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO retryVideoSummary(Long processId) {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
+        if (StrUtil.equals(session.getSummaryStatus(), "FAILED_MERGE")) {
+            if (!videoMergeService.canMerge(session)) {
+                throw new BusinessException("缺少双方录像，无法重新合并");
+            }
+            prepareVideoMerge(session);
+            videoSessionMapper.updateById(session);
+            scheduleVideoMergeAndSummary(session.getId());
+            return getProcess(processId);
+        }
         if (!isReadableFile(StrUtil.blankToDefault(session.getMergedRecordingPath(), session.getRecordingPath()))) {
             throw new BusinessException("没有可处理的视频录制文件");
         }
@@ -1211,23 +1204,14 @@ public class InterviewServiceImpl implements InterviewService {
             session.setRecordingPath(storedFile.toString());
             session.setRecordingFileName(storedName);
             if (videoMergeService.canMerge(session)) {
-                try {
-                    videoMergeService.mergeRecordings(session);
-                } catch (BusinessException ex) {
-                    session.setSessionStatus("RECORDED");
-                    session.setSummaryStatus("FAILED");
-                    videoSessionMapper.updateById(session);
-                    markVideoWaitingApproval(session.getProcessId());
-                    return toVideoSignalVO(session);
-                }
-                session.setSessionStatus("RECORDED");
-                session.setSummaryStatus("PENDING");
-                markVideoWaitingApproval(session.getProcessId());
-                runAfterCommit(() -> CompletableFuture.runAsync(() -> summarizeVideoSessionSafely(session.getId())));
+                prepareVideoMerge(session);
             } else if (!StrUtil.equals(session.getSessionStatus(), "END_REQUESTED")) {
                 session.setSessionStatus("END_REQUESTED");
             }
             videoSessionMapper.updateById(session);
+            if (videoMergeService.canMerge(session)) {
+                scheduleVideoMergeAndSummary(session.getId());
+            }
             return toVideoSignalVO(session);
         } catch (IOException ex) {
             throw new BusinessException("录制文件上传失败: " + ex.getMessage());
@@ -1902,6 +1886,50 @@ public class InterviewServiceImpl implements InterviewService {
         }
         String response = callOpenAiChat(config, prompt + "\n只返回一个整数分数，不限制分数上限，由你的评分标准决定。", answer);
         return parseScore(response);
+    }
+
+    private void prepareVideoMerge(InterviewVideoSession session) {
+        session.setSessionStatus("RECORDED");
+        session.setSummaryStatus("PENDING_MERGE");
+        session.setSummaryText(null);
+        markVideoWaitingApproval(session.getProcessId());
+    }
+
+    private void scheduleVideoMergeAndSummary(Long sessionId) {
+        runAfterCommit(() -> CompletableFuture.runAsync(() -> mergeAndSummarizeVideoSessionSafely(sessionId)));
+    }
+
+    private void mergeAndSummarizeVideoSessionSafely(Long sessionId) {
+        BusinessException lastFailure = null;
+        for (int attempt = 1; attempt <= VIDEO_MERGE_MAX_ATTEMPTS; attempt++) {
+            InterviewVideoSession session = videoSessionMapper.selectById(sessionId);
+            if (session == null || !videoMergeService.canMerge(session)) {
+                markVideoMergeFailed(sessionId, "录像文件不完整，无法合并");
+                return;
+            }
+            try {
+                videoMergeService.mergeRecordings(session);
+                session.setSummaryStatus("PENDING");
+                videoSessionMapper.updateById(session);
+                summarizeVideoSessionSafely(sessionId);
+                return;
+            } catch (BusinessException ex) {
+                lastFailure = ex;
+            }
+        }
+        String detail = lastFailure == null ? "未知错误" : abbreviate(lastFailure.getMessage(), 240);
+        markVideoMergeFailed(sessionId, detail);
+    }
+
+    private void markVideoMergeFailed(Long sessionId, String detail) {
+        InterviewVideoSession session = videoSessionMapper.selectById(sessionId);
+        if (session == null) {
+            return;
+        }
+        session.setSessionStatus("RECORDED");
+        session.setSummaryStatus("FAILED_MERGE");
+        session.setSummaryText("录像合并已自动重试3次仍失败。原始录像已保留，审批流程不受影响。原因：" + abbreviate(detail, 240));
+        videoSessionMapper.updateById(session);
     }
 
     private void summarizeVideoSessionSafely(Long sessionId) {

@@ -12,4 +12,5 @@ public class SessionUserVO {
     private String email;
     private Integer status;
     private Integer profileCompleted;
+    private Integer mustChangePassword;
 }

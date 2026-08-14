@@ -15,13 +15,19 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -30,7 +36,8 @@ public class S3ObjectStorageService {
     private static final Logger log = LoggerFactory.getLogger(S3ObjectStorageService.class);
     private static final String[] CONFIG_KEYS = {
             "S3_ENABLED", "S3_ENDPOINT", "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID",
-            "S3_SECRET_ACCESS_KEY", "S3_SESSION_TOKEN", "S3_PREFIX", "S3_PATH_STYLE_ACCESS"
+            "S3_SECRET_ACCESS_KEY", "S3_SESSION_TOKEN", "S3_PREFIX", "S3_PATH_STYLE_ACCESS",
+            "S3_INTERNAL_ENDPOINT_ENABLED", "S3_INTERNAL_ENDPOINT"
     };
 
     private final SystemConfigService systemConfigService;
@@ -71,7 +78,11 @@ public class S3ObjectStorageService {
             return;
         }
 
-        String endpoint = trim(config.get("S3_ENDPOINT"));
+        String endpoint = selectUploadEndpoint(config);
+        if (endpoint.isEmpty()) {
+            log.warn("Skipping S3 archive because the upload endpoint is not configured");
+            return;
+        }
         String region = valueOrDefault(config.get("S3_REGION"), "us-east-1");
         String bucket = trim(config.get("S3_BUCKET"));
         String accessKeyId = trim(config.get("S3_ACCESS_KEY_ID"));
@@ -105,6 +116,45 @@ public class S3ObjectStorageService {
         }
     }
 
+    /**
+     * Returns a short-lived URL signed for the browser-facing endpoint. A failed
+     * archive leaves no readable object, so callers retain their local response.
+     */
+    public Optional<URI> presignExternalDownloadIfAvailable(String objectName) {
+        Map<String, String> config = systemConfigService.loadConfig(CONFIG_KEYS);
+        if (!Boolean.parseBoolean(config.get("S3_ENABLED"))) {
+            return Optional.empty();
+        }
+        String endpoint = trim(config.get("S3_ENDPOINT"));
+        String region = valueOrDefault(config.get("S3_REGION"), "us-east-1");
+        String bucket = trim(config.get("S3_BUCKET"));
+        String accessKeyId = trim(config.get("S3_ACCESS_KEY_ID"));
+        String secretAccessKey = trim(config.get("S3_SECRET_ACCESS_KEY"));
+        if (endpoint.isEmpty() || bucket.isEmpty() || accessKeyId.isEmpty() || secretAccessKey.isEmpty()) {
+            return Optional.empty();
+        }
+        try {
+            String objectKey = buildObjectKey(config.get("S3_PREFIX"), objectName);
+            String sessionToken = trim(config.get("S3_SESSION_TOKEN"));
+            boolean pathStyleAccess = Boolean.parseBoolean(config.get("S3_PATH_STYLE_ACCESS"));
+            try (S3Client client = createClient(endpoint, region, accessKeyId, secretAccessKey, sessionToken, pathStyleAccess);
+                 S3Presigner presigner = createPresigner(endpoint, region, accessKeyId, secretAccessKey, sessionToken, pathStyleAccess)) {
+                client.headObject(HeadObjectRequest.builder().bucket(bucket).key(objectKey).build());
+                GetObjectRequest getObjectRequest = GetObjectRequest.builder().bucket(bucket).key(objectKey).build();
+                URI url = presigner.presignGetObject(GetObjectPresignRequest.builder()
+                                .signatureDuration(Duration.ofMinutes(5))
+                                .getObjectRequest(getObjectRequest)
+                                .build())
+                        .url()
+                        .toURI();
+                return Optional.of(url);
+            }
+        } catch (Exception ex) {
+            log.debug("S3 object {} is not available through the browser endpoint: {}", objectName, ex.toString());
+            return Optional.empty();
+        }
+    }
+
     private S3Client createClient(String endpoint, String region, String accessKeyId, String secretAccessKey,
                                   String sessionToken, boolean pathStyleAccess) {
         var credentials = sessionToken.isEmpty()
@@ -121,6 +171,26 @@ public class S3ObjectStorageService {
             builder.endpointOverride(URI.create(endpoint));
         }
         return builder.build();
+    }
+
+    private S3Presigner createPresigner(String endpoint, String region, String accessKeyId, String secretAccessKey,
+                                        String sessionToken, boolean pathStyleAccess) {
+        var credentials = sessionToken.isEmpty()
+                ? AwsBasicCredentials.create(accessKeyId, secretAccessKey)
+                : AwsSessionCredentials.create(accessKeyId, secretAccessKey, sessionToken);
+        var builder = S3Presigner.builder()
+                .region(Region.of(region))
+                .credentialsProvider(StaticCredentialsProvider.create(credentials))
+                .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(pathStyleAccess).build());
+        builder.endpointOverride(URI.create(endpoint));
+        return builder.build();
+    }
+
+    private String selectUploadEndpoint(Map<String, String> config) {
+        if (!Boolean.parseBoolean(config.get("S3_INTERNAL_ENDPOINT_ENABLED"))) {
+            return trim(config.get("S3_ENDPOINT"));
+        }
+        return trim(config.get("S3_INTERNAL_ENDPOINT"));
     }
 
     private String buildObjectKey(String prefix, String objectName) {

@@ -824,7 +824,7 @@ onMounted(async () => {
 .status-rail div:last-child { border-right: 0; }
 .status-rail span, .exam-facts dt { display: block; color: var(--text-muted); font-size: 12px; }
 .status-rail strong { display: block; margin-top: 5px; overflow-wrap: anywhere; font-size: 16px; }
-.ai-workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
+.ai-workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; min-width: 0; }
 .exam-sidebar { position: sticky; top: 16px; display: grid; gap: 12px; }
 .sidebar-section, .answer-workspace, .video-workspace { min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-card); }
 .sidebar-section { padding: 14px; }
@@ -843,7 +843,7 @@ onMounted(async () => {
 .exam-facts div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; }
 .exam-facts dd { margin: 0; color: var(--ink-soft); font-size: 13px; font-weight: 700; }
 .wide-action { width: 100%; margin-left: 0 !important; }
-.answer-workspace { position: relative; padding: 24px; }
+.answer-workspace { position: relative; display: flex; min-width: 0; flex-direction: column; padding: 24px; overflow: hidden; }
 .ai-status-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; margin-bottom: 22px; padding: 13px 15px; border: 1px solid #cfe1d8; border-radius: 6px; background: #f2f8f5; }
 .ai-status-card.busy { border-color: #d7c69b; background: #fff9eb; }
 .ai-status-card.terminal { border-color: var(--border); background: var(--surface-soft); }
@@ -851,15 +851,15 @@ onMounted(async () => {
 .ai-status-card small { margin-top: 3px; color: var(--text-muted); line-height: 1.5; }
 .status-dot { width: 9px; height: 9px; border-radius: 999px; background: var(--primary); box-shadow: 0 0 0 4px var(--primary-ring); }
 .ai-status-card.busy .status-dot { background: var(--warning); box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.12); }
-.current-question { padding: 4px 2px 8px; }
+.current-question { min-width: 0; padding: 4px 2px 8px; }
 .question-meta { justify-content: flex-start; }
 .question-meta span, .question-meta em { padding: 6px 9px; border-radius: 4px; font-size: 12px; font-style: normal; font-weight: 700; }
 .question-meta span { color: #fff; background: var(--ink); }
 .question-meta em { color: var(--primary-dark); background: var(--primary-soft); }
-.current-question h2 { max-width: 920px; margin: 18px 0 24px; font-size: 23px; line-height: 1.55; letter-spacing: 0; }
-.answer-composer { overflow: hidden; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); }
+.current-question h2 { max-width: 920px; margin: 18px 0 24px; overflow-wrap: anywhere; font-size: 23px; line-height: 1.55; letter-spacing: 0; }
+.answer-composer { display: flex; min-width: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); }
 .answer-composer :deep(.el-textarea__inner) { min-height: 176px !important; padding: 16px; border: 0; border-radius: 0; box-shadow: none; resize: vertical; line-height: 1.8; }
-.composer-footer { padding: 10px 12px; border-top: 1px solid var(--border); background: var(--surface-soft); }
+.composer-footer { flex: 0 0 auto; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--surface-soft); }
 .composer-footer > span { color: var(--text-muted); font-size: 12px; }
 .processing-state { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; margin-top: 16px; padding: 14px; border: 1px solid #ead9ad; border-radius: 6px; background: #fff9eb; }
 .processing-state p { margin: 4px 0 0; color: var(--text-muted); }
@@ -916,5 +916,7 @@ onMounted(async () => {
   .history-item summary { grid-template-columns: 36px minmax(0, 1fr); }
   .history-item summary > em { grid-column: 2; }
   .history-content { padding-left: 0; }
+  .composer-footer { align-items: stretch; flex-direction: column; }
+  .composer-footer :deep(.el-button) { width: 100%; margin-left: 0; }
 }
 </style>

@@ -33,8 +33,14 @@ public class AuthBootstrapRunner implements CommandLineRunner {
     }
 
     private void ensureUser(String username, String password, String roleCode, String displayName) {
-        Long count = sysUserMapper.selectCount(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username));
-        if (count > 0) {
+        SysUser existing = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getUsername, username)
+                .last("LIMIT 1"));
+        if (existing != null) {
+            if (passwordEncoder.matches(password, existing.getPassword()) && !Integer.valueOf(1).equals(existing.getMustChangePassword())) {
+                existing.setMustChangePassword(1);
+                sysUserMapper.updateById(existing);
+            }
             return;
         }
         SysUser user = new SysUser();
@@ -46,6 +52,7 @@ public class AuthBootstrapRunner implements CommandLineRunner {
         user.setStatus(1);
         user.setProfileCompleted(1);
         user.setTokenVersion(0);
+        user.setMustChangePassword(1);
         sysUserMapper.insert(user);
     }
 
