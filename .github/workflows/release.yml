@@ -100,9 +100,11 @@ jobs:
             DEPLOY_WEB_ROOT="$(printf '%s' "$DEPLOY_WEB_ROOT_B64" | base64 --decode)"
             cleanup() {
               rm -f /tmp/auto-hr-release.zip /tmp/auto-hr-initial.env
+              sudo rm -f /opt/auto-hr/backend/auto-hr.jar.next
             }
             trap cleanup EXIT
-            sudo install -d -m 0755 /opt/auto-hr "$DEPLOY_WEB_ROOT"
+            sudo install -d -m 0755 /opt/auto-hr /opt/auto-hr/backend /opt/auto-hr/frontend \
+              /opt/auto-hr/uploads /opt/auto-hr/logs "$DEPLOY_WEB_ROOT"
             if [ ! -f /opt/auto-hr/.env ]; then
               if [ ! -s /tmp/auto-hr-initial.env ]; then
                 echo "First deployment requires the DEPLOY_INITIAL_ENV repository secret." >&2
@@ -126,19 +128,51 @@ jobs:
                       raise SystemExit(f"Unsafe path in release archive: {member.filename}")
                   archive.extract(member, destination_root)
           PY
-            sudo cp -a /tmp/auto-hr-release/auto-hr-release/. /opt/auto-hr/
+            RELEASE_ROOT=/tmp/auto-hr-release/auto-hr-release
+            NEXT_JAR=/opt/auto-hr/backend/auto-hr.jar.next
+            CURRENT_JAR=/opt/auto-hr/backend/auto-hr.jar
+            PREVIOUS_JAR=/opt/auto-hr/backend/auto-hr.jar.previous
+            sudo install -m 0644 "$RELEASE_ROOT/backend/auto-hr.jar" "$NEXT_JAR"
+            sudo install -m 0644 "$RELEASE_ROOT/.env.example" /opt/auto-hr/.env.example
+            sudo install -m 0755 "$RELEASE_ROOT/start.sh" /opt/auto-hr/start.sh
+            sudo install -m 0644 "$RELEASE_ROOT/auto-hr.service" /opt/auto-hr/auto-hr.service
+            sudo install -m 0644 "$RELEASE_ROOT/auto-hr.service" /etc/systemd/system/auto-hr.service
+            sudo cp -a "$RELEASE_ROOT/frontend/." /opt/auto-hr/frontend/
             sudo cp -a /opt/auto-hr/frontend/. "$DEPLOY_WEB_ROOT"/
-            sudo chmod 0755 /opt/auto-hr/start.sh
-            sudo install -m 0644 /opt/auto-hr/auto-hr.service /etc/systemd/system/auto-hr.service
             sudo systemctl daemon-reload
             sudo systemctl enable auto-hr
-            sudo systemctl restart auto-hr
+            if [ -f "$CURRENT_JAR" ]; then
+              sudo cp -a "$CURRENT_JAR" "$PREVIOUS_JAR"
+            else
+              sudo rm -f "$PREVIOUS_JAR"
+            fi
+            sudo systemctl stop auto-hr
+            if ! sudo mv -f "$NEXT_JAR" "$CURRENT_JAR"; then
+              echo "Could not activate the staged backend JAR; restarting the previous service." >&2
+              sudo systemctl start auto-hr
+              exit 1
+            fi
+            if ! sudo systemctl start auto-hr; then
+              if [ -f "$PREVIOUS_JAR" ]; then
+                echo "New backend could not start; restoring previous backend JAR." >&2
+                sudo mv -f "$PREVIOUS_JAR" "$CURRENT_JAR"
+                sudo systemctl start auto-hr
+              fi
+              exit 1
+            fi
             for attempt in $(seq 1 30); do
               if sudo systemctl is-active --quiet auto-hr && curl --fail --silent --show-error http://127.0.0.1:8081/api/auth/captcha >/dev/null; then
+                sudo rm -f "$PREVIOUS_JAR"
                 exit 0
               fi
               sleep 2
             done
-            sudo systemctl status auto-hr --no-pager
+            sudo systemctl status auto-hr --no-pager || true
+            if [ -f "$PREVIOUS_JAR" ]; then
+              echo "Deployment health check failed; restoring previous backend JAR." >&2
+              sudo systemctl stop auto-hr || true
+              sudo mv -f "$PREVIOUS_JAR" "$CURRENT_JAR"
+              sudo systemctl start auto-hr
+            fi
             exit 1
           REMOTE
