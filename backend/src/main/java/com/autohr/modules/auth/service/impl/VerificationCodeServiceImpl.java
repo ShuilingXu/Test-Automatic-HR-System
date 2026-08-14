@@ -10,7 +10,10 @@ import com.autohr.modules.auth.service.VerificationCodeService;
 import com.autohr.modules.auth.service.CaptchaService;
 import com.autohr.modules.auth.service.AuthRedisSecurityStore;
 import com.autohr.modules.system.service.SystemConfigService;
-import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.stereotype.Service;
@@ -22,9 +25,9 @@ import java.util.Map;
 import java.util.Properties;
 
 @Service
-@RequiredArgsConstructor
 public class VerificationCodeServiceImpl implements VerificationCodeService {
 
+    private static final Logger log = LoggerFactory.getLogger(VerificationCodeServiceImpl.class);
     private static final String[] CONFIG_KEYS = {
             "ALIYUN_SMS_ACCESS_KEY_ID", "ALIYUN_SMS_ACCESS_KEY_SECRET", "ALIYUN_SMS_ENDPOINT", "ALIYUN_SMS_SIGN_NAME", "ALIYUN_SMS_TEMPLATE_CODE",
             "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_SSL_ENABLED", "SMTP_STARTTLS_ENABLED"
@@ -39,6 +42,18 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
     private final SystemConfigService systemConfigService;
     private final CaptchaService captchaService;
     private final AuthRedisSecurityStore securityStore;
+    @Qualifier("verificationCodeExecutor")
+    private final TaskExecutor verificationCodeExecutor;
+
+    public VerificationCodeServiceImpl(SystemConfigService systemConfigService,
+                                       CaptchaService captchaService,
+                                       AuthRedisSecurityStore securityStore,
+                                       @Qualifier("verificationCodeExecutor") TaskExecutor verificationCodeExecutor) {
+        this.systemConfigService = systemConfigService;
+        this.captchaService = captchaService;
+        this.securityStore = securityStore;
+        this.verificationCodeExecutor = verificationCodeExecutor;
+    }
 
     @Override
     public void sendRegisterCode(String mobilePhone, String email, String captchaId, String captchaCode) {
@@ -51,8 +66,17 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
     }
 
     @Override
-    public void sendPasswordResetCode(String mobilePhone, String email, String captchaId, String captchaCode) {
-        sendCode(PASSWORD_RESET_PURPOSE, mobilePhone, email, captchaId, captchaCode);
+    public void sendPasswordResetCode(String mobilePhone, String email, String captchaId, String captchaCode, boolean deliver) {
+        String target = normalizeTarget(mobilePhone, email);
+        captchaService.verifyCaptcha(captchaId, captchaCode);
+        if (!deliver) {
+            return;
+        }
+        try {
+            verificationCodeExecutor.execute(() -> sendPasswordResetCodeSafely(target));
+        } catch (RuntimeException ex) {
+            log.warn("Password-reset verification delivery could not be scheduled");
+        }
     }
 
     @Override
@@ -63,6 +87,10 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
     private void sendCode(String purpose, String mobilePhone, String email, String captchaId, String captchaCode) {
         String target = normalizeTarget(mobilePhone, email);
         captchaService.verifyCaptcha(captchaId, captchaCode);
+        sendCode(purpose, target);
+    }
+
+    private void sendCode(String purpose, String target) {
         String code = String.format(Locale.ROOT, "%06d", SECURE_RANDOM.nextInt(1_000_000));
         boolean stored = securityStore.replaceVerificationCode(purpose, target, code, Instant.now().getEpochSecond(),
                 RESEND_SECONDS, EXPIRE_MINUTES * 60);
@@ -78,6 +106,14 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
         } catch (RuntimeException ex) {
             securityStore.discardVerificationCode(purpose, target, code);
             throw ex;
+        }
+    }
+
+    private void sendPasswordResetCodeSafely(String target) {
+        try {
+            sendCode(PASSWORD_RESET_PURPOSE, target);
+        } catch (RuntimeException ex) {
+            log.warn("Password-reset verification delivery failed");
         }
     }
 

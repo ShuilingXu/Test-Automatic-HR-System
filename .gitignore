@@ -10,6 +10,9 @@ node_modules/
 dist/
 .npm/
 *.local
+*.pid
+__pycache__/
+*.pyc
 
 # IDE
 .idea/
@@ -29,9 +32,14 @@ Thumbs.db
 # Env
 .env
 .env.local
+.env.*
+!.env.example
 .site-content.json
 *.log
 /backend/uploads/resumes
 /backend/uploads
+/backend/runtime/
+/logs/
+/backups/
 backend/LLM.txt
 release/

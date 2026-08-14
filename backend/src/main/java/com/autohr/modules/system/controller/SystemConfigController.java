@@ -59,7 +59,7 @@ public class SystemConfigController {
     public ApiResponse<Map<String, String>> saveConfig(@RequestBody Map<String, String> updates) {
         Map<String, String> safeUpdates = new LinkedHashMap<>(updates);
         safeUpdates.entrySet().removeIf(entry -> !CONFIG_KEY_SET.contains(entry.getKey()));
-        safeUpdates.entrySet().removeIf(e -> "****".equals(e.getValue()) || (e.getValue() != null && e.getValue().contains("****")));
+        safeUpdates.entrySet().removeIf(e -> "****".equals(e.getValue()));
         safeUpdates.entrySet().removeIf(e -> RETAIN_ON_BLANK_KEYS.contains(e.getKey()) && (e.getValue() == null || e.getValue().isBlank()));
         systemConfigService.saveConfig(safeUpdates);
         Map<String, String> config = systemConfigService.loadConfig(CONFIG_KEYS);

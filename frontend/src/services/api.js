@@ -20,6 +20,9 @@ request.interceptors.response.use(
     if (error.response?.status === 401) {
       window.localStorage.removeItem('demo-token')
       window.localStorage.removeItem('session-user')
+      if (window.location.pathname !== '/login') {
+        window.location.replace('/login')
+      }
     }
     const message = error.response?.data?.message || error.message || '请求失败'
     const wrapped = new Error(message)

@@ -169,7 +169,7 @@
             <el-form-item label="标题"><el-input v-model="contentForm.title" placeholder="例如：春季招聘开放" /></el-form-item>
             <el-form-item label="摘要"><el-input v-model="contentForm.summary" maxlength="140" show-word-limit placeholder="首页列表中展示的一句话" /></el-form-item>
             <el-form-item label="正文"><el-input v-model="contentForm.content" type="textarea" :rows="9" placeholder="支持纯文本，建议分段书写" /></el-form-item>
-            <div class="form-row"><el-form-item label="内容类型"><el-select v-model="contentForm.type"><el-option label="公告" value="announcement" /><el-option label="团队动态" value="story" /><el-option label="招聘说明" value="guide" /></el-select></el-form-item><el-form-item label="发布时间"><el-input v-model="contentForm.publishedAt" placeholder="2026-08-13 09:00" /></el-form-item></div>
+            <div class="form-row"><el-form-item label="内容类型"><el-select v-model="contentForm.type" :teleported="false"><el-option label="公告" value="announcement" /><el-option label="团队动态" value="story" /><el-option label="招聘说明" value="guide" /></el-select></el-form-item><el-form-item label="发布时间"><el-input v-model="contentForm.publishedAt" placeholder="2026-08-13 09:00" /></el-form-item></div>
             <el-form-item><el-checkbox v-model="contentForm.published">发布到首页</el-checkbox></el-form-item>
             <div class="action-row"><el-button type="primary" @click="saveContent">保存内容</el-button><el-button @click="resetContentForm">新建内容</el-button></div>
           </el-form>
@@ -235,10 +235,10 @@ const tabs = computed(() => {
     { key: 'dashboard', label: '总览', to: '/admin/dashboard' },
     { key: 'departments', label: '部门', to: '/admin/departments' },
     { key: 'employees', label: '员工', to: '/admin/employees' },
-    { key: 'content', label: '站点内容', to: '/admin/content' },
     { key: 'recruitment', label: '招聘', to: '/admin/recruitment/jobs' },
   ]
   if (isItAdmin.value || isHrAdmin.value) {
+    base.splice(3, 0, { key: 'content', label: '站点内容', to: '/admin/content' })
     base.unshift({ key: 'audit', label: '审计日志', to: '/admin/audit' })
     base.unshift({ key: 'users', label: '用户管理中心', to: '/admin/users' })
   }
@@ -490,7 +490,15 @@ async function deleteUser(row) {
     if (error !== 'cancel' && error !== 'close') fail(error)
   }
 }
-async function logout() { try { await authApi.logout(); router.push('/login') } catch (error) { fail(error) } }
+async function logout() {
+  try {
+    await authApi.logout()
+  } catch (error) {
+    fail(error)
+  } finally {
+    router.push('/login')
+  }
+}
 function cleanParams(source) { return Object.fromEntries(Object.entries(source).filter(([, value]) => value !== '' && value !== null && value !== undefined)) }
 function resolveActionCode(value) {
   if (!value) return ''

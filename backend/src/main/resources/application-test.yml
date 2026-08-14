@@ -1,7 +1,11 @@
-spring:
-  datasource:
+app:
+  database:
+    type: sqlite
     url: jdbc:sqlite:autohr-test.db
-    driver-class-name: org.sqlite.JDBC
+    fallback-enabled: false
+
+jwt:
+  secret: AUTOHR_TEST_ONLY_JWT_SECRET_WITH_AT_LEAST_32_CHARACTERS
 
 logging:
   level:

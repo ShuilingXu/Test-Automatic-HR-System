@@ -116,8 +116,13 @@ async function saveProfile() {
 }
 
 async function logout() {
-  await authApi.logout()
-  router.push('/login')
+  try {
+    await authApi.logout()
+  } catch (error) {
+    ElMessage.error(error.message || '退出登录失败')
+  } finally {
+    router.push('/login')
+  }
 }
 
 function openApplication(item) {

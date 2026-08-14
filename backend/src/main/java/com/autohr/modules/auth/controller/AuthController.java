@@ -70,9 +70,9 @@ public class AuthController {
     @PostMapping("/password-reset/code")
     public ApiResponse<Void> sendPasswordResetCode(HttpServletRequest httpRequest, @RequestBody VerificationCodeRequest request) {
         authRateLimitService.checkVerificationSend(httpRequest, "password-reset", request.getMobilePhone(), request.getEmail());
-        if (authService.canResetPassword(request.getMobilePhone(), request.getEmail())) {
-            verificationCodeService.sendPasswordResetCode(request.getMobilePhone(), request.getEmail(), request.getCaptchaId(), request.getCaptchaCode());
-        }
+        boolean deliver = authService.canResetPassword(request.getMobilePhone(), request.getEmail());
+        verificationCodeService.sendPasswordResetCode(request.getMobilePhone(), request.getEmail(),
+                request.getCaptchaId(), request.getCaptchaCode(), deliver);
         return ApiResponse.success("如该联系方式已绑定账号，验证码将很快发送", null);
     }
 

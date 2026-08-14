@@ -350,11 +350,14 @@ start_backend() {
   (cd "$BACKEND_DIR" && mvn -q -DskipTests package)
 
   local jar_file
-  jar_file="$(find "$BACKEND_DIR/target" -maxdepth 1 -name '*.jar' ! -name '*.original' | head -n 1)"
-  if [ -z "$jar_file" ]; then
-    echo "Backend jar was not found."
+  local -a jar_files=()
+  mapfile -t jar_files < <(find "$BACKEND_DIR/target" -maxdepth 1 -type f -name '*.jar' ! -name '*.original' -print)
+  if [ "${#jar_files[@]}" -ne 1 ]; then
+    echo "Expected exactly one backend jar; found ${#jar_files[@]}." >&2
+    printf '%s\n' "${jar_files[@]}" >&2
     exit 1
   fi
+  jar_file="${jar_files[0]}"
 
   echo "Starting backend on http://0.0.0.0:$BACKEND_PORT ..."
   nohup java -jar "$jar_file" --server.port="$BACKEND_PORT" > "$LOG_DIR/backend.log" 2>&1 &
