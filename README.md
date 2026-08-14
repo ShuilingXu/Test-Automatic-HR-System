@@ -228,7 +228,7 @@ npm.cmd run build
 2. 进入 `/interview/hr` 的 LLM 配置模块。
 3. 分别配置模型角色：`INTERVIEWER` 和 `SCORER`。
 4. 填写模型名称、Base URL、API Key、提示词模板和评分规则。
-5. `INTERVIEWER` 用于生成追问和面试官评价，`SCORER` 用于评分。
+5. `INTERVIEWER` 用于生成追问和面试官评价，`SCORER` 用于评分。评分器必须只返回包含 `score`（0-100 整数）和 `reason`（非空评分理由）的严格 JSON；缺少理由的模型输出会被标记为可重试失败。
 
 API Key 使用 AES-GCM 加密后落库；`CONFIG_ENCRYPTION_KEY` 未配置时复用 `JWT_SECRET` 派生密钥，因此上线后必须稳定保存所选密钥。LLM Endpoint 默认仅允许可解析到公网地址的 `http/https` URL，以阻止回环和内网 SSRF；仅当模型确实位于可信 VPC 时设置 `LLM_ALLOW_PRIVATE_ADDRESSES=true`。如果未正确配置 LLM，AI 面试相关功能可能无法正常生成问题或评分。
 
