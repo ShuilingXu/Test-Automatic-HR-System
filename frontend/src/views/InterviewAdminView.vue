@@ -187,7 +187,13 @@
           <el-table-column prop="processStatusView" label="状态展示" />
           <el-table-column prop="aiAverageScore" label="AI均分" />
           <el-table-column prop="overallStatus" label="总状态" />
-          <el-table-column label="操作" width="120"><template #default="scope"><el-button text @click.stop="openProcess(scope.row)">进入面试界面</el-button></template></el-table-column>
+          <el-table-column label="操作" min-width="250">
+            <template #default="scope">
+              <el-button text @click.stop="openProcess(scope.row)">进入面试界面</el-button>
+              <el-button v-if="isAiApprovalPending(scope.row)" text type="primary" @click.stop="approveAi(scope.row, 1)">AI审批通过</el-button>
+              <el-button v-if="isAiApprovalPending(scope.row)" text type="danger" @click.stop="approveAi(scope.row, 0)">AI审批不通过</el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </section>
 
@@ -291,8 +297,8 @@
               <p>切屏次数：{{ selectedProcess.antiCheatSwitchCount || 0 }} / {{ selectedProcess.antiCheatSwitchLimit || 5 }}</p>
             </div>
             <div class="action-button-grid">
-              <el-button v-if="canApproveAi" @click="approveAi(1)">{{ selectedProcess.stageName || 'AI 面试' }}人工通过</el-button>
-              <el-button v-if="canApproveAi" @click="approveAi(0)">{{ selectedProcess.stageName || 'AI 面试' }}人工不通过</el-button>
+              <el-button v-if="canApproveAi" type="primary" @click="approveAi(selectedProcess, 1)">AI审批通过</el-button>
+              <el-button v-if="canApproveAi" type="danger" plain @click="approveAi(selectedProcess, 0)">AI审批不通过</el-button>
               <el-button v-if="canStartVideo" @click="startHrVideoCall">开始视频面</el-button>
               <el-button v-if="canStopVideo" @click="stopHrRecording">结束并上传录制</el-button>
               <el-button v-if="canApproveVideo" @click="approveVideo(1)">{{ selectedProcess.stageName || '视频面试' }}通过</el-button>
@@ -429,7 +435,7 @@ const modelTabs = [
 const currentModel = computed(() => modelTabs.find((item) => item.role === modelTab.value) || modelTabs[0])
 
 const canTerminate = computed(() => selectedProcess.value?.overallStatus === 'IN_PROGRESS')
-const canApproveAi = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'AI' && selectedProcess.value?.stageStatus === 'WAITING_APPROVAL')
+const canApproveAi = computed(() => isAiApprovalPending(selectedProcess.value))
 const canStartVideo = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'VIDEO' && selectedProcess.value?.videoJoinLink && !videoActive.value)
 const canStopVideo = computed(() => videoActive.value)
 const canApproveVideo = computed(() => canTerminate.value && selectedProcess.value?.currentStage === 'VIDEO' && ['WAITING_APPROVAL', 'RECORDED'].includes(selectedProcess.value?.sessionStatus))
@@ -454,6 +460,7 @@ function summaryLines(markdown) {
   })
 }
 function resumeLlmStatusLabel(status) { return ({ PENDING: '评分中', COMPLETED: '已完成', FAILED: '评分失败' })[status] || '-' }
+function isAiApprovalPending(process) { return process?.overallStatus === 'IN_PROGRESS' && process?.currentStage === 'AI' && process?.stageStatus === 'WAITING_APPROVAL' }
 async function loadAll() {
   try {
     sessionUser.value = (await authApi.getSession()).data
@@ -533,7 +540,7 @@ async function loadProcessDetail(row) {
   aiRecords.value = (await interviewApi.listAiRecords({ processId: row.id })).data
   selectedCandidate.value = row.recruitmentCandidateId ? (await recruitmentApi.getCandidate(row.recruitmentCandidateId)).data : null
 }
-async function approveAi(approved) { try { await interviewApi.approveAi(selectedProcess.value.id, { approved }); ElMessage.success(`${selectedProcess.value?.stageName || 'AI面试'}审批完成`); await loadAll() } catch (error) { fail(error) } }
+async function approveAi(process, approved) { try { await interviewApi.approveAi(process.id, { approved }); ElMessage.success(`${process.stageName || 'AI面试'}审批完成`); await loadAll() } catch (error) { fail(error) } }
 async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved }); ElMessage.success(`${selectedProcess.value?.stageName || '视频面试'}审批完成`); await loadAll() } catch (error) { fail(error) } }
 async function approveOnsite(approved) { try { await interviewApi.approveOnsite(selectedProcess.value.id, { approved }); ElMessage.success('线下面审批完成'); await loadAll() } catch (error) { fail(error) } }
 async function terminateProcess() { try { await interviewApi.terminateProcess(selectedProcess.value.id, { approved: 0 }); ElMessage.success('流程已终止'); await loadAll() } catch (error) { fail(error) } }
