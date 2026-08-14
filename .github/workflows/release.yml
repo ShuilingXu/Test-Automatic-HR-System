@@ -87,8 +87,17 @@ jobs:
             sudo python3 -c 'import zipfile; zipfile.ZipFile("/tmp/auto-hr-release.zip").extractall("/tmp/auto-hr-release")'
             sudo cp -a /tmp/auto-hr-release/auto-hr-release/. /opt/auto-hr/
             sudo cp -a /opt/auto-hr/frontend/. "$DEPLOY_WEB_ROOT"/
+            sudo chmod 0755 /opt/auto-hr/start.sh
             sudo install -m 0644 /opt/auto-hr/auto-hr.service /etc/systemd/system/auto-hr.service
             sudo systemctl daemon-reload
             sudo systemctl enable auto-hr
             sudo systemctl restart auto-hr
+            for attempt in $(seq 1 30); do
+              if sudo systemctl is-active --quiet auto-hr && curl --fail --silent --show-error http://127.0.0.1:8081/api/auth/captcha >/dev/null; then
+                exit 0
+              fi
+              sleep 2
+            done
+            sudo systemctl status auto-hr --no-pager
+            exit 1
           REMOTE

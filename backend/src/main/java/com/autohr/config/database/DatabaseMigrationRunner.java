@@ -45,7 +45,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         }
         List<String> statements = loadStatements();
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
-            for (String sql : statements) {
+            for (String sql : statements.stream().filter(sql -> !isCreateIndex(sql)).toList()) {
                 execute(statement, sql);
             }
             migrateInterviewProcessColumns(connection, statement);
@@ -53,6 +53,9 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
             migrateInterviewVideoSessionColumns(connection, statement);
             migrateInterviewProcessStageColumns(connection, statement);
             migrateRecruitmentCandidateColumns(connection, statement);
+            for (String sql : statements.stream().filter(this::isCreateIndex).toList()) {
+                execute(statement, sql);
+            }
         }
         log.info("Database migration completed for {}", activeDatabase.type());
     }
@@ -103,6 +106,10 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
                     || messageContains(ex, "Duplicate key name");
         }
         return false;
+    }
+
+    private boolean isCreateIndex(String sql) {
+        return sql.stripLeading().toUpperCase().startsWith("CREATE INDEX");
     }
 
     private void migrateInterviewProcessColumns(Connection connection, Statement statement) throws SQLException {
@@ -160,7 +167,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "recruitment_candidate", "resume_llm_score", "INTEGER");
         addColumnIfMissing(connection, statement, "recruitment_candidate", "resume_llm_comment", "VARCHAR(2000)");
         addColumnIfMissing(connection, statement, "recruitment_candidate", "resume_llm_status", "VARCHAR(32)");
-        addColumnIfMissing(connection, statement, "recruitment_candidate", "resume_llm_evaluated_at", "DATETIME");
+        addColumnIfMissing(connection, statement, "recruitment_candidate", "resume_llm_evaluated_at", dateTimeType());
     }
 
     private void addColumnIfMissing(Connection connection, Statement statement, String table, String column, String definition) throws SQLException {
