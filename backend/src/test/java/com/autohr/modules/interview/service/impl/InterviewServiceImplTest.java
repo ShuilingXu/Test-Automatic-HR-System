@@ -244,6 +244,20 @@ class InterviewServiceImplTest {
     }
 
     @Test
+    void acceptsStrictJsonScorerEvaluationWithReason() {
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(service, "parseScorerEvaluation",
+                "{\"score\":85,\"reason\":\"回答覆盖主要知识点，步骤准确且说明了适用边界。\"}"));
+    }
+
+    @Test
+    void rejectsScorerEvaluationWithoutReason() {
+        BusinessException error = assertThrows(BusinessException.class, () -> ReflectionTestUtils.invokeMethod(
+                service, "parseScorerEvaluation", "{\"score\":85}"));
+
+        assertTrue(error.getMessage().contains("reason"));
+    }
+
+    @Test
     void rejectsKnowledgeCsvLargerThanFiveMegabytes() {
         InterviewKnowledgeBase base = new InterviewKnowledgeBase();
         base.setId(7L);

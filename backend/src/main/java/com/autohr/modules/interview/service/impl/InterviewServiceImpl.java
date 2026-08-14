@@ -2445,9 +2445,9 @@ public class InterviewServiceImpl implements InterviewService {
 
         if (!needNextQuestion) {
             String scorerPrompt = basePrompt + dataBoundaryRule
-                    + "\n请严格基于用户消息中的数据评分。只返回JSON对象，格式为{\"score\":整数0到100}，不要输出Markdown或额外文本。";
+                    + "\n请严格基于用户消息中的数据评分。只返回JSON对象，格式为{\"score\":整数0到100,\"reason\":\"评分理由\"}。reason必须是具体、简洁的中文评分依据，不能留空；不要输出Markdown或额外文本。";
             String response = callOpenAiChat(config, scorerPrompt, userPrompt);
-            return new LlmEvaluation(parseScore(response), "", "");
+            return parseScorerEvaluation(response);
         }
 
         String systemPrompt = basePrompt + dataBoundaryRule
@@ -2457,10 +2457,6 @@ public class InterviewServiceImpl implements InterviewService {
                 + "本JSON格式要求优先于旧配置中的输出格式要求。";
         String response = chunkConsumer == null ? callOpenAiChat(config, systemPrompt, userPrompt) : callOpenAiChatStream(config, systemPrompt, userPrompt, chunkConsumer);
         return parseEvaluation(response);
-    }
-
-    private int parseScore(String response) {
-        return requireLlmScore(readStrictLlmJson(response));
     }
 
     private int normalizeScore(long score) {
@@ -2490,6 +2486,20 @@ public class InterviewServiceImpl implements InterviewService {
         }
         String nextQuestion = nextQuestionNode.textValue().trim();
         return new LlmEvaluation(score, comment, nextQuestion);
+    }
+
+    private LlmEvaluation parseScorerEvaluation(String response) {
+        JsonNode json = readStrictLlmJson(response);
+        int score = requireLlmScore(json);
+        JsonNode reasonNode = json.get("reason");
+        if (reasonNode == null || !reasonNode.isTextual() || StrUtil.isBlank(reasonNode.textValue())) {
+            throw new BusinessException("LLM评分JSON缺少有效reason");
+        }
+        String reason = reasonNode.textValue().trim();
+        if (reason.length() > MAX_INTERVIEWER_COMMENT_LENGTH) {
+            throw new BusinessException("LLM评分reason超过长度限制");
+        }
+        return new LlmEvaluation(score, reason, "");
     }
 
     private JsonNode readStrictLlmJson(String response) {

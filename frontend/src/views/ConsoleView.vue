@@ -1,18 +1,6 @@
 <template>
-  <div class="page-shell console-shell">
-    <aside class="console-side">
-      <p class="page-eyebrow">Auto HR Console</p>
-      <h1>管理后台</h1>
-      <nav>
-        <RouterLink v-for="item in tabs" :key="item.key" class="side-link" :class="{ active: activeTab === item.key }" :to="item.to">
-          {{ item.label }}
-        </RouterLink>
-      </nav>
-      <el-button class="side-link logout-btn" @click="logout">退出登录</el-button>
-      <RouterLink class="side-link" to="/interview/hr/processes">面试流程</RouterLink>
-    </aside>
-
-    <main class="console-main">
+  <AdminNav />
+  <main class="console-main">
       <section v-if="activeTab === 'dashboard'" class="page-card">
         <div class="topline">
           <div>
@@ -213,7 +201,7 @@
           <el-table :data="candidates" stripe class="data-table" @row-click="openCandidate"><el-table-column prop="id" label="候选人ID" min-width="100" /><el-table-column prop="fullName" label="报名者姓名" min-width="120" /><el-table-column prop="mobilePhone" label="联系电话" min-width="130" /><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="interviewStageStatus" label="面试状态" min-width="120" /><el-table-column label="LLM简历评分" min-width="120"><template #default="scope"><span>{{ scope.row.resumeLlmScore ?? resumeLlmStatusLabel(scope.row.resumeLlmStatus) }}</span></template></el-table-column><el-table-column prop="interviewProcessId" label="流程流水号" min-width="120" /><el-table-column label="简历" min-width="150"><template #default="scope"><el-button v-if="scope.row.resumeFileId" text class="resume-link" @click.stop="openResume(scope.row.resumeFileId)">{{ scope.row.resumeFileName || '查看简历' }}</el-button><span v-else>未上传</span></template></el-table-column><el-table-column label="操作" width="460"><template #default="scope"><el-button text @click.stop="openCandidate(scope.row)">查看详情</el-button><el-button text :disabled="!canReevaluateResumeLlm(scope.row)" @click.stop="reevaluateResumeLlm(scope.row.id)">{{ resumeLlmReevaluateLabel(scope.row) }}</el-button><el-button text @click.stop="startCandidateInterview(scope.row)">发起面试</el-button><el-button text type="danger" @click.stop="rejectCandidateResume(scope.row.id)">简历拒绝</el-button><el-button text type="danger" @click.stop="deleteCandidate(scope.row.id)">删除候选人</el-button></template></el-table-column><el-table-column prop="applicationStatus" label="状态" width="110" /></el-table>
         </template>
       </section>
-    </main>
+  </main>
     <el-dialog v-model="templateDialogVisible" title="选择面试流程" width="min(560px, calc(100vw - 32px))" destroy-on-close>
       <p class="dialog-intro">选择流程模板后，系统会为该候选人创建独立的面试阶段快照；留空则沿用旧流程。</p>
       <el-form label-position="top"><el-form-item label="流程模板（可选）"><el-select v-model="selectedTemplateId" clearable placeholder="不选择则沿用旧流程"><el-option v-for="item in enabledProcessTemplates" :key="item.id" :label="item.templateName" :value="item.id"><span>{{ item.templateName }}</span><small class="template-option-detail">{{ templateStageSummary(item) }}</small></el-option></el-select></el-form-item></el-form>
@@ -227,13 +215,13 @@
         <el-table-column prop="message" label="明细" min-width="260" />
       </el-table>
     </el-dialog>
-  </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import AdminNav from '../components/AdminNav.vue'
 import { authApi, downloadBlob, hrApi, interviewApi, recruitmentApi, siteContentApi } from '../services/api'
 import { readSessionUser, writeSessionUser } from '../utils/session'
 import { isStrongPassword, strongPasswordMessage } from '../utils/password'
@@ -243,23 +231,6 @@ const route = useRoute()
 const sessionUser = ref(readSessionUser())
 const isItAdmin = computed(() => sessionUser.value?.roleCode === 'IT_ADMIN')
 const isHrAdmin = computed(() => sessionUser.value?.roleCode === 'HR_ADMIN')
-const tabs = computed(() => {
-  const base = [
-    { key: 'dashboard', label: '总览', to: '/admin/dashboard' },
-    { key: 'departments', label: '部门', to: '/admin/departments' },
-    { key: 'employees', label: '员工', to: '/admin/employees' },
-    { key: 'recruitment', label: '招聘', to: '/admin/recruitment/jobs' },
-    { key: 'payroll', label: '薪资计算', to: '/admin/payroll' },
-    { key: 'statistics', label: '员工统计', to: '/admin/statistics' },
-  ]
-  if (isItAdmin.value || isHrAdmin.value) {
-    base.splice(3, 0, { key: 'content', label: '站点内容', to: '/admin/content' })
-    base.unshift({ key: 'audit', label: '审计日志', to: '/admin/audit' })
-    base.unshift({ key: 'users', label: '用户管理中心', to: '/admin/users' })
-  }
-  return base
-})
-
 const activeTab = computed(() => route.meta.consoleTab || 'dashboard')
 const departmentMode = ref('create')
 const employeeMode = ref('create')
@@ -511,15 +482,6 @@ async function deleteUser(row) {
     if (error !== 'cancel' && error !== 'close') fail(error)
   }
 }
-async function logout() {
-  try {
-    await authApi.logout()
-  } catch (error) {
-    fail(error)
-  } finally {
-    router.push('/login')
-  }
-}
 function cleanParams(source) { return Object.fromEntries(Object.entries(source).filter(([, value]) => value !== '' && value !== null && value !== undefined)) }
 function resolveActionCode(value) {
   if (!value) return ''
@@ -559,18 +521,7 @@ function syncRouteState() {
 </script>
 
 <style scoped>
-.console-shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 24px; }
-.console-side { position: sticky; top: 32px; z-index: 2; min-width: 0; background: #164f46; color: #f5f8f5; border-radius: var(--radius-lg); padding: 24px; display: flex; flex-direction: column; gap: 12px; min-height: calc(100vh - 64px); box-shadow: var(--shadow-card); }
-.console-side h1 { margin: 0; line-height: 1.1; font-size: 22px; color: #f8fafc; }
-.console-side .page-eyebrow { color: rgba(220, 242, 230, 0.66); }
-.console-side nav { display: grid; gap: 6px; margin-top: 4px; }
-.console-side .side-link { color: rgba(248,250,252,0.8); background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.1); justify-content: flex-start; }
-.console-side .side-link:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.2); color: #f8fafc; }
-.console-side .side-link.active { background: #d7ede1; border-color: rgba(255,255,255,0.9); color: #164f46; }
-.console-side .el-button { color: rgba(248,250,252,0.8); background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.1); justify-content: flex-start; }
-.console-side .el-button:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.2); color: #f8fafc; }
-.logout-btn { margin-top: auto; }
-.console-main { min-width: 0; display: grid; gap: 18px; }
+.console-main { min-width: 0; min-height: calc(100vh - 61px); display: grid; gap: 18px; max-width: 1440px; margin: 0 auto; padding: 30px 28px 48px; }
 .topline { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
 .topline h2 { margin: 6px 0 0; }
 .metric-grid { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 14px; }
@@ -612,7 +563,8 @@ function syncRouteState() {
 .dialog-intro { margin: 0 0 18px; color: var(--text-muted); line-height: 1.7; }.template-preview { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-soft); }.template-preview span, .template-option-detail { color: var(--text-muted); font-size: 12px; }.template-option-detail { display: block; margin-top: 3px; }
 @media (max-width: 1200px) { .audit-grid { grid-template-columns: 1fr; } }
 @media (max-width: 1200px) { .metric-grid { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
-@media (max-width: 980px) { .console-shell { grid-template-columns: 1fr; } .console-side { position: relative; top: auto; min-height: auto; } .form-grid, .content-editor-layout { grid-template-columns: 1fr; } }
+@media (max-width: 980px) { .form-grid, .content-editor-layout { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .console-main { padding: 22px 14px 36px; } }
 @media (max-width: 640px) { .form-row { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .metric-grid { grid-template-columns: 1fr; } }
 </style>
