@@ -75,12 +75,15 @@ export const authApi = {
   login(payload) { return request.post('/auth/login', payload) },
   register(payload) { return request.post('/auth/register', payload) },
   sendRegisterCode(payload) { return request.post('/auth/register/code', payload) },
+  sendPasswordResetCode(payload) { return request.post('/auth/password-reset/code', payload) },
+  resetPassword(payload) { return request.post('/auth/password-reset', payload) },
   getSession() { return request.get('/auth/me') },
   changePassword(payload) { return request.post('/auth/change-password', payload) },
   updateProfile(payload) { return request.post('/auth/profile', payload) },
   listUsers(params) { return request.get('/auth/admin/users', { params }) },
   listAuditLogs(params) { return request.get('/auth/admin/audit-logs', { params }) },
   updateUser(id, payload) { return request.post(`/auth/admin/users/${id}`, payload) },
+  deleteUser(id) { return request.delete(`/auth/admin/users/${id}`) },
   logout() {
     return request.post('/auth/logout').finally(() => {
       window.localStorage.removeItem('demo-token')

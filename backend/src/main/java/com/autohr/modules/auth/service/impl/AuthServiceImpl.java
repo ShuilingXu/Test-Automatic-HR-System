@@ -7,6 +7,7 @@ import com.autohr.modules.auth.dto.CandidateRegisterRequest;
 import com.autohr.modules.auth.dto.LoginRequest;
 import com.autohr.modules.auth.dto.LoginResponse;
 import com.autohr.modules.auth.dto.PasswordChangeRequest;
+import com.autohr.modules.auth.dto.PasswordResetRequest;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.dto.UserAdminUpdateRequest;
 import com.autohr.modules.auth.entity.SysUser;
@@ -23,19 +24,31 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
+
+    private static final Set<String> DEFAULT_USERNAMES = Set.of("itadmin", "hradmin", "hruser");
+    private static final List<String> USER_REFERENCE_QUERIES = List.of(
+            "SELECT COUNT(*) FROM recruitment_candidate WHERE interviewee_user_id = ?",
+            "SELECT COUNT(*) FROM interview_process WHERE interviewee_user_id = ? OR approved_hr_user_id = ?",
+            "SELECT COUNT(*) FROM interview_video_session WHERE approver_user_id = ?",
+            "SELECT COUNT(*) FROM interview_process_stage WHERE approved_hr_user_id = ?"
+    );
 
     private final SysUserMapper sysUserMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final VerificationCodeService verificationCodeService;
     private final CaptchaService captchaService;
+    private final JdbcTemplate jdbcTemplate;
 
     @Override
     public LoginResponse login(LoginRequest request) {
@@ -164,6 +177,41 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
+    public void deleteUserByAdmin(Long id, Long operatorId, String operatorRoleCode) {
+        SysUser user = requireUser(id);
+        assertAdminCanManageUser(user, operatorRoleCode);
+        if (Objects.equals(user.getId(), operatorId)) {
+            throw new BusinessException("不能删除当前登录用户");
+        }
+        if (DEFAULT_USERNAMES.contains(user.getUsername())) {
+            throw new BusinessException("默认账号不能删除");
+        }
+        if (hasLinkedBusinessData(user.getId())) {
+            throw new BusinessException("该用户已有候选人、面试或审批记录，不能删除");
+        }
+        sysUserMapper.deleteById(user.getId());
+    }
+
+    @Override
+    public boolean canResetPassword(String mobilePhone, String email) {
+        return findActiveUserByContact(mobilePhone, email) != null;
+    }
+
+    @Override
+    @Transactional
+    public void resetPassword(PasswordResetRequest request) {
+        SysUser user = findActiveUserByContact(request.getMobilePhone(), request.getEmail());
+        if (user == null) {
+            throw new BusinessException("验证码无效或已过期");
+        }
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        user.setMustChangePassword(0);
+        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
+        sysUserMapper.updateById(user);
+    }
+
+    @Override
+    @Transactional
     public LoginResponse changePassword(String username, PasswordChangeRequest request) {
         SysUser user = requireUserByUsername(username);
         if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
@@ -209,6 +257,39 @@ public class AuthServiceImpl implements AuthService {
         return sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
                 .eq(SysUser::getUsername, username)
                 .last("LIMIT 1"));
+    }
+
+    private SysUser findActiveUserByContact(String mobilePhone, String email) {
+        boolean hasPhone = StrUtil.isNotBlank(mobilePhone);
+        boolean hasEmail = StrUtil.isNotBlank(email);
+        if (hasPhone == hasEmail) {
+            throw new BusinessException("手机号和邮箱必须择一提供");
+        }
+        LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getStatus, 1)
+                .eq(hasPhone, SysUser::getMobilePhone, mobilePhone == null ? null : mobilePhone.trim())
+                .apply(hasEmail, "LOWER(email) = {0}", email == null ? null : email.trim().toLowerCase(Locale.ROOT));
+        List<SysUser> matches = sysUserMapper.selectList(wrapper);
+        return matches.size() == 1 ? matches.get(0) : null;
+    }
+
+    private void assertAdminCanManageUser(SysUser user, String operatorRoleCode) {
+        if (StrUtil.equals(operatorRoleCode, "HR_ADMIN")
+                && !(StrUtil.equals(user.getRoleCode(), "HR_USER") || StrUtil.equals(user.getRoleCode(), "INTERVIEWEE"))) {
+            throw new BusinessException("HR管理员仅可维护HR用户和面试者用户");
+        }
+    }
+
+    private boolean hasLinkedBusinessData(Long userId) {
+        for (String query : USER_REFERENCE_QUERIES) {
+            Integer count = query.contains(" OR ")
+                    ? jdbcTemplate.queryForObject(query, Integer.class, userId, userId)
+                    : jdbcTemplate.queryForObject(query, Integer.class, userId);
+            if (count != null && count > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private SysUser requireUser(Long id) {

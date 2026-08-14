@@ -8,6 +8,7 @@ import com.autohr.modules.auth.dto.AuditLogVO;
 import com.autohr.modules.auth.dto.LoginRequest;
 import com.autohr.modules.auth.dto.LoginResponse;
 import com.autohr.modules.auth.dto.PasswordChangeRequest;
+import com.autohr.modules.auth.dto.PasswordResetRequest;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.dto.UserAdminUpdateRequest;
 import com.autohr.modules.auth.dto.VerificationCodeRequest;
@@ -19,6 +20,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -57,6 +59,21 @@ public class AuthController {
     public ApiResponse<Void> sendRegisterCode(@RequestBody VerificationCodeRequest request) {
         verificationCodeService.sendRegisterCode(request.getMobilePhone(), request.getEmail(), request.getCaptchaId(), request.getCaptchaCode());
         return ApiResponse.success("验证码已发送", null);
+    }
+
+    @PostMapping("/password-reset/code")
+    public ApiResponse<Void> sendPasswordResetCode(@RequestBody VerificationCodeRequest request) {
+        if (authService.canResetPassword(request.getMobilePhone(), request.getEmail())) {
+            verificationCodeService.sendPasswordResetCode(request.getMobilePhone(), request.getEmail(), request.getCaptchaId(), request.getCaptchaCode());
+        }
+        return ApiResponse.success("如该联系方式已绑定账号，验证码将很快发送", null);
+    }
+
+    @PostMapping("/password-reset")
+    public ApiResponse<Void> resetPassword(@Valid @RequestBody PasswordResetRequest request) {
+        verificationCodeService.verifyPasswordResetCode(request.getMobilePhone(), request.getEmail(), request.getVerificationCode());
+        authService.resetPassword(request);
+        return ApiResponse.success("密码已重置，请使用新密码登录", null);
     }
 
     @GetMapping("/me")
@@ -101,6 +118,14 @@ public class AuthController {
         String action = request.getNewPassword() == null || request.getNewPassword().isBlank() ? "UPDATE_USER" : "RESET_USER_PASSWORD";
         auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "ADMIN", action, "SYS_USER", String.valueOf(updated.getId()), updated.getUsername());
         return ApiResponse.success(updated);
+    }
+
+    @DeleteMapping("/admin/users/{id}")
+    public ApiResponse<Void> deleteUser(Authentication authentication, @PathVariable Long id) {
+        SessionUserVO current = authService.loadUserByUsername(authentication.getName());
+        authService.deleteUserByAdmin(id, current.getId(), current.getRoleCode());
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "ADMIN", "DELETE_USER", "SYS_USER", String.valueOf(id), "deleted user");
+        return ApiResponse.success("用户已删除", null);
     }
 
     @GetMapping("/admin/audit-logs")

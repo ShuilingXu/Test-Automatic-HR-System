@@ -31,6 +31,8 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
     };
     private static final int EXPIRE_MINUTES = 5;
     private static final int RESEND_SECONDS = 60;
+    private static final String REGISTER_PURPOSE = "register";
+    private static final String PASSWORD_RESET_PURPOSE = "password-reset";
 
     private final Map<String, CodeRecord> codeStore = new ConcurrentHashMap<>();
     private final SystemConfigService systemConfigService;
@@ -38,10 +40,30 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
 
     @Override
     public void sendRegisterCode(String mobilePhone, String email, String captchaId, String captchaCode) {
+        sendCode(REGISTER_PURPOSE, mobilePhone, email, captchaId, captchaCode);
+    }
+
+    @Override
+    public void verifyRegisterCode(String mobilePhone, String email, String code) {
+        verifyCode(REGISTER_PURPOSE, mobilePhone, email, code);
+    }
+
+    @Override
+    public void sendPasswordResetCode(String mobilePhone, String email, String captchaId, String captchaCode) {
+        sendCode(PASSWORD_RESET_PURPOSE, mobilePhone, email, captchaId, captchaCode);
+    }
+
+    @Override
+    public void verifyPasswordResetCode(String mobilePhone, String email, String code) {
+        verifyCode(PASSWORD_RESET_PURPOSE, mobilePhone, email, code);
+    }
+
+    private void sendCode(String purpose, String mobilePhone, String email, String captchaId, String captchaCode) {
         cleanupExpiredCodes();
         captchaService.verifyCaptcha(captchaId, captchaCode);
         String target = normalizeTarget(mobilePhone, email);
-        CodeRecord oldRecord = codeStore.get(target);
+        String codeKey = codeKey(purpose, target);
+        CodeRecord oldRecord = codeStore.get(codeKey);
         if (oldRecord != null && oldRecord.sentAt().plusSeconds(RESEND_SECONDS).isAfter(LocalDateTime.now())) {
             throw new BusinessException("验证码发送过于频繁，请稍后再试");
         }
@@ -52,25 +74,29 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
             sendEmail(target.substring(6), code);
         }
         LocalDateTime now = LocalDateTime.now();
-        codeStore.put(target, new CodeRecord(code, now, now.plusMinutes(EXPIRE_MINUTES)));
+        codeStore.put(codeKey, new CodeRecord(code, now, now.plusMinutes(EXPIRE_MINUTES)));
     }
 
-    @Override
-    public void verifyRegisterCode(String mobilePhone, String email, String code) {
+    private void verifyCode(String purpose, String mobilePhone, String email, String code) {
         cleanupExpiredCodes();
         String target = normalizeTarget(mobilePhone, email);
-        CodeRecord record = codeStore.get(target);
+        String codeKey = codeKey(purpose, target);
+        CodeRecord record = codeStore.get(codeKey);
         if (record == null) {
             throw new BusinessException("验证码已过期，请重新获取");
         }
         if (record.expiresAt().isBefore(LocalDateTime.now())) {
-            codeStore.remove(target, record);
+            codeStore.remove(codeKey, record);
             throw new BusinessException("验证码已过期，请重新获取");
         }
         if (!StrUtil.equals(record.code(), code)) {
             throw new BusinessException("验证码错误");
         }
-        codeStore.remove(target);
+        codeStore.remove(codeKey);
+    }
+
+    private String codeKey(String purpose, String target) {
+        return purpose + ':' + target;
     }
 
     private String normalizeTarget(String mobilePhone, String email) {
@@ -135,8 +161,8 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(StrUtil.blankToDefault(config.get("SMTP_FROM"), config.get("SMTP_USERNAME")));
         message.setTo(email);
-        message.setSubject("面试系统注册验证码");
-        message.setText("您的面试系统注册验证码为：" + code + "，有效期" + EXPIRE_MINUTES + "分钟。");
+        message.setSubject("人事系统验证码");
+        message.setText("您的验证码为：" + code + "，有效期" + EXPIRE_MINUTES + "分钟。");
         try {
             sender.send(message);
         } catch (Exception ex) {

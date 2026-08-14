@@ -9,11 +9,17 @@ import com.autohr.modules.auth.mapper.SysUserMapper;
 import com.autohr.modules.auth.service.AuditLogService;
 import com.autohr.modules.interview.entity.InterviewProcess;
 import com.autohr.modules.interview.entity.InterviewAiRecord;
+import com.autohr.modules.interview.entity.InterviewCandidate;
 import com.autohr.modules.interview.entity.InterviewLlmConfig;
+import com.autohr.modules.interview.entity.InterviewProcessStage;
+import com.autohr.modules.interview.entity.InterviewSubmission;
 import com.autohr.modules.interview.entity.InterviewVideoSession;
 import com.autohr.modules.interview.mapper.InterviewAiRecordMapper;
+import com.autohr.modules.interview.mapper.InterviewCandidateMapper;
 import com.autohr.modules.interview.mapper.InterviewLlmConfigMapper;
 import com.autohr.modules.interview.mapper.InterviewProcessMapper;
+import com.autohr.modules.interview.mapper.InterviewProcessStageMapper;
+import com.autohr.modules.interview.mapper.InterviewSubmissionMapper;
 import com.autohr.modules.interview.mapper.InterviewVideoSessionMapper;
 import com.autohr.modules.recruitment.dto.CandidateApplyRequest;
 import com.autohr.modules.recruitment.dto.CandidateVO;
@@ -28,6 +34,7 @@ import com.autohr.modules.recruitment.mapper.RecruitmentJobMapper;
 import com.autohr.modules.recruitment.mapper.RecruitmentResumeFileMapper;
 import com.autohr.modules.recruitment.service.RecruitmentService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.ImageType;
@@ -79,6 +86,9 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     private final AuditLogService auditLogService;
     private final InterviewProcessMapper interviewProcessMapper;
     private final InterviewAiRecordMapper interviewAiRecordMapper;
+    private final InterviewCandidateMapper interviewCandidateMapper;
+    private final InterviewSubmissionMapper interviewSubmissionMapper;
+    private final InterviewProcessStageMapper interviewProcessStageMapper;
     private final InterviewVideoSessionMapper interviewVideoSessionMapper;
     private final InterviewLlmConfigMapper llmConfigMapper;
     private final S3ObjectStorageService s3ObjectStorageService;
@@ -102,10 +112,12 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     @Transactional
     public JobVO saveJob(JobSaveRequest request) {
         RecruitmentJob job = request.getId() == null ? new RecruitmentJob() : requireJob(request.getId());
+        String existingCode = job.getJobCode();
         BeanUtils.copyProperties(request, job);
         if (StrUtil.isBlank(job.getJobCode())) {
-            job.setJobCode(buildJobCode(request.getJobTitle()));
+            job.setJobCode(request.getId() == null ? buildJobCode(request.getJobTitle()) : existingCode);
         }
+        ensureJobCodeUnique(job.getJobCode(), request.getId());
         job.setStatus(Objects.requireNonNullElse(request.getStatus(), 1));
         job.setPublishDate(Objects.requireNonNullElse(request.getPublishDate(), LocalDate.now()));
         if (request.getId() == null) {
@@ -146,10 +158,22 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     @Override
     @Transactional
     public CandidateVO apply(CandidateApplyRequest request, String intervieweeUsername) {
-        requireJob(request.getJobId());
+        RecruitmentJob job = requireJob(request.getJobId());
+        if (!Objects.equals(job.getStatus(), 1)) {
+            throw new BusinessException("该招聘岗位已关闭，不能投递");
+        }
+        if (job.getCloseDate() != null && job.getCloseDate().isBefore(LocalDate.now())) {
+            throw new BusinessException("该招聘岗位已过期，不能投递");
+        }
         SysUser user = findUserByUsername(intervieweeUsername);
         if (user == null) {
             throw new BusinessException("面试者用户不存在");
+        }
+        Long existingApplicationCount = candidateMapper.selectCount(new LambdaQueryWrapper<RecruitmentCandidate>()
+                .eq(RecruitmentCandidate::getJobId, request.getJobId())
+                .eq(RecruitmentCandidate::getIntervieweeUserId, user.getId()));
+        if (existingApplicationCount > 0) {
+            throw new BusinessException("您已投递过该招聘岗位，不能重复投递");
         }
         RecruitmentCandidate candidate = new RecruitmentCandidate();
         BeanUtils.copyProperties(request, candidate);
@@ -219,11 +243,18 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         if (StrUtil.equals(candidate.getResumeLlmStatus(), "PENDING")) {
             throw new BusinessException("简历评分正在进行中，请稍后再试");
         }
-        candidate.setResumeLlmScore(null);
-        candidate.setResumeLlmComment("AI简历重评已提交，请稍后刷新查看结果");
-        candidate.setResumeLlmStatus("PENDING");
-        candidate.setResumeLlmEvaluatedAt(null);
-        candidateMapper.updateById(candidate);
+        int updated = candidateMapper.update(null, new LambdaUpdateWrapper<RecruitmentCandidate>()
+                .eq(RecruitmentCandidate::getId, id)
+                .and(wrapper -> wrapper.isNull(RecruitmentCandidate::getResumeLlmStatus)
+                        .or()
+                        .ne(RecruitmentCandidate::getResumeLlmStatus, "PENDING"))
+                .set(RecruitmentCandidate::getResumeLlmScore, null)
+                .set(RecruitmentCandidate::getResumeLlmComment, "AI简历重评已提交，请稍后刷新查看结果")
+                .set(RecruitmentCandidate::getResumeLlmStatus, "PENDING")
+                .set(RecruitmentCandidate::getResumeLlmEvaluatedAt, null));
+        if (updated != 1) {
+            throw new BusinessException("简历评分正在进行中，请稍后再试");
+        }
         Long resumeFileId = candidate.getResumeFileId();
         runAfterCommit(() -> CompletableFuture.runAsync(() -> evaluateCandidateResumeSafely(id, resumeFileId)));
         return toCandidateVO(requireCandidate(id), loadJobMap(), loadResumeMap());
@@ -232,16 +263,27 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     @Override
     @Transactional
     public void deleteCandidate(Long id) {
-        RecruitmentCandidate candidate = requireCandidate(id);
+        requireCandidate(id);
         List<InterviewProcess> processes = interviewProcessMapper.selectList(new LambdaQueryWrapper<InterviewProcess>()
                 .eq(InterviewProcess::getRecruitmentCandidateId, id));
         for (InterviewProcess process : processes) {
             interviewAiRecordMapper.delete(new LambdaQueryWrapper<InterviewAiRecord>().eq(InterviewAiRecord::getProcessId, process.getId()));
             interviewVideoSessionMapper.delete(new LambdaQueryWrapper<InterviewVideoSession>().eq(InterviewVideoSession::getProcessId, process.getId()));
+            interviewProcessStageMapper.delete(new LambdaQueryWrapper<InterviewProcessStage>().eq(InterviewProcessStage::getProcessId, process.getId()));
             interviewProcessMapper.deleteById(process.getId());
         }
+        List<InterviewCandidate> interviewCandidates = interviewCandidateMapper.selectList(new LambdaQueryWrapper<InterviewCandidate>()
+                .eq(InterviewCandidate::getRecruitmentCandidateId, id));
+        for (InterviewCandidate interviewCandidate : interviewCandidates) {
+            interviewSubmissionMapper.delete(new LambdaQueryWrapper<InterviewSubmission>()
+                    .eq(InterviewSubmission::getInterviewCandidateId, interviewCandidate.getId()));
+            interviewCandidateMapper.deleteById(interviewCandidate.getId());
+        }
+        List<RecruitmentResumeFile> resumeFiles = resumeFileMapper.selectList(new LambdaQueryWrapper<RecruitmentResumeFile>()
+                .eq(RecruitmentResumeFile::getCandidateId, id));
         resumeFileMapper.delete(new LambdaQueryWrapper<RecruitmentResumeFile>().eq(RecruitmentResumeFile::getCandidateId, id));
         candidateMapper.deleteById(id);
+        runAfterCommit(() -> resumeFiles.forEach(this::deleteLocalResumeFile));
     }
 
     @Override
@@ -271,7 +313,10 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             try (InputStream inputStream = file.getInputStream()) {
                 Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
             }
+            runAfterRollback(() -> deleteLocalResumePath(target));
             s3ObjectStorageService.archiveIfEnabled(target, "resumes/" + storedName, file.getContentType());
+            List<RecruitmentResumeFile> previousResumeFiles = resumeFileMapper.selectList(new LambdaQueryWrapper<RecruitmentResumeFile>()
+                    .eq(RecruitmentResumeFile::getCandidateId, candidateId));
             RecruitmentResumeFile resumeFile = new RecruitmentResumeFile();
             resumeFile.setId(nextId(resumeFileMapper.selectList(null).stream().map(RecruitmentResumeFile::getId).toList()));
             resumeFile.setCandidateId(candidateId);
@@ -281,11 +326,16 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             resumeFile.setContentType(file.getContentType());
             resumeFile.setFileSize(file.getSize());
             resumeFileMapper.insert(resumeFile);
-            candidate.setResumeFileId(resumeFile.getId());
-            candidate.setResumeLlmStatus("PENDING");
-            candidateMapper.updateById(candidate);
+            candidateMapper.update(null, new LambdaUpdateWrapper<RecruitmentCandidate>()
+                    .eq(RecruitmentCandidate::getId, candidateId)
+                    .set(RecruitmentCandidate::getResumeFileId, resumeFile.getId())
+                    .set(RecruitmentCandidate::getResumeLlmStatus, "PENDING"));
+            resumeFileMapper.delete(new LambdaQueryWrapper<RecruitmentResumeFile>()
+                    .eq(RecruitmentResumeFile::getCandidateId, candidateId)
+                    .ne(RecruitmentResumeFile::getId, resumeFile.getId()));
             auditLogService.log(owner.getId(), displayName(owner), owner.getRoleCode(), "RECRUITMENT", "UPLOAD_RESUME", "RECRUITMENT_RESUME", String.valueOf(resumeFile.getId()), originalName);
             runAfterCommit(() -> CompletableFuture.runAsync(() -> evaluateCandidateResumeSafely(candidateId, resumeFile.getId())));
+            runAfterCommit(() -> previousResumeFiles.forEach(this::deleteLocalResumeFile));
             return toResumeFileVO(resumeFileMapper.selectById(resumeFile.getId()));
         } catch (IOException ex) {
             throw new BusinessException("简历上传失败: " + ex.getMessage());
@@ -318,24 +368,27 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             RecruitmentResumeFile resumeFile = candidate.getResumeFileId() == null ? null : resumeFileMapper.selectById(candidate.getResumeFileId());
             String resumeText = resumeFile == null ? "未上传简历文件" : extractResumeText(resumeFile);
             ResumeLlmEvaluation evaluation = callResumeReviewLlm(job, candidate, resumeFile, resumeText);
-            RecruitmentCandidate latest = requireCandidate(candidateId);
-            if (!Objects.equals(latest.getResumeFileId(), expectedResumeFileId)) {
-                return;
-            }
-            candidate.setResumeLlmScore(evaluation.score());
-            candidate.setResumeLlmComment(evaluation.comment());
-            candidate.setResumeLlmStatus("COMPLETED");
-            candidate.setResumeLlmEvaluatedAt(LocalDateTime.now());
-            candidateMapper.updateById(candidate);
+            updateResumeEvaluation(candidateId, expectedResumeFileId, evaluation.score(), evaluation.comment(), "COMPLETED");
         } catch (Exception ex) {
-            RecruitmentCandidate candidate = candidateMapper.selectById(candidateId);
-            if (candidate != null) {
-                candidate.setResumeLlmStatus("FAILED");
-                candidate.setResumeLlmComment("LLM简历评分失败: " + abbreviate(ex.getMessage(), 500));
-                candidate.setResumeLlmEvaluatedAt(LocalDateTime.now());
-                candidateMapper.updateById(candidate);
-            }
+            updateResumeEvaluation(candidateId, expectedResumeFileId, null,
+                    "LLM简历评分失败: " + abbreviate(ex.getMessage(), 500), "FAILED");
         }
+    }
+
+    private void updateResumeEvaluation(Long candidateId, Long expectedResumeFileId, Integer score, String comment, String status) {
+        LambdaUpdateWrapper<RecruitmentCandidate> wrapper = new LambdaUpdateWrapper<RecruitmentCandidate>()
+                .eq(RecruitmentCandidate::getId, candidateId)
+                .eq(RecruitmentCandidate::getResumeLlmStatus, "PENDING")
+                .set(RecruitmentCandidate::getResumeLlmScore, score)
+                .set(RecruitmentCandidate::getResumeLlmComment, comment)
+                .set(RecruitmentCandidate::getResumeLlmStatus, status)
+                .set(RecruitmentCandidate::getResumeLlmEvaluatedAt, LocalDateTime.now());
+        if (expectedResumeFileId == null) {
+            wrapper.isNull(RecruitmentCandidate::getResumeFileId);
+        } else {
+            wrapper.eq(RecruitmentCandidate::getResumeFileId, expectedResumeFileId);
+        }
+        candidateMapper.update(null, wrapper);
     }
 
     private String extractResumeText(RecruitmentResumeFile resumeFile) throws IOException {
@@ -552,6 +605,41 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         });
     }
 
+    private void runAfterRollback(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    action.run();
+                }
+            }
+        });
+    }
+
+    private void deleteLocalResumeFile(RecruitmentResumeFile resumeFile) {
+        if (resumeFile != null && StrUtil.isNotBlank(resumeFile.getFilePath())) {
+            try {
+                deleteLocalResumePath(Paths.get(resumeFile.getFilePath()));
+            } catch (RuntimeException ignored) {
+                // A malformed historic path must not make a successful deletion fail.
+            }
+        }
+    }
+
+    private void deleteLocalResumePath(Path path) {
+        try {
+            Path normalizedPath = path.normalize().toAbsolutePath();
+            if (normalizedPath.startsWith(UploadPaths.RESUME_DIR)) {
+                Files.deleteIfExists(normalizedPath);
+            }
+        } catch (IOException | RuntimeException ignored) {
+            // File cleanup is best effort and must not make a successful database operation fail.
+        }
+    }
+
     private String sanitizeOriginalFileName(String originalFileName) {
         String fileName = Paths.get(Objects.requireNonNullElse(originalFileName, "resume.pdf")).getFileName().toString().trim();
         if (fileName.length() > 120) {
@@ -644,7 +732,25 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     private String buildJobCode(String jobTitle) {
-        return "JOB-" + Math.abs(Objects.requireNonNullElse(jobTitle, "RECRUITMENT").hashCode());
+        String baseCode = "JOB-" + Math.abs((long) Objects.requireNonNullElse(jobTitle, "RECRUITMENT").hashCode());
+        String candidateCode = baseCode;
+        int suffix = 2;
+        while (jobMapper.selectCount(new LambdaQueryWrapper<RecruitmentJob>()
+                .eq(RecruitmentJob::getJobCode, candidateCode)) > 0) {
+            candidateCode = baseCode + "-" + suffix++;
+        }
+        return candidateCode;
+    }
+
+    private void ensureJobCodeUnique(String jobCode, Long currentId) {
+        LambdaQueryWrapper<RecruitmentJob> wrapper = new LambdaQueryWrapper<RecruitmentJob>()
+                .eq(RecruitmentJob::getJobCode, jobCode);
+        if (currentId != null) {
+            wrapper.ne(RecruitmentJob::getId, currentId);
+        }
+        if (jobMapper.selectCount(wrapper) > 0) {
+            throw new BusinessException("招聘岗位编码已存在");
+        }
     }
 
     private String displayName(SysUser user) {

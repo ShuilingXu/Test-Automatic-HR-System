@@ -21,6 +21,7 @@
           </el-form-item>
             <div class="link-row"><el-button type="primary" @click="login">登录</el-button></div>
           </el-form>
+          <el-button class="reset-password-trigger" text type="primary" @click="openPasswordReset">忘记密码？</el-button>
           <el-form :model="registerForm" label-position="top" class="login-form register-form">
             <h3>面试者注册</h3>
           <el-form-item label="用户名"><el-input v-model="registerForm.username" /></el-form-item>
@@ -54,6 +55,27 @@
         <p class="login-note">面试者可以先注册账号，完善资料后查看和参与已发起的面试流程。</p>
       </div>
     </section>
+    <el-dialog v-model="passwordResetVisible" class="password-reset-dialog" title="重置密码" width="min(460px, calc(100vw - 32px))" destroy-on-close>
+      <p class="reset-intro">使用已绑定的手机号或邮箱验证后设置新密码。</p>
+      <el-form :model="passwordResetForm" label-position="top">
+        <el-form-item label="验证方式">
+          <el-radio-group v-model="passwordResetForm.contactType" @change="changePasswordResetContactType">
+            <el-radio value="phone">手机号</el-radio>
+            <el-radio value="email">邮箱</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="passwordResetForm.contactType === 'phone'" label="手机号"><el-input v-model="passwordResetForm.mobilePhone" autocomplete="tel" /></el-form-item>
+        <el-form-item v-else label="邮箱"><el-input v-model="passwordResetForm.email" autocomplete="email" /></el-form-item>
+        <el-form-item label="验证码">
+          <div class="code-row"><el-input v-model="passwordResetForm.verificationCode" inputmode="numeric" /><el-button :loading="sendingPasswordResetCode" @click="sendPasswordResetCode">获取验证码</el-button></div>
+        </el-form-item>
+        <el-form-item label="图形验证码">
+          <div class="captcha-row"><el-input v-model="passwordResetForm.captchaCode" placeholder="输入图片字符" /><button type="button" class="captcha-image" @click="loadPasswordResetCaptcha"><img :src="passwordResetCaptcha.imageBase64" alt="重置密码图形验证码" /></button></div>
+        </el-form-item>
+        <el-form-item label="新密码"><el-input v-model="passwordResetForm.newPassword" type="password" show-password autocomplete="new-password" placeholder="至少6位" /></el-form-item>
+      </el-form>
+      <template #footer><el-button @click="passwordResetVisible = false">取消</el-button><el-button type="primary" @click="resetPassword">确认重置</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
@@ -66,9 +88,13 @@ import { authApi } from '../services/api'
 const router = useRouter()
 const loginForm = reactive({ username: '', password: '', captchaId: '', captchaCode: '' })
 const registerForm = reactive({ username: '', password: '', displayName: '', contactType: 'phone', mobilePhone: '', email: '', verificationCode: '', captchaId: '', captchaCode: '' })
+const passwordResetForm = reactive({ contactType: 'phone', mobilePhone: '', email: '', verificationCode: '', newPassword: '', captchaId: '', captchaCode: '' })
 const loginCaptcha = reactive({ imageBase64: '' })
 const registerCaptcha = reactive({ imageBase64: '' })
+const passwordResetCaptcha = reactive({ imageBase64: '' })
 const sendingCode = ref(false)
+const passwordResetVisible = ref(false)
+const sendingPasswordResetCode = ref(false)
 
 function targetByRole(roleCode) {
   return roleCode === 'INTERVIEWEE' ? '/user' : '/admin'
@@ -105,6 +131,54 @@ function changeContactType(type) {
   else registerForm.mobilePhone = ''
 }
 
+function changePasswordResetContactType(type) {
+  if (type === 'phone') passwordResetForm.email = ''
+  else passwordResetForm.mobilePhone = ''
+}
+
+async function openPasswordReset() {
+  passwordResetForm.verificationCode = ''
+  passwordResetForm.newPassword = ''
+  passwordResetVisible.value = true
+  await loadPasswordResetCaptcha()
+}
+
+async function sendPasswordResetCode() {
+  const contact = passwordResetForm.contactType === 'phone' ? passwordResetForm.mobilePhone : passwordResetForm.email
+  if (!contact.trim()) {
+    ElMessage.warning(passwordResetForm.contactType === 'phone' ? '请填写手机号' : '请填写邮箱')
+    return
+  }
+  sendingPasswordResetCode.value = true
+  try {
+    await authApi.sendPasswordResetCode({ mobilePhone: passwordResetForm.mobilePhone, email: passwordResetForm.email, captchaId: passwordResetForm.captchaId, captchaCode: passwordResetForm.captchaCode })
+    ElMessage.success('如该联系方式已绑定账号，验证码将很快发送')
+  } catch (error) {
+    ElMessage.error(error.message || '验证码发送失败')
+  } finally {
+    sendingPasswordResetCode.value = false
+    await loadPasswordResetCaptcha()
+  }
+}
+
+async function resetPassword() {
+  const contact = passwordResetForm.contactType === 'phone' ? passwordResetForm.mobilePhone : passwordResetForm.email
+  if (!contact.trim() || !passwordResetForm.verificationCode || passwordResetForm.newPassword.length < 6) {
+    ElMessage.warning('请完整填写联系方式、验证码和至少6位的新密码')
+    return
+  }
+  try {
+    const { contactType, captchaId, captchaCode, ...payload } = passwordResetForm
+    await authApi.resetPassword(payload)
+    passwordResetVisible.value = false
+    loginForm.password = ''
+    ElMessage.success('密码已重置，请使用新密码登录')
+    await loadLoginCaptcha()
+  } catch (error) {
+    ElMessage.error(error.message || '密码重置失败')
+  }
+}
+
 async function sendRegisterCode() {
   const contact = registerForm.contactType === 'phone' ? registerForm.mobilePhone : registerForm.email
   if (!contact.trim()) {
@@ -138,6 +212,13 @@ async function loadRegisterCaptcha() {
   registerCaptcha.imageBase64 = response.data.imageBase64
 }
 
+async function loadPasswordResetCaptcha() {
+  const response = await authApi.getCaptcha()
+  passwordResetForm.captchaId = response.data.captchaId
+  passwordResetForm.captchaCode = ''
+  passwordResetCaptcha.imageBase64 = response.data.imageBase64
+}
+
 onMounted(async () => {
   await Promise.all([loadLoginCaptcha(), loadRegisterCaptcha()])
 })
@@ -151,6 +232,10 @@ onMounted(async () => {
 .captcha-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(96px, 128px); gap: 10px; width: 100%; min-width: 0; }
 .captcha-image { width: 100%; max-width: 128px; height: 48px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-soft); cursor: pointer; overflow: visible; }
 .captcha-image img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.reset-password-trigger { margin-top: 10px; padding-inline: 0; }
+.reset-intro { margin: 0 0 18px; color: var(--text-muted); line-height: 1.65; }
+:global(.password-reset-dialog) { display: flex; flex-direction: column; max-height: calc(100vh - 32px); margin: 16px auto; }
+:global(.password-reset-dialog .el-dialog__body) { overflow-y: auto; }
 @media (max-width: 900px) { .login-page { padding: 14px; }.login-layout { grid-template-columns: 1fr; }.login-intro { min-height: 250px; padding: 26px; }.login-intro-copy { margin: 52px 0 34px; }.login-intro-copy h1 { font-size: 38px; }.form-columns { grid-template-columns: 1fr; gap: 44px; }.register-form { padding-left: 0; border-left: 0; border-top: 1px solid #dce5df; padding-top: 38px; }.login-forms { padding: 38px 30px; } }
 @media (max-width: 560px) { .code-row, .captcha-row { grid-template-columns: minmax(0, 1fr); } .captcha-image { max-width: 100%; } .login-forms-head { margin-bottom: 32px; }.login-forms-head h2 { font-size: 26px; } }
 </style>

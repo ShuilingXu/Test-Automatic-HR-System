@@ -25,9 +25,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -44,10 +46,12 @@ public class HrServiceImpl implements HrService {
     public DepartmentVO saveDepartment(DepartmentSaveRequest request) {
         validateDepartment(request.getParentDepartmentId(), request.getManagerEmployeeId(), request.getId());
         Department department = request.getId() == null ? new Department() : requireDepartment(request.getId());
+        String existingCode = department.getDepartmentCode();
         BeanUtils.copyProperties(request, department);
         if (StrUtil.isBlank(department.getDepartmentCode())) {
-            department.setDepartmentCode(buildDepartmentCode(request.getDepartmentName()));
+            department.setDepartmentCode(request.getId() == null ? buildDepartmentCode(request.getDepartmentName()) : existingCode);
         }
+        ensureDepartmentCodeUnique(department.getDepartmentCode(), request.getId());
         department.setSortOrder(Objects.requireNonNullElse(request.getSortOrder(), 0));
         department.setStatus(Objects.requireNonNullElse(request.getStatus(), 1));
         if (request.getId() == null) {
@@ -97,9 +101,10 @@ public class HrServiceImpl implements HrService {
         validateEmployee(request.getDepartmentId(), request.getManagerEmployeeId(), resolvedId);
         validateEmployeeUnique(request, resolvedId);
         Employee employee = resolvedId == null ? new Employee() : requireEmployee(resolvedId);
+        String existingCode = employee.getEmployeeCode();
         BeanUtils.copyProperties(request, employee);
         if (StrUtil.isBlank(employee.getEmployeeCode())) {
-            employee.setEmployeeCode(buildEmployeeCode());
+            employee.setEmployeeCode(resolvedId == null ? buildEmployeeCode() : existingCode);
         }
         employee.setHireDate(Objects.requireNonNullElse(request.getHireDate(), LocalDate.now()));
         employee.setEmploymentStatus(Objects.requireNonNullElse(request.getEmploymentStatus(), EmploymentStatus.ACTIVE.getCode()));
@@ -134,6 +139,11 @@ public class HrServiceImpl implements HrService {
         Long managerCount = employeeMapper.selectCount(new LambdaQueryWrapper<Employee>().eq(Employee::getManagerEmployeeId, id));
         if (managerCount > 0) {
             throw new BusinessException("该员工仍被作为直属上级引用，不能删除");
+        }
+        Long departmentManagerCount = departmentMapper.selectCount(new LambdaQueryWrapper<Department>()
+                .eq(Department::getManagerEmployeeId, id));
+        if (departmentManagerCount > 0) {
+            throw new BusinessException("该员工仍被作为部门负责人引用，不能删除");
         }
         integrationBindingMapper.delete(new LambdaQueryWrapper<IntegrationBinding>().eq(IntegrationBinding::getEmployeeId, id));
         employeeMapper.deleteById(id);
@@ -199,6 +209,17 @@ public class HrServiceImpl implements HrService {
             if (currentId != null && parent.getId().equals(currentId)) {
                 throw new BusinessException("部门不能将自己设为上级部门");
             }
+            Set<Long> visited = new HashSet<>();
+            Long ancestorId = parent.getId();
+            while (ancestorId != null) {
+                if (!visited.add(ancestorId)) {
+                    throw new BusinessException("上级部门层级存在循环，不能保存");
+                }
+                if (Objects.equals(currentId, ancestorId)) {
+                    throw new BusinessException("部门不能设置为自己的下级部门");
+                }
+                ancestorId = requireDepartment(ancestorId).getParentDepartmentId();
+            }
         }
         if (managerEmployeeId != null) {
             requireEmployee(managerEmployeeId);
@@ -220,6 +241,17 @@ public class HrServiceImpl implements HrService {
         ensureUnique(Employee::getMobilePhone, request.getMobilePhone(), currentId, "手机号已存在");
         if (StrUtil.isNotBlank(request.getEmployeeCode())) {
             ensureUnique(Employee::getEmployeeCode, request.getEmployeeCode(), currentId, "员工编码已存在");
+        }
+    }
+
+    private void ensureDepartmentCodeUnique(String departmentCode, Long currentId) {
+        LambdaQueryWrapper<Department> wrapper = new LambdaQueryWrapper<Department>()
+                .eq(Department::getDepartmentCode, departmentCode);
+        if (currentId != null) {
+            wrapper.ne(Department::getId, currentId);
+        }
+        if (departmentMapper.selectCount(wrapper) > 0) {
+            throw new BusinessException("部门编码已存在");
         }
     }
 
@@ -321,12 +353,34 @@ public class HrServiceImpl implements HrService {
     }
 
     private String buildDepartmentCode(String departmentName) {
-        return "DEPT-" + Math.abs(departmentName.hashCode());
+        String baseCode = "DEPT-" + Math.abs((long) Objects.requireNonNullElse(departmentName, "DEPARTMENT").hashCode());
+        String candidateCode = baseCode;
+        int suffix = 2;
+        while (departmentMapper.selectCount(new LambdaQueryWrapper<Department>()
+                .eq(Department::getDepartmentCode, candidateCode)) > 0) {
+            candidateCode = baseCode + "-" + suffix++;
+        }
+        return candidateCode;
     }
 
     private String buildEmployeeCode() {
-        long next = employeeMapper.selectCount(null) + 1;
-        return String.format("EMP%05d", next);
+        long maxSequence = employeeMapper.selectList(null).stream()
+                .map(Employee::getEmployeeCode)
+                .mapToLong(this::employeeCodeSequence)
+                .max()
+                .orElse(0L);
+        return String.format("EMP%05d", maxSequence + 1);
+    }
+
+    private long employeeCodeSequence(String employeeCode) {
+        if (StrUtil.isBlank(employeeCode) || !employeeCode.matches("EMP\\d+")) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(employeeCode.substring(3));
+        } catch (NumberFormatException ignored) {
+            return 0L;
+        }
     }
 
     private Long nextId(List<Long> ids) {

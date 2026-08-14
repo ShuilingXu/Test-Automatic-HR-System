@@ -76,6 +76,7 @@
           <el-table-column prop="roleCode" label="角色" />
           <el-table-column prop="mobilePhone" label="电话" />
           <el-table-column prop="status" label="状态"><template #default="scope">{{ scope.row.status === 1 ? '启用' : '停用' }}</template></el-table-column>
+          <el-table-column label="操作" width="90"><template #default="scope"><el-button text type="danger" @click.stop="deleteUser(scope.row)">删除</el-button></template></el-table-column>
         </el-table>
         <el-form :model="userForm" label-position="top" class="form-grid">
           <el-form-item label="用户名"><el-input v-model="userForm.username" disabled /></el-form-item>
@@ -219,7 +220,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { authApi, hrApi, interviewApi, recruitmentApi, siteContentApi } from '../services/api'
 import { readSessionUser } from '../utils/session'
 
@@ -260,6 +261,7 @@ const templateDialogVisible = ref(false)
 const selectedTemplateId = ref(null)
 const selectedInterviewCandidate = ref(null)
 const startingInterview = ref(false)
+const consoleReady = ref(false)
 
 const userForm = reactive({ id: null, username: '', displayName: '', roleCode: 'HR_USER', status: 1, mobilePhone: '', email: '', newPassword: '' })
 const departmentForm = reactive({ id: null, departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '', sortOrder: 0, status: 1 })
@@ -364,6 +366,32 @@ async function loadRecruitment() { await Promise.all([loadJobs(), loadCandidates
 async function loadUsers() { if (!(isItAdmin.value || isHrAdmin.value)) return; try { users.value = (await authApi.listUsers()).data } catch (error) { fail(error) } }
 async function loadAuditLogs() { if (!(isItAdmin.value || isHrAdmin.value)) return; try { const params = cleanParams({ ...auditFilter, actionCode: resolveActionCode(auditFilter.actionCode) }); auditLogs.value = (await authApi.listAuditLogs(params)).data } catch (error) { fail(error) } }
 async function loadAll() { await Promise.all([loadSession(), loadDashboard(), loadDepartments(), loadEmployees(), loadRecruitment(), loadContent(), loadProcessTemplates()]); if (isItAdmin.value || isHrAdmin.value) { await Promise.all([loadUsers(), loadAuditLogs()]) } syncRouteState() }
+async function loadCurrentTab() {
+  switch (activeTab.value) {
+    case 'dashboard':
+      await Promise.all([loadDashboard(), loadJobs(), loadContent()])
+      break
+    case 'audit':
+      await loadAuditLogs()
+      break
+    case 'users':
+      await loadUsers()
+      break
+    case 'departments':
+      await Promise.all([loadDepartments(), loadEmployees()])
+      break
+    case 'employees':
+      await Promise.all([loadEmployees(), loadDepartments()])
+      break
+    case 'content':
+      await loadContent()
+      break
+    case 'recruitment':
+      await Promise.all([loadRecruitment(), loadDepartments()])
+      break
+  }
+  syncRouteState()
+}
 async function loadProcessTemplates() { try { processTemplates.value = (await interviewApi.listProcessTemplates({ status: 1 })).data } catch (error) { fail(error) } }
 async function saveDepartment() { try { await hrApi.saveDepartment({ ...departmentForm }); ElMessage.success('部门已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveEmployee() { try { await hrApi.saveEmployee({ ...employeeForm }); ElMessage.success('员工已保存'); await loadAll() } catch (error) { fail(error) } }
@@ -448,6 +476,17 @@ async function deleteCandidate(id) {
 function editUser(row) { Object.assign(userForm, row, { newPassword: '' }) }
 async function saveUser() { try { await authApi.updateUser(userForm.id, { roleCode: userForm.roleCode, status: userForm.status, displayName: userForm.displayName, mobilePhone: userForm.mobilePhone, email: userForm.email }); ElMessage.success('用户已保存'); await loadUsers() } catch (error) { fail(error) } }
 async function resetUserPassword() { try { if (!userForm.id) { ElMessage.warning('请先选择用户'); return } if (!userForm.newPassword || userForm.newPassword.length < 6) { ElMessage.warning('新密码长度不能少于6位'); return } await authApi.updateUser(userForm.id, { newPassword: userForm.newPassword }); userForm.newPassword = ''; ElMessage.success('密码已重置'); await loadUsers() } catch (error) { fail(error) } }
+async function deleteUser(row) {
+  try {
+    await ElMessageBox.confirm(`删除用户“${row.username}”后无法恢复。`, '确认删除', { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' })
+    await authApi.deleteUser(row.id)
+    if (userForm.id === row.id) Object.assign(userForm, { id: null, username: '', displayName: '', roleCode: 'HR_USER', status: 1, mobilePhone: '', email: '', newPassword: '' })
+    ElMessage.success('用户已删除')
+    await loadUsers()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') fail(error)
+  }
+}
 async function logout() { try { await authApi.logout(); router.push('/login') } catch (error) { fail(error) } }
 function cleanParams(source) { return Object.fromEntries(Object.entries(source).filter(([, value]) => value !== '' && value !== null && value !== undefined)) }
 function resolveActionCode(value) {
@@ -455,9 +494,16 @@ function resolveActionCode(value) {
   return Object.entries(actionLabels).find(([key, label]) => key === value || label.includes(value))?.[0] || value
 }
 
-onMounted(loadAll)
+onMounted(async () => {
+  await loadSession()
+  consoleReady.value = true
+  await loadCurrentTab()
+})
 watch(() => route.fullPath, () => {
   syncRouteState()
+  if (consoleReady.value) {
+    void loadCurrentTab()
+  }
 }, { immediate: true })
 
 function syncRouteState() {

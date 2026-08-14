@@ -27,7 +27,7 @@ public class SecurityConfig {
         http.csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/register/code", "/api/auth/captcha").permitAll()
+                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/register/code", "/api/auth/password-reset", "/api/auth/password-reset/code", "/api/auth/captcha").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/recruitment/jobs/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/site-content").permitAll()
                         .requestMatchers("/api/site-content/admin/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "IT_ADMIN", "HR_ADMIN")
