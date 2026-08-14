@@ -321,7 +321,7 @@ async function submitAiAnswer() {
     if (isStreamMode.value) {
       await submitAiAnswerStream()
     } else {
-      await interviewApi.submitAiAnswer({ processId: sessionForm.processId, answerContent: aiAnswer.answerContent })
+      await interviewApi.submitAiAnswer({ processId: sessionForm.processId, questionId: currentQuestion.value.id, answerContent: aiAnswer.answerContent })
     }
     aiSubmitState.message = '正在同步最新面试状态'
     aiPendingRefresh.active = false
@@ -406,7 +406,7 @@ async function enterAiExamMode() {
 
 async function submitAiAnswerStream() {
   aiStreamText.value = ''
-  await interviewApi.submitAiAnswerStream({ processId: sessionForm.processId, answerContent: aiAnswer.answerContent }, ({ event, data }) => {
+  await interviewApi.submitAiAnswerStream({ processId: sessionForm.processId, questionId: currentQuestion.value.id, answerContent: aiAnswer.answerContent }, ({ event, data }) => {
     const text = parseStreamData(data)
     if (event === 'error') throw new Error(text || '流式提交失败')
     if (event === 'token' && text) {

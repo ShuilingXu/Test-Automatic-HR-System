@@ -1,20 +1,27 @@
 package com.autohr.modules.system.service;
 
 import cn.hutool.core.util.StrUtil;
+import com.autohr.common.exception.BusinessException;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 @Service
 public class SystemConfigService {
 
+    private static final Pattern ENV_KEY_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
     private final Path envPath = Paths.get(".env");
 
     public synchronized Map<String, String> loadConfig(String... keys) {
@@ -31,13 +38,27 @@ public class SystemConfigService {
     }
 
     public synchronized void saveConfig(Map<String, String> updates) {
-        Map<String, String> current = readEnvFile();
-        updates.forEach((key, value) -> {
-            if (StrUtil.isNotBlank(key) && value != null) {
-                current.put(key, value);
+        Map<String, String> sanitizedUpdates = sanitizeUpdates(updates);
+        if (sanitizedUpdates.isEmpty()) {
+            return;
+        }
+        List<String> currentLines = readEnvLines();
+        Set<String> pendingKeys = new LinkedHashSet<>(sanitizedUpdates.keySet());
+        StringBuilder builder = new StringBuilder();
+        for (String line : currentLines) {
+            String key = parseKey(line);
+            if (key != null && sanitizedUpdates.containsKey(key)) {
+                builder.append(key).append('=').append(sanitizedUpdates.get(key));
+                pendingKeys.remove(key);
+            } else {
+                builder.append(line);
             }
-        });
-        writeEnvFile(current);
+            builder.append(System.lineSeparator());
+        }
+        for (String key : pendingKeys) {
+            builder.append(key).append('=').append(sanitizedUpdates.get(key)).append(System.lineSeparator());
+        }
+        writeEnvFile(builder.toString());
     }
 
     private Map<String, String> readEnvFile() {
@@ -45,31 +66,96 @@ public class SystemConfigService {
         if (!Files.exists(envPath)) {
             return values;
         }
-        try {
-            List<String> lines = Files.readAllLines(envPath, StandardCharsets.UTF_8);
-            for (String line : lines) {
-                String trimmed = line.trim();
-                if (trimmed.isEmpty() || trimmed.startsWith("#") || !trimmed.contains("=")) {
-                    continue;
-                }
-                int index = trimmed.indexOf('=');
-                values.put(trimmed.substring(0, index).trim(), trimmed.substring(index + 1).trim());
+        for (String line : readEnvLines()) {
+            String key = parseKey(line);
+            if (key != null) {
+                int index = line.indexOf('=');
+                values.put(key, line.substring(index + 1).trim());
             }
-            return values;
+        }
+        return values;
+    }
+
+    private List<String> readEnvLines() {
+        if (!Files.exists(envPath)) {
+            return List.of();
+        }
+        try {
+            return Files.readAllLines(envPath, StandardCharsets.UTF_8);
         } catch (IOException ex) {
             throw new IllegalStateException("读取.env配置失败", ex);
         }
     }
 
-    private void writeEnvFile(Map<String, String> values) {
-        StringBuilder builder = new StringBuilder();
-        for (Map.Entry<String, String> entry : values.entrySet()) {
-            builder.append(entry.getKey()).append('=').append(entry.getValue()).append(System.lineSeparator());
+    private Map<String, String> sanitizeUpdates(Map<String, String> updates) {
+        Map<String, String> sanitized = new LinkedHashMap<>();
+        if (updates == null) {
+            return sanitized;
         }
+        updates.forEach((key, value) -> {
+            if (StrUtil.isBlank(key) || value == null) {
+                return;
+            }
+            if (!ENV_KEY_PATTERN.matcher(key).matches()) {
+                throw new BusinessException("环境变量名称无效: " + key);
+            }
+            if (containsControlCharacter(value)) {
+                throw new BusinessException("环境变量值不能包含控制字符");
+            }
+            sanitized.put(key, value);
+        });
+        return sanitized;
+    }
+
+    private String parseKey(String line) {
+        String trimmed = line.trim();
+        if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+            return null;
+        }
+        int index = line.indexOf('=');
+        if (index < 1) {
+            return null;
+        }
+        String key = line.substring(0, index).trim();
+        return ENV_KEY_PATTERN.matcher(key).matches() ? key : null;
+    }
+
+    private boolean containsControlCharacter(String value) {
+        return value.chars().anyMatch(character -> Character.isISOControl((char) character));
+    }
+
+    private void writeEnvFile(String content) {
+        Path absoluteEnvPath = envPath.toAbsolutePath();
+        Path directory = absoluteEnvPath.getParent();
+        Path temporaryPath = null;
         try {
-            Files.writeString(envPath, builder.toString(), StandardCharsets.UTF_8);
+            temporaryPath = Files.createTempFile(directory, absoluteEnvPath.getFileName().toString(), ".tmp");
+            Files.writeString(temporaryPath, content, StandardCharsets.UTF_8);
+            copyPosixPermissions(absoluteEnvPath, temporaryPath);
+            try {
+                Files.move(temporaryPath, absoluteEnvPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException ex) {
+                Files.move(temporaryPath, absoluteEnvPath, StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException ex) {
             throw new IllegalStateException("写入.env配置失败", ex);
+        } finally {
+            if (temporaryPath != null) {
+                try {
+                    Files.deleteIfExists(temporaryPath);
+                } catch (IOException ignored) {
+                }
+            }
+        }
+    }
+
+    private void copyPosixPermissions(Path source, Path target) {
+        try {
+            if (Files.exists(source)) {
+                Files.setPosixFilePermissions(target, Files.getPosixFilePermissions(source));
+            }
+        } catch (UnsupportedOperationException | IOException ignored) {
+            // Windows and non-POSIX filesystems do not expose POSIX permissions.
         }
     }
 }

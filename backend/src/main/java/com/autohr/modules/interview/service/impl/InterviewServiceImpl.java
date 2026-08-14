@@ -557,21 +557,21 @@ public class InterviewServiceImpl implements InterviewService {
 
     private synchronized InterviewVO submitAiAnswer(AiAnswerRequest request, Consumer<String> interviewerChunkConsumer) {
         InterviewProcess process = requireProcess(request.getProcessId());
+        InterviewAiRecord requestedRecord = requireRequestedAiRecord(process, request);
+        if (requestedRecord.getAnswerContent() != null) {
+            if (StrUtil.equals(requestedRecord.getAnswerContent(), request.getAnswerContent())) {
+                return toAiRecordVO(requestedRecord, process);
+            }
+            throw new BusinessException("该题已提交，不能修改回答");
+        }
         if (isTemplateProcess(process)) {
-            return submitTemplateAiAnswer(process, request, interviewerChunkConsumer);
+            return submitTemplateAiAnswer(process, request, requestedRecord, interviewerChunkConsumer);
         }
         ensureInProgress(process);
         if (!StrUtil.equals(process.getCurrentStage(), "AI")) {
             throw new BusinessException("当前流程不在AI面试阶段");
         }
-        InterviewAiRecord record = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
-                .eq(InterviewAiRecord::getProcessId, process.getId())
-                .isNull(InterviewAiRecord::getAnswerContent)
-                .orderByAsc(InterviewAiRecord::getSequenceNo)
-                .last("LIMIT 1"));
-        if (record == null) {
-            throw new BusinessException("当前没有待回答的问题");
-        }
+        InterviewAiRecord record = requestedRecord;
         record.setAnswerContent(request.getAnswerContent());
         String materials = loadKnowledgeMaterials(record.getKnowledgeBaseId());
         String jobRequirements = loadJobRequirements(process);
@@ -690,6 +690,14 @@ public class InterviewServiceImpl implements InterviewService {
         return listAiRecords(processId);
     }
 
+    private InterviewAiRecord requireRequestedAiRecord(InterviewProcess process, AiAnswerRequest request) {
+        InterviewAiRecord record = aiRecordMapper.selectById(request.getQuestionId());
+        if (record == null || !Objects.equals(record.getProcessId(), process.getId())) {
+            throw new BusinessException("请求的题目不属于当前面试流程");
+        }
+        return record;
+    }
+
     private InterviewVO getTemplateNextAiQuestion(InterviewProcess process) {
         if (!StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
             return null;
@@ -715,19 +723,14 @@ public class InterviewServiceImpl implements InterviewService {
         return unanswered == null ? null : toAiRecordVO(unanswered, process);
     }
 
-    private InterviewVO submitTemplateAiAnswer(InterviewProcess process, AiAnswerRequest request, Consumer<String> interviewerChunkConsumer) {
+    private InterviewVO submitTemplateAiAnswer(InterviewProcess process, AiAnswerRequest request, InterviewAiRecord record, Consumer<String> interviewerChunkConsumer) {
         ensureInProgress(process);
         InterviewProcessStage stage = requireActiveProcessStage(process);
         if (!"AI".equals(stage.getStageType()) || !"IN_PROGRESS".equals(stage.getStageStatus())) {
             throw new BusinessException("当前流程不在AI面试阶段");
         }
-        InterviewAiRecord record = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
-                .eq(InterviewAiRecord::getProcessStageId, stage.getId())
-                .isNull(InterviewAiRecord::getAnswerContent)
-                .orderByAsc(InterviewAiRecord::getSequenceNo)
-                .last("LIMIT 1"));
-        if (record == null) {
-            throw new BusinessException("当前没有待回答的问题");
+        if (!Objects.equals(record.getProcessStageId(), stage.getId())) {
+            throw new BusinessException("该题不属于当前 AI 面试阶段");
         }
         record.setAnswerContent(request.getAnswerContent());
         String materials = loadKnowledgeMaterials(record.getKnowledgeBaseId());
@@ -1283,7 +1286,7 @@ public class InterviewServiceImpl implements InterviewService {
     public InterviewVO reportAntiCheatEvent(AntiCheatEventRequest request, Long intervieweeUserId, String intervieweeName) {
         InterviewProcess process = requireIntervieweeProcess(request.getProcessId(), intervieweeUserId);
         boolean switchEvent = isSwitchEvent(request.getEventType());
-        if (switchEvent && StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
+        if (switchEvent && isActiveAiStage(process)) {
             int count = Objects.requireNonNullElse(process.getAntiCheatSwitchCount(), 0) + 1;
             int limit = Math.max(Objects.requireNonNullElse(process.getAntiCheatSwitchLimit(), 5), 1);
             process.setAntiCheatSwitchCount(count);
@@ -1306,6 +1309,17 @@ public class InterviewServiceImpl implements InterviewService {
 
     private boolean isSwitchEvent(String eventType) {
         return Set.of("FULLSCREEN_EXIT", "TAB_HIDDEN", "WINDOW_BLUR").contains(StrUtil.blankToDefault(eventType, ""));
+    }
+
+    private boolean isActiveAiStage(InterviewProcess process) {
+        if (!StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
+            return false;
+        }
+        if (!isTemplateProcess(process)) {
+            return StrUtil.equals(process.getCurrentStage(), "AI") && StrUtil.equals(process.getStageStatus(), "IN_PROGRESS");
+        }
+        InterviewProcessStage stage = requireActiveProcessStage(process);
+        return "AI".equals(stage.getStageType()) && "IN_PROGRESS".equals(stage.getStageStatus());
     }
 
     private void syncToPendingOnboarding(InterviewProcess process) {
@@ -1965,7 +1979,8 @@ public class InterviewServiceImpl implements InterviewService {
             session.setSummaryStatus("COMPLETED");
             videoSessionMapper.updateById(session);
         } catch (Exception ex) {
-            session.setSummaryStatus("FAILED: " + abbreviate(ex.getMessage(), 400));
+            session.setSummaryStatus("FAILED");
+            session.setSummaryText("视频转写或会议概要生成失败。原因：" + abbreviate(ex.getMessage(), 5000));
             videoSessionMapper.updateById(session);
         }
     }
@@ -2523,17 +2538,9 @@ public class InterviewServiceImpl implements InterviewService {
         }
         return java.util.Arrays.stream(candidates.split("\\n"))
                 .filter(StrUtil::isNotBlank)
-                .filter(item -> isRelayIceCandidate(item))
                 .filter(item -> isCurrentIceCandidate(sessionDescription, item))
                 .reduce((left, right) -> left + "\n" + right)
                 .orElse(null);
-    }
-
-    private boolean isRelayIceCandidate(String iceCandidate) {
-        return StrUtil.contains(iceCandidate, " typ relay ")
-                || StrUtil.endWith(iceCandidate, " typ relay")
-                || StrUtil.contains(iceCandidate, " typ relay\\r")
-                || StrUtil.contains(iceCandidate, " typ relay\\n");
     }
 
     private String appendSignal(String existing, String value) {

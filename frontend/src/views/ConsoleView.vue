@@ -162,7 +162,7 @@
         </template>
       </section>
 
-      <section v-if="activeTab === 'content'" class="page-card">
+      <section v-if="activeTab === 'content'" class="page-card content-page">
         <div class="topline"><div><p class="page-eyebrow">Site editor</p><h2>站点内容</h2><p class="page-subtitle">管理首页的信息发布。保存为草稿后，发布状态才会显示在公开首页。</p></div><el-button @click="loadContent">刷新</el-button></div>
         <div class="content-editor-layout">
           <el-form :model="contentForm" label-position="top" class="content-form">
@@ -564,6 +564,10 @@ function syncRouteState() {
 .audit-panel-head span { color: var(--text-muted); font-weight: 600; font-size: 13px; }
 .compact-table { margin-top: 12px; }
 .content-editor-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(240px, .75fr); gap: 22px; margin-top: 24px; }
+.content-page,
+.content-page *,
+.content-page *::before,
+.content-page *::after { animation: none !important; transition: none !important; }
 .content-form { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .content-preview { min-width: 0; min-height: 280px; padding: 22px; border: 1px solid #cbd7d1; border-radius: var(--radius-md); background: #f5f8f5; }

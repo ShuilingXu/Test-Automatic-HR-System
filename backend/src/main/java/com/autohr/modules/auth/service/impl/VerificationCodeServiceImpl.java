@@ -31,6 +31,7 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
     };
     private static final int EXPIRE_MINUTES = 5;
     private static final int RESEND_SECONDS = 60;
+    private static final int MAX_VERIFY_ATTEMPTS = 5;
     private static final String REGISTER_PURPOSE = "register";
     private static final String PASSWORD_RESET_PURPOSE = "password-reset";
 
@@ -77,7 +78,7 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
         codeStore.put(codeKey, new CodeRecord(code, now, now.plusMinutes(EXPIRE_MINUTES)));
     }
 
-    private void verifyCode(String purpose, String mobilePhone, String email, String code) {
+    private synchronized void verifyCode(String purpose, String mobilePhone, String email, String code) {
         cleanupExpiredCodes();
         String target = normalizeTarget(mobilePhone, email);
         String codeKey = codeKey(purpose, target);
@@ -90,6 +91,12 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
             throw new BusinessException("验证码已过期，请重新获取");
         }
         if (!StrUtil.equals(record.code(), code)) {
+            int failedAttempts = record.failedAttempts() + 1;
+            if (failedAttempts >= MAX_VERIFY_ATTEMPTS) {
+                codeStore.remove(codeKey, record);
+                throw new BusinessException("验证码错误次数过多，请重新获取验证码");
+            }
+            codeStore.put(codeKey, record.withFailedAttempts(failedAttempts));
             throw new BusinessException("验证码错误");
         }
         codeStore.remove(codeKey);
@@ -197,5 +204,13 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
         codeStore.entrySet().removeIf(entry -> entry.getValue().expiresAt().isBefore(now));
     }
 
-    private record CodeRecord(String code, LocalDateTime sentAt, LocalDateTime expiresAt) {}
+    private record CodeRecord(String code, LocalDateTime sentAt, LocalDateTime expiresAt, int failedAttempts) {
+        private CodeRecord(String code, LocalDateTime sentAt, LocalDateTime expiresAt) {
+            this(code, sentAt, expiresAt, 0);
+        }
+
+        private CodeRecord withFailedAttempts(int value) {
+            return new CodeRecord(code, sentAt, expiresAt, value);
+        }
+    }
 }

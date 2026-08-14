@@ -8,6 +8,8 @@ import lombok.Data;
 public class AiAnswerRequest {
     @NotNull(message = "流程ID必填")
     private Long processId;
+    @NotNull(message = "题目ID必填")
+    private Long questionId;
     @NotBlank(message = "回答内容必填")
     private String answerContent;
 }
