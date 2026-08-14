@@ -169,7 +169,7 @@
             <el-form-item label="标题"><el-input v-model="contentForm.title" placeholder="例如：春季招聘开放" /></el-form-item>
             <el-form-item label="摘要"><el-input v-model="contentForm.summary" maxlength="140" show-word-limit placeholder="首页列表中展示的一句话" /></el-form-item>
             <el-form-item label="正文"><el-input v-model="contentForm.content" type="textarea" :rows="9" placeholder="支持纯文本，建议分段书写" /></el-form-item>
-            <div class="form-row"><el-form-item label="内容类型"><el-select v-model="contentForm.type" :teleported="false"><el-option label="公告" value="announcement" /><el-option label="团队动态" value="story" /><el-option label="招聘说明" value="guide" /></el-select></el-form-item><el-form-item label="发布时间"><el-input v-model="contentForm.publishedAt" placeholder="2026-08-13 09:00" /></el-form-item></div>
+            <div class="form-row"><el-form-item label="内容类型"><el-select v-model="contentForm.type" :teleported="false" popper-class="content-type-popper" :popper-style="{ animation: 'none', transition: 'none' }"><el-option label="公告" value="announcement" /><el-option label="团队动态" value="story" /><el-option label="招聘说明" value="guide" /></el-select></el-form-item><el-form-item label="发布时间"><el-input v-model="contentForm.publishedAt" placeholder="2026-08-13 09:00" /></el-form-item></div>
             <el-form-item><el-checkbox v-model="contentForm.published">发布到首页</el-checkbox></el-form-item>
             <div class="action-row"><el-button type="primary" @click="saveContent">保存内容</el-button><el-button @click="resetContentForm">新建内容</el-button></div>
           </el-form>
@@ -579,6 +579,10 @@ function syncRouteState() {
 .content-page :deep(*),
 .content-page :deep(*::before),
 .content-page :deep(*::after) { animation: none !important; transition: none !important; }
+:global(.content-type-popper.el-zoom-in-top-enter-active),
+:global(.content-type-popper.el-zoom-in-top-leave-active),
+:global(.content-type-popper.el-zoom-in-top-enter-from),
+:global(.content-type-popper.el-zoom-in-top-leave-to) { animation: none !important; transition: none !important; transform: none !important; opacity: 1 !important; }
 .content-form { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .content-preview { min-width: 0; min-height: 280px; padding: 22px; border: 1px solid #cbd7d1; border-radius: var(--radius-md); background: #f5f8f5; }
