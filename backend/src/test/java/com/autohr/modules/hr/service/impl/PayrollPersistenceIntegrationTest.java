@@ -53,6 +53,25 @@ class PayrollPersistenceIntegrationTest {
     }
 
     @Test
+    void singleMonthPayrollMatchesTheManualGrossTaxAndNetCalculation() throws Exception {
+        JdbcTemplate jdbc = migratedDatabase("single-month.db");
+        insertDepartmentAndJob(jdbc);
+        insertEmployee(jdbc, 1, "E001", "2026-08-01", 1, null, "20000.00");
+        jdbc.update("INSERT INTO hr_salary_history (employee_id,effective_month,base_salary_before,base_salary_after) VALUES (1,'2026-08',0,20000)");
+        jdbc.update("INSERT INTO hr_performance_month (employee_id,salary_month,amount) VALUES (1,'2026-08',1000)");
+        jdbc.update("INSERT INTO hr_overtime_month (employee_id,salary_month,overtime_hours,unit_rate,overtime_pay) VALUES (1,'2026-08',2,50,100)");
+        jdbc.update("INSERT INTO hr_social_insurance_month (employee_id,salary_month,pension,medical,unemployment,housing_fund) VALUES (1,'2026-08',1000,200,50,750)");
+        jdbc.update("INSERT INTO hr_special_deduction_month (employee_id,salary_month,children_education,continuing_education,housing_loan_interest,housing_rent,elderly_support,infant_care,other_deduction) VALUES (1,'2026-08',1000,0,0,0,0,0,0)");
+
+        PayrollVO payroll = service(jdbc).generate(request(1L, "2026-08")).get(0);
+
+        assertEquals(new BigDecimal("21100.00"), payroll.getGrossIncome());
+        assertEquals(new BigDecimal("13100.00"), payroll.getCumulativeTaxableIncome());
+        assertEquals(new BigDecimal("393.00"), payroll.getCurrentTaxWithheld());
+        assertEquals(new BigDecimal("18707.00"), payroll.getNetPay());
+    }
+
+    @Test
     void yearMidHireUsesOnlyEmployedMonthsInPersistedPayroll() throws Exception {
         JdbcTemplate jdbc = migratedDatabase("mid-year.db");
         insertDepartmentAndJob(jdbc);
@@ -129,6 +148,19 @@ class PayrollPersistenceIntegrationTest {
             assertEquals(10000D, workbook.getSheetAt(0).getRow(1).getCell(4).getNumericCellValue());
             assertEquals(0D, workbook.getSheetAt(0).getRow(1).getCell(5).getNumericCellValue());
         }
+    }
+
+    @Test
+    void monthlyInputListsExposeTheEmployeeNameExpectedByTheFrontend() throws Exception {
+        JdbcTemplate jdbc = migratedDatabase("input-list.db");
+        insertDepartmentAndJob(jdbc);
+        insertEmployee(jdbc, 1, "E001", "2026-01-01", 1, null, "10000.00");
+        jdbc.update("INSERT INTO hr_performance_month (employee_id,salary_month,amount) VALUES (1,'2026-08',1200)");
+
+        List<java.util.Map<String, Object>> rows = service(jdbc).listInputs("performance", "2026-08", null);
+
+        assertEquals(1, rows.size());
+        assertEquals("员工1", rows.get(0).get("employee_name"));
     }
 
     private JdbcTemplate migratedDatabase(String fileName) throws Exception {

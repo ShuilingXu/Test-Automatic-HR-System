@@ -111,6 +111,7 @@ async function requestAllPages(path, params) {
 export const hrApi = {
   getDashboard() { return request.get('/hr/dashboard') },
   listDepartments(params) { return requestPage('/hr/departments', params) },
+  listAllDepartments(params) { return requestAllPages('/hr/departments', params) },
   saveDepartment(payload) { return request.post('/hr/departments', payload) },
   deleteDepartment(id) { return request.delete(`/hr/departments/${id}`) },
   listEmployees(params) { return requestPage('/hr/employees', params) },
@@ -153,6 +154,7 @@ export function downloadBlob(blob, filename) {
 export const recruitmentApi = {
   saveJob(payload) { return request.post('/recruitment/admin/jobs', payload) },
   listAdminJobs(params) { return requestPage('/recruitment/admin/jobs', params) },
+  listAllAdminJobs(params) { return requestAllPages('/recruitment/admin/jobs', params) },
   deleteJob(id) { return request.delete(`/recruitment/admin/jobs/${id}`) },
   listCandidates(params) { return requestPage('/recruitment/admin/candidates', params) },
   getCandidate(id) { return request.get(`/recruitment/admin/candidates/${id}`) },

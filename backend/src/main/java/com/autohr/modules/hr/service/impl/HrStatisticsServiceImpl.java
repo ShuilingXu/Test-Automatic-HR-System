@@ -140,7 +140,7 @@ public class HrStatisticsServiceImpl implements HrStatisticsService {
 
     private void populateDismissals(HrStatisticsVO result, YearMonth month) {
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT e.dismissal_reason,p.gross_income FROM hr_employee e "
+                "SELECT e.dismissal_reason,e.salary_confirmed,p.gross_income FROM hr_employee e "
                         + "LEFT JOIN hr_payroll_month p ON p.employee_id=e.id AND p.salary_month=? "
                         + "WHERE e.employment_status=3 AND e.dismissal_date>=? AND e.dismissal_date<=?",
                 month.toString(), month.atDay(1), month.atEndOfMonth());
@@ -149,7 +149,7 @@ public class HrStatisticsServiceImpl implements HrStatisticsService {
         long payrollCount = 0;
         Map<String, Long> reasons = new LinkedHashMap<>();
         for (Map<String, Object> row : rows) {
-            if (row.get("gross_income") != null) {
+            if (number(row.get("salary_confirmed")) == 1L && row.get("gross_income") != null) {
                 total = total.add(money(row.get("gross_income")));
                 payrollCount++;
             }

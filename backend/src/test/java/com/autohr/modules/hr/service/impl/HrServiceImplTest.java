@@ -5,6 +5,7 @@ import com.autohr.modules.hr.dto.EmployeeSaveRequest;
 import com.autohr.modules.hr.dto.EmployeeVO;
 import com.autohr.modules.hr.entity.Department;
 import com.autohr.modules.hr.entity.Employee;
+import com.autohr.modules.hr.entity.SalaryHistory;
 import com.autohr.modules.hr.mapper.DepartmentMapper;
 import com.autohr.modules.hr.mapper.EmployeeMapper;
 import com.autohr.modules.hr.mapper.IntegrationBindingMapper;
@@ -20,6 +21,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -89,6 +91,43 @@ class HrServiceImplTest {
 
         verify(employeeMapper, never()).insert(any(Employee.class));
         verify(employeeMapper, never()).updateById(any(Employee.class));
+    }
+
+    @Test
+    void salaryChangeToZeroUpdatesTheCurrentMonthHistoryAndConfirmsTheSalary() {
+        Department department = department(7L);
+        Employee employee = new Employee();
+        employee.setId(42L);
+        employee.setEmployeeCode("EMP-42");
+        employee.setFullName("Test User");
+        employee.setDepartmentId(7L);
+        employee.setJobId(3L);
+        employee.setBaseSalary(new BigDecimal("10000.00"));
+        employee.setSalaryConfirmed(0);
+        SalaryHistory history = new SalaryHistory();
+        history.setId(11L);
+        history.setEmployeeId(42L);
+
+        when(departmentMapper.selectById(7L)).thenReturn(department);
+        when(employeeMapper.selectCount(any())).thenReturn(0L);
+        when(employeeMapper.selectById(42L)).thenReturn(employee);
+        when(recruitmentJobMapper.selectById(3L)).thenReturn(job(3L));
+        when(salaryHistoryMapper.selectOne(any())).thenReturn(history);
+        when(departmentMapper.selectList(any())).thenReturn(List.of(department));
+        when(employeeMapper.selectList(any())).thenReturn(List.of(employee));
+        EmployeeSaveRequest request = employeeRequest(42L);
+        request.setBaseSalary(BigDecimal.ZERO);
+        request.setSalaryChangeReason("协商调整");
+
+        hrService.saveEmployee(request, 99L);
+
+        assertEquals(new BigDecimal("0.00"), employee.getBaseSalary());
+        assertEquals(1, employee.getSalaryConfirmed());
+        assertEquals(new BigDecimal("10000.00"), history.getBaseSalaryBefore());
+        assertEquals(new BigDecimal("0.00"), history.getBaseSalaryAfter());
+        assertEquals("协商调整", history.getReason());
+        assertEquals(99L, history.getOperatorUserId());
+        verify(salaryHistoryMapper).updateById(history);
     }
 
     private Department department(Long id) {

@@ -155,6 +155,7 @@ onMounted(async () => { await loadEmployees(); await Promise.all([loadPayroll(),
 
 <style scoped>
 .payroll-page { display: grid; gap: 18px; max-width: 1440px; margin: 0 auto; padding: 30px; }
+.payroll-page > *, :deep(.monthly-form), :deep(.form-grid), :deep(.actions) { min-width: 0; }
 .payroll-page header, .filters { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .payroll-page h1 { margin: 4px 0; }
 .filters { justify-content: flex-start; padding: 14px 0; border-bottom: 1px solid var(--border); }

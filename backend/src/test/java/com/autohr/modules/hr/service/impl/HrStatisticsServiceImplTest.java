@@ -71,6 +71,24 @@ class HrStatisticsServiceImplTest {
         assertEquals(new BigDecimal("20.00"), statistics.getSalary().getEmployees().get(0).get("newEmployeeGrowth"));
     }
 
+    @Test
+    void dismissalAverageExcludesUnconfirmedEmployeesWithoutDroppingTheirCount() throws Exception {
+        JdbcTemplate jdbc = migratedDatabase("dismissal-average.db");
+        jdbc.update("INSERT INTO hr_department (department_code,department_name,description) VALUES ('D1','研发部','研发')");
+        jdbc.update("INSERT INTO recruitment_job (job_code,job_title,department_name,requirements,responsibilities,publish_date) VALUES ('J1','工程师','研发部','要求','职责','2026-01-01')");
+        insertEmployee(jdbc, "E001", "已确认员工", "110101199001010011", "13800000001", 1, new BigDecimal("10000.00"));
+        insertEmployee(jdbc, "E002", "未确认员工", "110101199001010022", "13800000002", 0, new BigDecimal("0.00"));
+        jdbc.update("UPDATE hr_employee SET employment_status=3,dismissal_date='2026-08-15',dismissal_reason='组织调整'");
+        insertPayroll(jdbc, 1, "10000.00");
+        insertPayroll(jdbc, 2, "99999.00");
+
+        HrStatisticsVO statistics = new HrStatisticsServiceImpl(jdbc).statistics("2026-08");
+
+        assertEquals(2, statistics.getDismissal().getCount());
+        assertEquals(new BigDecimal("10000.00"), statistics.getDismissal().getAverageGross());
+        assertEquals(2L, statistics.getDismissal().getReasons().get(0).get("value"));
+    }
+
     private JdbcTemplate migratedDatabase(String fileName) throws Exception {
         String url = "jdbc:sqlite:" + tempDirectory.resolve(fileName).toString().replace('\\', '/');
         DriverManagerDataSource dataSource = new DriverManagerDataSource(url);
@@ -82,5 +100,11 @@ class HrStatisticsServiceImplTest {
                                 int confirmed, BigDecimal salary) {
         jdbc.update("INSERT INTO hr_employee (employee_code,full_name,id_card_no,mobile_phone,recruitment_major,position_name,department_id,bank_account_no,bank_name,hire_date,employment_status,job_id,base_salary,salary_confirmed) VALUES (?,?,?,?,?,?,?,?,?,'2026-01-01',1,1,?,?)",
                 code, name, idCard, mobile, "计算机", "工程师", 1, "6222000000000000" + confirmed, "测试银行", salary, confirmed);
+    }
+
+    private void insertPayroll(JdbcTemplate jdbc, long employeeId, String grossIncome) {
+        jdbc.update("INSERT INTO hr_payroll_month (employee_id,salary_month,base_salary,performance,overtime_hours,overtime_pay,gross_income,social_insurance_total,special_deduction_total,taxable_income_month,cumulative_income,cumulative_deduction_base,cumulative_social_insurance,cumulative_special_deduction,cumulative_taxable_income,cumulative_tax_withheld,current_tax_withheld,net_pay,locked) VALUES (?,'2026-08',?,0,0,0,?,0,0,0,?,40000,0,0,0,0,0,?,0)",
+                employeeId, new BigDecimal(grossIncome), new BigDecimal(grossIncome),
+                new BigDecimal(grossIncome), new BigDecimal(grossIncome));
     }
 }

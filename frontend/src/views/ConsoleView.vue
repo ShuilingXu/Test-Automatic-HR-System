@@ -161,7 +161,7 @@
             <el-form-item label="直属部门"><el-select v-model="employeeFilter.departmentId" clearable><el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" /></el-select></el-form-item>
             <el-form-item label="员工状态"><el-select v-model="employeeFilter.employmentStatus" clearable><el-option label="待入职" :value="0" /><el-option label="已入职" :value="1" /><el-option label="停用" :value="2" /><el-option label="已离职" :value="3" /></el-select></el-form-item>
             <el-form-item label="姓名"><el-input v-model="employeeFilter.name" /></el-form-item><el-form-item label="工号"><el-input v-model="employeeFilter.employeeCode" /></el-form-item><el-form-item label="联系方式"><el-input v-model="employeeFilter.mobilePhone" /></el-form-item>
-            <el-form-item label="联系方式匹配"><el-radio-group v-model="employeeFilter.mobileExact"><el-radio-button :label="false">模糊</el-radio-button><el-radio-button :label="true">精确</el-radio-button></el-radio-group></el-form-item>
+            <el-form-item label="联系方式匹配"><el-radio-group v-model="employeeFilter.mobileExact"><el-radio-button :value="false">模糊</el-radio-button><el-radio-button :value="true">精确</el-radio-button></el-radio-group></el-form-item>
             <el-form-item label="操作"><div class="filter-actions"><el-button type="primary" @click="loadEmployees">查询</el-button><el-button @click="resetEmployeeFilter">重置</el-button></div></el-form-item>
           </el-form>
           <div class="action-row"><el-button @click="downloadEmployeeTemplate">下载导入模板</el-button><el-upload :show-file-list="false" accept=".xlsx" :http-request="importEmployees"><el-button>批量导入</el-button></el-upload></div><el-table :data="employees" stripe class="data-table" @row-click="openEmployee"><el-table-column prop="employeeCode" label="工号" /><el-table-column prop="fullName" label="姓名" /><el-table-column prop="departmentName" label="部门" /><el-table-column prop="positionName" label="岗位" /><el-table-column prop="baseSalary" label="基本薪资" /><el-table-column prop="mobilePhone" label="电话" /><el-table-column label="身份证号"><template #default="{ row }">{{ mask(row.idCardNo) }}</template></el-table-column><el-table-column label="银行卡号"><template #default="{ row }">{{ mask(row.bankAccountNo) }}</template></el-table-column><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteEmployee(scope.row.id)">删除</el-button></template></el-table-column></el-table>
@@ -175,7 +175,7 @@
             <el-form-item label="标题"><el-input v-model="contentForm.title" placeholder="例如：春季招聘开放" /></el-form-item>
             <el-form-item label="摘要"><el-input v-model="contentForm.summary" maxlength="140" show-word-limit placeholder="首页列表中展示的一句话" /></el-form-item>
             <el-form-item label="正文"><el-input v-model="contentForm.content" type="textarea" :rows="9" placeholder="支持纯文本，建议分段书写" /></el-form-item>
-            <div class="form-row"><el-form-item label="内容类型"><el-radio-group v-model="contentForm.type" class="content-type-options" aria-label="内容类型"><el-radio-button label="announcement">公告</el-radio-button><el-radio-button label="story">团队动态</el-radio-button><el-radio-button label="guide">招聘说明</el-radio-button></el-radio-group></el-form-item><el-form-item label="发布时间"><el-input v-model="contentForm.publishedAt" placeholder="2026-08-13 09:00" /></el-form-item></div>
+            <div class="form-row"><el-form-item label="内容类型"><el-radio-group v-model="contentForm.type" class="content-type-options" aria-label="内容类型"><el-radio-button value="announcement">公告</el-radio-button><el-radio-button value="story">团队动态</el-radio-button><el-radio-button value="guide">招聘说明</el-radio-button></el-radio-group></el-form-item><el-form-item label="发布时间"><el-input v-model="contentForm.publishedAt" placeholder="2026-08-13 09:00" /></el-form-item></div>
             <el-form-item><el-checkbox v-model="contentForm.published">发布到首页</el-checkbox></el-form-item>
             <div class="action-row"><el-button type="primary" @click="saveContent">保存内容</el-button><el-button @click="resetContentForm">新建内容</el-button></div>
           </el-form>
@@ -377,10 +377,10 @@ function localizeDetail(value) {
 }
 async function loadSession() { try { const response = await authApi.getSession(); sessionUser.value = response.data; writeSessionUser(response.data) } catch (error) { fail(error); router.push('/login') } }
 async function loadDashboard() { try { Object.assign(dashboard, (await hrApi.getDashboard()).data) } catch (error) { fail(error) } }
-async function loadDepartments() { try { departments.value = (await hrApi.listDepartments(cleanParams(departmentFilter))).data } catch (error) { fail(error) } }
+async function loadDepartments() { try { departments.value = (await hrApi.listAllDepartments(cleanParams(departmentFilter))).data } catch (error) { fail(error) } }
 async function loadEmployees() { try { employees.value = (await hrApi.listAllEmployees(cleanParams(employeeFilter))).data } catch (error) { fail(error) } }
 async function loadContent() { try { contentItems.value = (await siteContentApi.listAdmin()).data || [] } catch (error) { fail(error) } }
-async function loadJobs() { try { jobs.value = (await recruitmentApi.listAdminJobs(cleanParams(jobFilter))).data } catch (error) { fail(error) } }
+async function loadJobs() { try { jobs.value = (await recruitmentApi.listAllAdminJobs(cleanParams(jobFilter))).data } catch (error) { fail(error) } }
 async function loadCandidates() { try { candidates.value = (await recruitmentApi.listCandidates(cleanParams(candidateFilter))).data } catch (error) { fail(error) } }
 async function loadRecruitment() { await Promise.all([loadJobs(), loadCandidates()]) }
 async function loadUsers() { if (!(isItAdmin.value || isHrAdmin.value)) return; try { users.value = (await authApi.listUsers()).data } catch (error) { fail(error) } }

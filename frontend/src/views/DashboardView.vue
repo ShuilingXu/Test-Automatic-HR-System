@@ -19,7 +19,7 @@
       <el-form label-position="top">
         <el-form-item label="统计卡片"><el-checkbox-group v-model="config.cards"><el-checkbox v-for="card in cards" :key="card.id" :label="card.id">{{ card.label }}</el-checkbox></el-checkbox-group></el-form-item>
         <el-form-item v-for="section in chartSections" :key="section.key" :label="`${section.label}图表`">
-          <el-radio-group v-model="config.charts[section.key]"><el-radio-button label="bar">柱状图</el-radio-button><el-radio-button label="pie">饼图</el-radio-button><el-radio-button label="table">表格</el-radio-button></el-radio-group>
+          <el-radio-group v-model="config.charts[section.key]"><el-radio-button value="bar">柱状图</el-radio-button><el-radio-button value="pie">饼图</el-radio-button><el-radio-button value="table">表格</el-radio-button></el-radio-group>
         </el-form-item>
       </el-form>
       <template #footer><el-button @click="configVisible = false">取消</el-button><el-button type="primary" @click="save">保存</el-button></template>
@@ -80,11 +80,12 @@ function draw() {
   nextTick(() => chartSections.forEach(({ key }) => {
     const node = chartNodes[key]
     if (!node) return
-    const chart = chartInstances[key] || (chartInstances[key] = echarts.init(node))
     if (config.charts[key] === 'table') {
-      chart.clear()
+      chartInstances[key]?.clear()
       return
     }
+    const chart = chartInstances[key] || (chartInstances[key] = echarts.init(node))
+    chart.resize()
     const items = chartRows(key)
     const pie = config.charts[key] === 'pie'
     chart.setOption(pie ? {

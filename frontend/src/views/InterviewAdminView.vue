@@ -126,7 +126,7 @@
             <div v-for="(stage, index) in templateForm.stages" :key="stage.key" class="template-stage-row">
               <span class="stage-order">{{ index + 1 }}</span>
               <el-input v-model="stage.stageName" maxlength="128" placeholder="自定义阶段名称" />
-              <el-radio-group v-model="stage.stageType" class="stage-type-switch"><el-radio-button label="AI">AI 面试</el-radio-button><el-radio-button label="VIDEO">视频面试</el-radio-button></el-radio-group>
+              <el-radio-group v-model="stage.stageType" class="stage-type-switch"><el-radio-button value="AI">AI 面试</el-radio-button><el-radio-button value="VIDEO">视频面试</el-radio-button></el-radio-group>
               <el-select v-if="stage.stageType === 'AI'" v-model="stage.knowledgeBaseId" placeholder="选择题库"><el-option v-for="item in enabledKnowledgeBases" :key="item.id" :label="item.knowledgeBaseName" :value="item.id" /></el-select>
               <span v-else class="human-stage-note">由 HR 发起并完成视频面试</span>
               <div class="stage-row-actions">
@@ -601,8 +601,8 @@ async function loadAll() {
       if (activeTab.value === 'llm') router.replace('/interview/hr/knowledge-bases')
     }
     const [jobsResponse, departmentsResponse, candidatesResponse, templatesResponse, processesResponse] = await Promise.all([
-      recruitmentApi.listAdminJobs(),
-      hrApi.listDepartments({ status: 1 }),
+      recruitmentApi.listAllAdminJobs(),
+      hrApi.listAllDepartments({ status: 1 }),
       recruitmentApi.listCandidates(),
       interviewApi.listProcessTemplates(),
       interviewApi.listProcesses(),

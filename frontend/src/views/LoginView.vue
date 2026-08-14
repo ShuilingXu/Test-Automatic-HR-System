@@ -29,8 +29,8 @@
           <el-form-item label="姓名"><el-input v-model="registerForm.displayName" /></el-form-item>
           <el-form-item label="验证方式">
             <el-radio-group v-model="registerForm.contactType" class="contact-type" @change="changeContactType">
-              <el-radio-button label="phone">手机号</el-radio-button>
-              <el-radio-button label="email">邮箱</el-radio-button>
+              <el-radio-button value="phone">手机号</el-radio-button>
+              <el-radio-button value="email">邮箱</el-radio-button>
             </el-radio-group>
           </el-form-item>
           <el-form-item :label="registerForm.contactType === 'phone' ? '手机号' : '邮箱'">

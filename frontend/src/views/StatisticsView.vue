@@ -15,9 +15,9 @@
         <div class="chart-toolbar">
           <span>图表类型</span>
           <el-radio-group v-model="chartTypes[section.key]" @change="draw">
-            <el-radio-button label="bar">柱状图</el-radio-button>
-            <el-radio-button label="pie">饼图</el-radio-button>
-            <el-radio-button label="table">表格</el-radio-button>
+            <el-radio-button value="bar">柱状图</el-radio-button>
+            <el-radio-button value="pie">饼图</el-radio-button>
+            <el-radio-button value="table">表格</el-radio-button>
           </el-radio-group>
         </div>
         <div v-show="chartTypes[section.key] !== 'table'" :ref="(element) => setChart(section.key, element)" class="chart" />
@@ -102,11 +102,13 @@ function chartData(key) {
   return values.map((item) => [item.departmentName, item.averageGross])
 }
 function draw() {
-  nextTick(() => sections.forEach(({ key }) => {
+  nextTick(() => {
+    const key = tab.value
     const node = nodes[key]
     if (!node || chartTypes[key] === 'table') return
     const items = chartData(key)
     const chart = charts[key] || (charts[key] = echarts.init(node))
+    chart.resize()
     const pie = chartTypes[key] === 'pie'
     chart.setOption(pie ? {
       tooltip: { trigger: 'item' }, series: [{ type: 'pie', radius: ['35%', '68%'], data: items.map(([name, value]) => ({ name, value })) }],
@@ -115,7 +117,7 @@ function draw() {
       xAxis: { type: 'category', data: items.map((item) => item[0]), axisLabel: { rotate: items.length > 8 ? 35 : 0 } },
       yAxis: { type: 'value' }, series: [{ type: 'bar', data: items.map((item) => item[1]), itemStyle: { color: '#27806f' } }],
     }, { notMerge: true })
-  }))
+  })
 }
 async function load() { data.value = (await hrApi.statistics(month.value)).data; draw() }
 function money(value) { return `¥${Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` }
