@@ -32,14 +32,21 @@ jobs:
           path: release/auto-hr-release.zip
           if-no-files-found: error
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/auto-hr-release.zip
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('build-{0}', github.run_number) }}
-          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('Build {0}', github.run_number) }}
-          target_commitish: ${{ github.sha }}
-          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('build-{0}', github.run_number) }}
+          RELEASE_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('Build {0}', github.run_number) }}
+          RELEASE_PRERELEASE: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          release_args=(--title "$RELEASE_NAME" --target "$GITHUB_SHA" --generate-notes)
+          if [ "$RELEASE_PRERELEASE" = "true" ]; then
+            release_args+=(--prerelease)
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/auto-hr-release.zip --clobber
+          else
+            gh release create "$RELEASE_TAG" release/auto-hr-release.zip "${release_args[@]}"
+          fi
 
   deploy:
     needs: package
