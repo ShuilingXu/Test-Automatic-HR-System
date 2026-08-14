@@ -231,7 +231,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         ensureForeignKey(connection, statement, "fk_hr_employee_manager", "hr_employee", "manager_employee_id", "hr_employee");
         ensureForeignKey(connection, statement, "fk_hr_department_parent", "hr_department", "parent_department_id", "hr_department");
         ensureForeignKey(connection, statement, "fk_hr_department_manager", "hr_department", "manager_employee_id", "hr_employee");
-        ensureForeignKey(connection, statement, "fk_hr_employee_source_candidate", "hr_employee", "source_candidate_id", "recruitment_candidate");
+        ensureEmployeeSourceCandidateForeignKey(connection, statement);
         ensureForeignKey(connection, statement, "fk_binding_employee", "hr_integration_binding", "employee_id", "hr_employee");
         ensureForeignKey(connection, statement, "fk_candidate_interviewee_user", "recruitment_candidate", "interviewee_user_id", "sys_user");
         ensureForeignKey(connection, statement, "fk_process_candidate", "interview_process", "recruitment_candidate_id", "recruitment_candidate");
@@ -245,6 +245,73 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         ensureForeignKey(connection, statement, "fk_video_session_process", "interview_video_session", "process_id", "interview_process");
         ensureForeignKey(connection, statement, "fk_video_session_stage", "interview_video_session", "process_stage_id", "interview_process_stage");
         ensureForeignKey(connection, statement, "fk_video_session_approver", "interview_video_session", "approver_user_id", "sys_user");
+    }
+
+    /**
+     * The legacy SQLite data set contains a nullable employee source reference which was allowed to
+     * outlive its candidate. This is the only historical relationship we repair automatically.
+     */
+    private void ensureEmployeeSourceCandidateForeignKey(Connection connection, Statement statement) throws SQLException {
+        if (activeDatabase.type() != DatabaseType.PGSQL) {
+            ensureForeignKey(connection, statement, "fk_hr_employee_source_candidate", "hr_employee",
+                    "source_candidate_id", "recruitment_candidate");
+            return;
+        }
+
+        boolean originalAutoCommit = connection.getAutoCommit();
+        int originalIsolation = connection.getTransactionIsolation();
+        try {
+            connection.setAutoCommit(false);
+            connection.setTransactionIsolation(Connection.TRANSACTION_SERIALIZABLE);
+            try (Statement transactionStatement = connection.createStatement()) {
+                transactionStatement.executeUpdate("CREATE TABLE IF NOT EXISTS database_migration_orphan_archive ("
+                        + "table_name VARCHAR(64) NOT NULL, column_name VARCHAR(64) NOT NULL, "
+                        + "child_id INTEGER NOT NULL, invalid_reference_id INTEGER NOT NULL, "
+                        + "archived_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)");
+                transactionStatement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_migration_orphan_archive_expiry "
+                        + "ON database_migration_orphan_archive (archived_at)");
+                transactionStatement.executeUpdate("DELETE FROM database_migration_orphan_archive "
+                        + "WHERE archived_at < CURRENT_TIMESTAMP - INTERVAL '5 days'");
+
+                if (!foreignKeyExists(connection, "hr_employee", "source_candidate_id", "recruitment_candidate")) {
+                    transactionStatement.executeUpdate("LOCK TABLE hr_employee, recruitment_candidate "
+                            + "IN SHARE ROW EXCLUSIVE MODE");
+                    int archivedRows = transactionStatement.executeUpdate("INSERT INTO database_migration_orphan_archive "
+                            + "(table_name, column_name, child_id, invalid_reference_id, archived_at) "
+                            + "SELECT 'hr_employee', 'source_candidate_id', child.id, child.source_candidate_id, CURRENT_TIMESTAMP "
+                            + "FROM hr_employee child LEFT JOIN recruitment_candidate parent "
+                            + "ON child.source_candidate_id = parent.id "
+                            + "WHERE child.source_candidate_id IS NOT NULL AND parent.id IS NULL");
+                    int repairedRows = transactionStatement.executeUpdate("UPDATE hr_employee child SET source_candidate_id = NULL "
+                            + "WHERE child.source_candidate_id IS NOT NULL AND NOT EXISTS "
+                            + "(SELECT 1 FROM recruitment_candidate parent WHERE parent.id = child.source_candidate_id)");
+                    if (archivedRows != repairedRows) {
+                        throw new SQLException("Employee source-candidate repair changed while migration was running");
+                    }
+                    if (repairedRows > 0) {
+                        log.warn("Archived and cleared {} orphaned hr_employee.source_candidate_id value(s)", repairedRows);
+                    }
+                    assertNoOrphanedReferences(transactionStatement, "hr_employee", "source_candidate_id", "recruitment_candidate");
+                    execute(transactionStatement, "ALTER TABLE hr_employee ADD CONSTRAINT fk_hr_employee_source_candidate "
+                            + "FOREIGN KEY (source_candidate_id) REFERENCES recruitment_candidate(id) ON DELETE RESTRICT");
+                }
+            }
+            connection.commit();
+        } catch (SQLException | RuntimeException ex) {
+            rollbackEmployeeSourceCandidateMigration(connection, ex);
+            throw ex;
+        } finally {
+            connection.setTransactionIsolation(originalIsolation);
+            connection.setAutoCommit(originalAutoCommit);
+        }
+    }
+
+    private void rollbackEmployeeSourceCandidateMigration(Connection connection, Exception original) {
+        try {
+            connection.rollback();
+        } catch (SQLException rollbackError) {
+            original.addSuppressed(rollbackError);
+        }
     }
 
     private void ensureForeignKey(Connection connection, Statement statement, String constraintName, String table,
