@@ -1252,11 +1252,10 @@ public class InterviewServiceImpl implements InterviewService {
             } else {
                 process.setAiRecordingPath(storedFile.toString());
                 process.setAiRecordingFileName(storedName);
+                processMapper.updateById(process);
             }
-            processMapper.updateById(process);
             auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "UPLOAD_AI_EXAM_RECORDING", "INTERVIEW_PROCESS", String.valueOf(processId), storedName);
-            InterviewVO vo = toProcessVO(process);
-            return vo;
+            return getProcess(processId);
         } catch (IOException ex) {
             throw new BusinessException("AI面试录制文件上传失败: " + ex.getMessage());
         }
