@@ -1,5 +1,7 @@
 package com.autohr.modules.hr.service;
 
+import com.autohr.common.api.PageQuery;
+import com.autohr.common.api.PageResponse;
 import com.autohr.modules.hr.dto.DepartmentSaveRequest;
 import com.autohr.modules.hr.dto.DepartmentVO;
 import com.autohr.modules.hr.dto.EmployeeSaveRequest;
@@ -8,25 +10,23 @@ import com.autohr.modules.hr.dto.HrDashboardVO;
 import com.autohr.modules.hr.dto.IntegrationBindingSaveRequest;
 import com.autohr.modules.hr.dto.IntegrationBindingVO;
 
-import java.util.List;
-
 public interface HrService {
 
     DepartmentVO saveDepartment(DepartmentSaveRequest request);
 
-    List<DepartmentVO> listDepartments(Long parentDepartmentId, Integer status, String keyword);
+    PageResponse<DepartmentVO> listDepartments(Long parentDepartmentId, Integer status, String keyword, PageQuery pageQuery);
 
     void deleteDepartment(Long id);
 
     EmployeeVO saveEmployee(EmployeeSaveRequest request);
 
-    List<EmployeeVO> listEmployees(Long departmentId, Integer employmentStatus, String keyword);
+    PageResponse<EmployeeVO> listEmployees(Long departmentId, Integer employmentStatus, String keyword, PageQuery pageQuery);
 
     void deleteEmployee(Long id);
 
     IntegrationBindingVO saveBinding(IntegrationBindingSaveRequest request);
 
-    List<IntegrationBindingVO> listBindings(String moduleCode, Long employeeId, Long departmentId);
+    PageResponse<IntegrationBindingVO> listBindings(String moduleCode, Long employeeId, Long departmentId, PageQuery pageQuery);
 
     HrDashboardVO getDashboard();
 }

@@ -300,10 +300,24 @@ CREATE TABLE IF NOT EXISTS interview_ai_record (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     process_id INTEGER NOT NULL,
     process_stage_id INTEGER,
+    stage_scope_id INTEGER NOT NULL DEFAULT 0,
     knowledge_base_id INTEGER,
     knowledge_point VARCHAR(255),
     question_content VARCHAR(5000) NOT NULL,
+    question_status VARCHAR(32) NOT NULL DEFAULT 'READY',
+    question_generation_attempts INTEGER NOT NULL DEFAULT 0,
+    question_generation_token VARCHAR(64),
+    question_lease_expires_at DATETIME,
+    question_next_retry_at DATETIME,
+    question_generation_error VARCHAR(1000),
+    previous_record_id INTEGER,
+    suggested_next_question VARCHAR(5000),
     answer_content VARCHAR(5000),
+    answer_status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    answer_processing_token VARCHAR(64),
+    answer_lease_expires_at DATETIME,
+    answer_processing_attempts INTEGER NOT NULL DEFAULT 0,
+    answer_error VARCHAR(1000),
     interviewer_score INTEGER,
     scorer_score INTEGER,
     average_score INTEGER,
@@ -353,6 +367,7 @@ CREATE TABLE IF NOT EXISTS interview_process_template (
     template_name VARCHAR(128) NOT NULL,
     description VARCHAR(1000),
     status INTEGER NOT NULL DEFAULT 1,
+    version INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -390,6 +405,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_interview_process_candidate_id ON interview
 CREATE INDEX IF NOT EXISTS idx_interview_process_template_id ON interview_process(template_id);
 CREATE INDEX IF NOT EXISTS idx_interview_process_stage ON interview_process(current_stage);
 CREATE INDEX IF NOT EXISTS idx_interview_ai_record_process_id ON interview_ai_record(process_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_interview_ai_record_scope_sequence ON interview_ai_record(process_id, stage_scope_id, sequence_no);
+CREATE INDEX IF NOT EXISTS idx_interview_ai_record_question_retry ON interview_ai_record(question_status, question_next_retry_at);
+CREATE INDEX IF NOT EXISTS idx_interview_ai_record_answer_lease ON interview_ai_record(answer_status, answer_lease_expires_at);
 CREATE INDEX IF NOT EXISTS idx_interview_ai_record_process_stage_id ON interview_ai_record(process_stage_id);
 CREATE INDEX IF NOT EXISTS idx_interview_video_session_process_id ON interview_video_session(process_id);
 CREATE INDEX IF NOT EXISTS idx_interview_video_session_process_stage_id ON interview_video_session(process_stage_id);

@@ -1,6 +1,8 @@
 package com.autohr.modules.recruitment.service.impl;
 
 import cn.hutool.core.util.StrUtil;
+import com.autohr.common.api.PageQuery;
+import com.autohr.common.api.PageResponse;
 import com.autohr.common.exception.BusinessException;
 import com.autohr.common.file.S3ObjectStorageService;
 import com.autohr.common.file.UploadPaths;
@@ -36,6 +38,7 @@ import com.autohr.modules.recruitment.mapper.RecruitmentJobMapper;
 import com.autohr.modules.recruitment.mapper.RecruitmentResumeFileMapper;
 import com.autohr.modules.recruitment.service.RecruitmentService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -142,8 +145,10 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     @Override
-    public List<JobVO> listJobs(Integer status, String departmentName, String jobType, String keyword) {
-        List<RecruitmentJob> jobs = jobMapper.selectList(new LambdaQueryWrapper<RecruitmentJob>()
+    public PageResponse<JobVO> listJobs(Integer status, String departmentName, String jobType, String keyword,
+                                        PageQuery pageQuery) {
+        Page<RecruitmentJob> result = jobMapper.selectPage(new Page<>(pageQuery.page(), pageQuery.pageSize()),
+                new LambdaQueryWrapper<RecruitmentJob>()
                 .eq(status != null, RecruitmentJob::getStatus, status)
                 .eq(StrUtil.isNotBlank(departmentName), RecruitmentJob::getDepartmentName, departmentName)
                 .eq(StrUtil.isNotBlank(jobType), RecruitmentJob::getJobType, jobType)
@@ -153,7 +158,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                         .or().like(RecruitmentJob::getWorkLocation, keyword)
                         .or().like(RecruitmentJob::getSalaryRange, keyword))
                 .orderByDesc(RecruitmentJob::getId));
-        return jobs.stream().map(this::toJobVO).toList();
+        return PageResponse.of(result.getRecords().stream().map(this::toJobVO).toList(), result.getTotal(), pageQuery);
     }
 
     @Override
@@ -203,8 +208,10 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     @Override
-    public List<CandidateVO> listCandidates(Long jobId, String status, String interviewStageStatus, String keyword) {
-        List<RecruitmentCandidate> candidates = candidateMapper.selectList(new LambdaQueryWrapper<RecruitmentCandidate>()
+    public PageResponse<CandidateVO> listCandidates(Long jobId, String status, String interviewStageStatus, String keyword,
+                                                     PageQuery pageQuery) {
+        Page<RecruitmentCandidate> result = candidateMapper.selectPage(new Page<>(pageQuery.page(), pageQuery.pageSize()),
+                new LambdaQueryWrapper<RecruitmentCandidate>()
                 .eq(jobId != null, RecruitmentCandidate::getJobId, jobId)
                 .eq(StrUtil.isNotBlank(status), RecruitmentCandidate::getApplicationStatus, status)
                 .eq(StrUtil.isNotBlank(interviewStageStatus), RecruitmentCandidate::getInterviewStageStatus, interviewStageStatus)
@@ -216,21 +223,24 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 .orderByDesc(RecruitmentCandidate::getId));
         Map<Long, RecruitmentJob> jobMap = loadJobMap();
         Map<Long, RecruitmentResumeFile> resumeMap = loadResumeMap();
-        return candidates.stream().map(item -> toCandidateVO(item, jobMap, resumeMap)).toList();
+        return PageResponse.of(result.getRecords().stream().map(item -> toCandidateVO(item, jobMap, resumeMap)).toList(),
+                result.getTotal(), pageQuery);
     }
 
     @Override
-    public List<CandidateVO> listMyCandidates(String intervieweeUsername) {
+    public PageResponse<CandidateVO> listMyCandidates(String intervieweeUsername, PageQuery pageQuery) {
         SysUser user = findUserByUsername(intervieweeUsername);
         if (user == null) {
             throw new BusinessException("面试者用户不存在");
         }
-        List<RecruitmentCandidate> candidates = candidateMapper.selectList(new LambdaQueryWrapper<RecruitmentCandidate>()
+        Page<RecruitmentCandidate> result = candidateMapper.selectPage(new Page<>(pageQuery.page(), pageQuery.pageSize()),
+                new LambdaQueryWrapper<RecruitmentCandidate>()
                 .eq(RecruitmentCandidate::getIntervieweeUserId, user.getId())
                 .orderByDesc(RecruitmentCandidate::getId));
         Map<Long, RecruitmentJob> jobMap = loadJobMap();
         Map<Long, RecruitmentResumeFile> resumeMap = loadResumeMap();
-        return candidates.stream().map(item -> toCandidateVO(item, jobMap, resumeMap)).toList();
+        return PageResponse.of(result.getRecords().stream().map(item -> toCandidateVO(item, jobMap, resumeMap)).toList(),
+                result.getTotal(), pageQuery);
     }
 
     @Override

@@ -37,4 +37,17 @@ public class AsyncTaskConfig {
         executor.setAwaitTerminationSeconds(15);
         return executor;
     }
+
+    @Bean("interviewAiExecutor")
+    public TaskExecutor interviewAiExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("interview-ai-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        return executor;
+    }
 }

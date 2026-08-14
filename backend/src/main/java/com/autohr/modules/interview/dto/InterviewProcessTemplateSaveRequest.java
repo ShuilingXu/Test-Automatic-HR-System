@@ -10,6 +10,7 @@ import java.util.List;
 @Data
 public class InterviewProcessTemplateSaveRequest {
     private Long id;
+    private Integer version;
     @NotBlank(message = "模板名称不能为空")
     private String templateName;
     private String description;

@@ -138,7 +138,7 @@
         <div class="sub-tabs"><button :class="{ active: employeeMode === 'create' }" @click="showCreateEmployee">新增员工</button><button :class="{ active: employeeMode === 'query' }" @click="employeeMode = 'query'">查询员工</button><button :class="{ active: employeeMode === 'edit' }" @click="employeeMode = 'edit'">修改员工</button></div>
         <template v-if="employeeMode === 'create' || employeeMode === 'edit'">
           <el-form :model="employeeForm" label-position="top" class="form-grid">
-            <el-form-item label="工号"><el-input v-model="employeeForm.employeeCode" placeholder="查询和修改时作为业务主键" /></el-form-item>
+            <el-form-item label="工号"><el-input v-model="employeeForm.employeeCode" placeholder="新增时可留空；修改请从列表进入" /></el-form-item>
             <el-form-item label="姓名"><el-input v-model="employeeForm.fullName" /></el-form-item>
             <el-form-item label="身份证号"><el-input v-model="employeeForm.idCardNo" /></el-form-item>
             <el-form-item label="手机号"><el-input v-model="employeeForm.mobilePhone" /></el-form-item>
@@ -169,7 +169,7 @@
             <el-form-item label="标题"><el-input v-model="contentForm.title" placeholder="例如：春季招聘开放" /></el-form-item>
             <el-form-item label="摘要"><el-input v-model="contentForm.summary" maxlength="140" show-word-limit placeholder="首页列表中展示的一句话" /></el-form-item>
             <el-form-item label="正文"><el-input v-model="contentForm.content" type="textarea" :rows="9" placeholder="支持纯文本，建议分段书写" /></el-form-item>
-            <div class="form-row"><el-form-item label="内容类型"><el-select v-model="contentForm.type" :teleported="false" popper-class="content-type-popper" :popper-style="{ animation: 'none', transition: 'none' }"><el-option label="公告" value="announcement" /><el-option label="团队动态" value="story" /><el-option label="招聘说明" value="guide" /></el-select></el-form-item><el-form-item label="发布时间"><el-input v-model="contentForm.publishedAt" placeholder="2026-08-13 09:00" /></el-form-item></div>
+            <div class="form-row"><el-form-item label="内容类型"><el-radio-group v-model="contentForm.type" class="content-type-options" aria-label="内容类型"><el-radio-button label="announcement">公告</el-radio-button><el-radio-button label="story">团队动态</el-radio-button><el-radio-button label="guide">招聘说明</el-radio-button></el-radio-group></el-form-item><el-form-item label="发布时间"><el-input v-model="contentForm.publishedAt" placeholder="2026-08-13 09:00" /></el-form-item></div>
             <el-form-item><el-checkbox v-model="contentForm.published">发布到首页</el-checkbox></el-form-item>
             <div class="action-row"><el-button type="primary" @click="saveContent">保存内容</el-button><el-button @click="resetContentForm">新建内容</el-button></div>
           </el-form>
@@ -575,14 +575,14 @@ function syncRouteState() {
 .audit-panel-head span { color: var(--text-muted); font-weight: 600; font-size: 13px; }
 .compact-table { margin-top: 12px; }
 .content-editor-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(240px, .75fr); gap: 22px; margin-top: 24px; }
-.content-page,
-.content-page :deep(*),
-.content-page :deep(*::before),
-.content-page :deep(*::after) { animation: none !important; transition: none !important; }
-:global(.content-type-popper.el-zoom-in-top-enter-active),
-:global(.content-type-popper.el-zoom-in-top-leave-active),
-:global(.content-type-popper.el-zoom-in-top-enter-from),
-:global(.content-type-popper.el-zoom-in-top-leave-to) { animation: none !important; transition: none !important; transform: none !important; opacity: 1 !important; }
+.content-type-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+.content-type-options :deep(.el-radio-button) { width: 100%; }
+.content-type-options :deep(.el-radio-button__inner) { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 38px; padding: 8px 10px; border-color: var(--border); border-radius: 0; background: var(--surface); color: var(--ink-soft); font: inherit; font-size: 14px; font-weight: 600; letter-spacing: .01em; box-shadow: none; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+.content-type-options :deep(.el-radio-button:first-child .el-radio-button__inner) { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.content-type-options :deep(.el-radio-button:last-child .el-radio-button__inner) { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.content-type-options :deep(.el-radio-button__inner:hover) { color: var(--primary); background: var(--primary-soft); }
+.content-type-options :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) { border-color: var(--primary); background: var(--primary); color: #ffffff; box-shadow: -1px 0 0 0 var(--primary); }
+.content-type-options :deep(.el-radio-button__original-radio:focus-visible + .el-radio-button__inner) { outline: 2px solid var(--primary-ring); outline-offset: 2px; }
 .content-form { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .content-preview { min-width: 0; min-height: 280px; padding: 22px; border: 1px solid #cbd7d1; border-radius: var(--radius-md); background: #f5f8f5; }

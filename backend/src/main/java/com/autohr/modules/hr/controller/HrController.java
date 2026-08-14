@@ -1,6 +1,8 @@
 package com.autohr.modules.hr.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.common.api.PageQuery;
+import com.autohr.common.api.PageResponse;
 import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.service.AuthService;
 import com.autohr.modules.auth.service.AuditLogService;
@@ -23,8 +25,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/hr")
@@ -50,10 +50,13 @@ public class HrController {
     }
 
     @GetMapping("/departments")
-    public ApiResponse<List<DepartmentVO>> listDepartments(@RequestParam(required = false) Long parentDepartmentId,
+    public ApiResponse<PageResponse<DepartmentVO>> listDepartments(@RequestParam(required = false) Long parentDepartmentId,
                                                            @RequestParam(required = false) Integer status,
-                                                           @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(hrService.listDepartments(parentDepartmentId, status, keyword));
+                                                           @RequestParam(required = false) String keyword,
+                                                           @RequestParam(required = false) Integer page,
+                                                           @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(hrService.listDepartments(parentDepartmentId, status, keyword,
+                PageQuery.of(page, pageSize)));
     }
 
     @DeleteMapping("/departments/{id}")
@@ -75,10 +78,13 @@ public class HrController {
     }
 
     @GetMapping("/employees")
-    public ApiResponse<List<EmployeeVO>> listEmployees(@RequestParam(required = false) Long departmentId,
+    public ApiResponse<PageResponse<EmployeeVO>> listEmployees(@RequestParam(required = false) Long departmentId,
                                                        @RequestParam(required = false) Integer employmentStatus,
-                                                       @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(hrService.listEmployees(departmentId, employmentStatus, keyword));
+                                                       @RequestParam(required = false) String keyword,
+                                                       @RequestParam(required = false) Integer page,
+                                                       @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(hrService.listEmployees(departmentId, employmentStatus, keyword,
+                PageQuery.of(page, pageSize)));
     }
 
     @DeleteMapping("/employees/{id}")
@@ -100,10 +106,13 @@ public class HrController {
     }
 
     @GetMapping("/bindings")
-    public ApiResponse<List<IntegrationBindingVO>> listBindings(@RequestParam(required = false) String moduleCode,
+    public ApiResponse<PageResponse<IntegrationBindingVO>> listBindings(@RequestParam(required = false) String moduleCode,
                                                                 @RequestParam(required = false) Long employeeId,
-                                                                @RequestParam(required = false) Long departmentId) {
-        return ApiResponse.success(hrService.listBindings(moduleCode, employeeId, departmentId));
+                                                                @RequestParam(required = false) Long departmentId,
+                                                                @RequestParam(required = false) Integer page,
+                                                                @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(hrService.listBindings(moduleCode, employeeId, departmentId,
+                PageQuery.of(page, pageSize)));
     }
 
     private SessionUserVO currentUser(Authentication authentication) {

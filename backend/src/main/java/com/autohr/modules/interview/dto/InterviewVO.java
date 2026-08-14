@@ -37,6 +37,7 @@ public class InterviewVO {
     private Long processId;
     private Long templateId;
     private String templateName;
+    private Integer version;
     private Long processStageId;
     private String stageName;
     private String stageType;
@@ -80,7 +81,10 @@ public class InterviewVO {
     private Long interviewCandidateId;
     private Long questionId;
     private String questionContent;
+    private String questionStatus;
+    private LocalDateTime questionNextRetryAt;
     private String answerContent;
+    private String answerStatus;
     private Integer interviewerScore;
     private Integer scorerScore;
     private Integer averageScore;

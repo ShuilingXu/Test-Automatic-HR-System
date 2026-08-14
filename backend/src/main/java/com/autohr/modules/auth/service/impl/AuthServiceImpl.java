@@ -1,6 +1,8 @@
 package com.autohr.modules.auth.service.impl;
 
 import cn.hutool.core.util.StrUtil;
+import com.autohr.common.api.PageQuery;
+import com.autohr.common.api.PageResponse;
 import com.autohr.common.exception.BusinessException;
 import com.autohr.modules.auth.dto.CandidateProfileUpdateRequest;
 import com.autohr.modules.auth.dto.CandidateRegisterRequest;
@@ -18,6 +20,7 @@ import com.autohr.modules.auth.service.JwtService;
 import com.autohr.modules.auth.service.PasswordPolicy;
 import com.autohr.modules.auth.service.VerificationCodeService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.security.core.Authentication;
@@ -137,7 +140,8 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public List<SessionUserVO> listUsers(String roleCode, Integer status, String keyword, String operatorRoleCode) {
+    public PageResponse<SessionUserVO> listUsers(String roleCode, Integer status, String keyword,
+                                                 String operatorRoleCode, PageQuery pageQuery) {
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<SysUser>()
                 .eq(status != null, SysUser::getStatus, status)
                 .and(StrUtil.isNotBlank(keyword), q -> q.like(SysUser::getUsername, keyword)
@@ -149,7 +153,8 @@ public class AuthServiceImpl implements AuthService {
         } else {
             wrapper.eq(StrUtil.isNotBlank(roleCode), SysUser::getRoleCode, roleCode);
         }
-        return sysUserMapper.selectList(wrapper).stream().map(this::toSessionUser).toList();
+        Page<SysUser> result = sysUserMapper.selectPage(new Page<>(pageQuery.page(), pageQuery.pageSize()), wrapper);
+        return PageResponse.of(result.getRecords().stream().map(this::toSessionUser).toList(), result.getTotal(), pageQuery);
     }
 
     @Override

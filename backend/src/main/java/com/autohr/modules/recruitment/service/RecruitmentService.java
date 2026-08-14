@@ -1,5 +1,7 @@
 package com.autohr.modules.recruitment.service;
 
+import com.autohr.common.api.PageQuery;
+import com.autohr.common.api.PageResponse;
 import com.autohr.modules.recruitment.dto.CandidateApplyRequest;
 import com.autohr.modules.recruitment.dto.CandidateVO;
 import com.autohr.modules.recruitment.dto.JobSaveRequest;
@@ -8,21 +10,20 @@ import com.autohr.modules.recruitment.dto.ResumeFileVO;
 import com.autohr.modules.recruitment.entity.RecruitmentResumeFile;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.List;
-
 public interface RecruitmentService {
 
     JobVO saveJob(JobSaveRequest request);
 
-    List<JobVO> listJobs(Integer status, String departmentName, String jobType, String keyword);
+    PageResponse<JobVO> listJobs(Integer status, String departmentName, String jobType, String keyword, PageQuery pageQuery);
 
     void deleteJob(Long id);
 
     CandidateVO apply(CandidateApplyRequest request, String intervieweeUsername);
 
-    List<CandidateVO> listCandidates(Long jobId, String status, String interviewStageStatus, String keyword);
+    PageResponse<CandidateVO> listCandidates(Long jobId, String status, String interviewStageStatus, String keyword,
+                                              PageQuery pageQuery);
 
-    List<CandidateVO> listMyCandidates(String intervieweeUsername);
+    PageResponse<CandidateVO> listMyCandidates(String intervieweeUsername, PageQuery pageQuery);
 
     CandidateVO getCandidate(Long id);
 

@@ -58,11 +58,13 @@ import com.autohr.modules.recruitment.mapper.RecruitmentJobMapper;
 import com.autohr.modules.system.service.SystemConfigService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -73,15 +75,18 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -125,6 +130,9 @@ public class InterviewServiceImpl implements InterviewService {
     private final SystemConfigService systemConfigService;
     private final TransactionTemplate transactionTemplate;
 
+    @Resource(name = "interviewAiExecutor")
+    private TaskExecutor interviewAiExecutor;
+
     @Value("${interview.llm.debug:false}")
     private boolean llmDebug;
 
@@ -133,6 +141,11 @@ public class InterviewServiceImpl implements InterviewService {
     private static final int MAX_ICE_CANDIDATE_COUNT = 256;
     private static final int MAX_ICE_CANDIDATES_LENGTH = 256 * 1024;
     private static final int ICE_APPEND_MAX_ATTEMPTS = 5;
+    private static final int AI_QUESTION_INSERT_MAX_ATTEMPTS = 5;
+    private static final int AI_QUESTION_RETRY_SCAN_LIMIT = 100;
+    private static final long AI_ANSWER_LEASE_SECONDS = 300L;
+    private static final long AI_QUESTION_LEASE_SECONDS = 120L;
+    private static final long AI_QUESTION_RETRY_MAX_SECONDS = 900L;
     private static final int VIDEO_MERGE_MAX_ATTEMPTS = 3;
     private static final long MISSING_RECORDING_TIMEOUT_MINUTES = 10L;
     private static final Set<String> ALLOWED_RECORDING_CONTENT_TYPES = Set.of("video/webm", "application/octet-stream");
@@ -140,6 +153,16 @@ public class InterviewServiceImpl implements InterviewService {
             "AI_RECORDING_DENIED", "AI_RECORDING_STARTED", "AI_RECORDING_UNSUPPORTED", "AI_RECORDING_UPLOADED",
             "CLIPBOARD_BLOCKED", "FULLSCREEN_DENIED", "FULLSCREEN_EXIT", "TAB_HIDDEN", "WINDOW_BLUR"
     );
+
+    private enum AnswerClaimState {
+        CLAIMED, PROCESSING, COMPLETED
+    }
+
+    private record AnswerClaim(AnswerClaimState state, Long recordId, String token) {
+    }
+
+    private record QuestionClaim(Long recordId, String token) {
+    }
 
     @Scheduled(fixedDelayString = "${interview.video.missing-recording-scan-interval-ms:60000}")
     public void releaseTimedOutVideoUploadsForApproval() {
@@ -156,6 +179,19 @@ public class InterviewServiceImpl implements InterviewService {
                 log.warn("Unable to release video session {} after recording upload timeout", sessionId, ex);
             }
         }
+    }
+
+    @Scheduled(fixedDelayString = "${interview.ai.question-retry-scan-interval-ms:30000}")
+    public void retryPendingAiQuestionGeneration() {
+        List<Long> recordIds = aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>()
+                        .in(InterviewAiRecord::getQuestionStatus, "PENDING", "FAILED", "PROCESSING")
+                        .orderByAsc(InterviewAiRecord::getQuestionNextRetryAt)
+                        .last("LIMIT " + AI_QUESTION_RETRY_SCAN_LIMIT))
+                .stream()
+                .filter(this::isQuestionGenerationDue)
+                .map(InterviewAiRecord::getId)
+                .toList();
+        recordIds.forEach(this::scheduleQuestionGeneration);
     }
 
     @Override
@@ -405,9 +441,18 @@ public class InterviewServiceImpl implements InterviewService {
         template.setDescription(abbreviate(StrUtil.blankToDefault(request.getDescription(), ""), 1000));
         template.setStatus(Objects.requireNonNullElse(request.getStatus(), 1));
         if (template.getId() == null) {
+            template.setVersion(0);
             processTemplateMapper.insert(template);
         } else {
-            processTemplateMapper.updateById(template);
+            if (request.getVersion() == null) {
+                throw new BusinessException("Template version is required. Refresh and try again.");
+            }
+            int changed = processTemplateMapper.updateWithVersion(template.getId(), request.getVersion(),
+                    template.getTemplateName(), template.getDescription(), template.getStatus());
+            if (changed != 1) {
+                throw new BusinessException("Template was changed by another user. Refresh and try again.");
+            }
+            template.setVersion(request.getVersion() + 1);
             processTemplateStageMapper.delete(new LambdaQueryWrapper<InterviewProcessTemplateStage>()
                     .eq(InterviewProcessTemplateStage::getTemplateId, template.getId()));
         }
@@ -440,13 +485,18 @@ public class InterviewServiceImpl implements InterviewService {
 
     @Override
     @Transactional
-    public void deleteProcessTemplate(Long id) {
+    public void deleteProcessTemplate(Long id, Integer version) {
+        if (version == null) {
+            throw new BusinessException("Template version is required. Refresh and try again.");
+        }
         if (processMapper.selectCount(new LambdaQueryWrapper<InterviewProcess>().eq(InterviewProcess::getTemplateId, id)) > 0) {
             throw new BusinessException("该模板已用于面试流程，不能删除；可改为停用");
         }
+        if (processTemplateMapper.deleteWithVersion(id, version) != 1) {
+            throw new BusinessException("Template was changed by another user. Refresh and try again.");
+        }
         processTemplateStageMapper.delete(new LambdaQueryWrapper<InterviewProcessTemplateStage>()
                 .eq(InterviewProcessTemplateStage::getTemplateId, id));
-        processTemplateMapper.deleteById(id);
     }
 
     @Override
@@ -510,7 +560,7 @@ public class InterviewServiceImpl implements InterviewService {
         candidate.setApplicationStatus("INTERVIEWING");
         recruitmentCandidateMapper.updateById(candidate);
         if ("AI".equals(process.getCurrentStage())) {
-            runAfterCommit(() -> CompletableFuture.runAsync(() -> generateInitialQuestionSafely(process.getId())));
+            runAfterCommit(() -> generateInitialQuestionSafely(process.getId()));
         }
         return toProcessVO(process);
     }
@@ -545,7 +595,7 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     @Override
-    public synchronized InterviewVO getNextAiQuestion(Long processId) {
+    public InterviewVO getNextAiQuestion(Long processId) {
         InterviewProcess process = requireProcess(processId);
         if (isTemplateProcess(process)) {
             return getTemplateNextAiQuestion(process);
@@ -555,21 +605,11 @@ public class InterviewServiceImpl implements InterviewService {
         }
         InterviewAiRecord unanswered = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
                 .eq(InterviewAiRecord::getProcessId, processId)
-                .isNull(InterviewAiRecord::getAnswerContent)
+                .eq(InterviewAiRecord::getQuestionStatus, "READY")
+                .and(query -> query.isNull(InterviewAiRecord::getAnswerContent)
+                        .or().eq(InterviewAiRecord::getAnswerStatus, "FAILED"))
                 .orderByAsc(InterviewAiRecord::getSequenceNo)
                 .last("LIMIT 1"));
-        if (unanswered == null && StrUtil.equals(process.getCurrentStage(), "AI")) {
-            int recordCount = aiRecordMapper.selectCount(new LambdaQueryWrapper<InterviewAiRecord>()
-                    .eq(InterviewAiRecord::getProcessId, processId)).intValue();
-            if (recordCount == 0) {
-                generateInitialQuestionSafely(processId);
-                unanswered = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
-                        .eq(InterviewAiRecord::getProcessId, processId)
-                        .isNull(InterviewAiRecord::getAnswerContent)
-                        .orderByAsc(InterviewAiRecord::getSequenceNo)
-                        .last("LIMIT 1"));
-            }
-        }
         return unanswered == null ? null : toAiRecordVO(unanswered, process);
     }
 
@@ -580,78 +620,34 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     @Override
-    @Transactional
-    public synchronized InterviewVO submitAiAnswer(AiAnswerRequest request) {
+    public InterviewVO submitAiAnswer(AiAnswerRequest request) {
         return submitAiAnswer(request, null);
     }
 
-    private synchronized InterviewVO submitAiAnswer(AiAnswerRequest request, Consumer<String> interviewerChunkConsumer) {
+    private InterviewVO submitAiAnswer(AiAnswerRequest request, Consumer<String> interviewerChunkConsumer) {
+        AnswerClaim claim = claimAiAnswer(request);
         InterviewProcess process = requireProcess(request.getProcessId());
-        InterviewAiRecord requestedRecord = requireRequestedAiRecord(process, request);
-        if (requestedRecord.getAnswerContent() != null) {
-            if (StrUtil.equals(requestedRecord.getAnswerContent(), request.getAnswerContent())) {
-                return toAiRecordVO(requestedRecord, process);
-            }
-            throw new BusinessException("该题已提交，不能修改回答");
+        InterviewAiRecord record = requireAiRecord(claim.recordId());
+        if (claim.state() != AnswerClaimState.CLAIMED) {
+            return toAiRecordVO(record, process);
         }
-        if (isTemplateProcess(process)) {
-            return submitTemplateAiAnswer(process, request, requestedRecord, interviewerChunkConsumer);
-        }
-        ensureInProgress(process);
-        if (!StrUtil.equals(process.getCurrentStage(), "AI")) {
-            throw new BusinessException("当前流程不在AI面试阶段");
-        }
-        InterviewAiRecord record = requestedRecord;
-        record.setAnswerContent(request.getAnswerContent());
         String materials = loadKnowledgeMaterials(record.getKnowledgeBaseId());
         String jobRequirements = loadJobRequirements(process);
-        LlmEvaluation interviewerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "INTERVIEWER", true, interviewerChunkConsumer);
-        LlmEvaluation scorerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "SCORER", false);
-        int interviewerScore = interviewerEvaluation.score();
-        int scorerScore = scorerEvaluation.score();
-        int averageScore = Math.round((interviewerScore + scorerScore) / 2.0f);
-        record.setInterviewerScore(interviewerScore);
-        record.setScorerScore(scorerScore);
-        record.setAverageScore(averageScore);
-        record.setInterviewerComment(interviewerEvaluation.comment());
-        aiRecordMapper.updateById(record);
-
-        int total = aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>()
-                .eq(InterviewAiRecord::getProcessId, process.getId())
-                .isNotNull(InterviewAiRecord::getAverageScore))
-                .stream().mapToInt(InterviewAiRecord::getAverageScore).sum();
-        int count = Math.max(aiRecordMapper.selectCount(new LambdaQueryWrapper<InterviewAiRecord>()
-                .eq(InterviewAiRecord::getProcessId, process.getId())
-                .isNotNull(InterviewAiRecord::getAverageScore)).intValue(), 1);
-        int currentAverage = Math.round(total / (float) count);
-        process.setAiAverageScore(currentAverage);
-        int answeredRounds = count;
-        int minQuestionRounds = Math.max(Objects.requireNonNullElse(process.getAiMinQuestionRounds(), 5), 1);
-        int maxQuestionRounds = Math.max(Objects.requireNonNullElse(process.getAiMaxQuestionRounds(), 10), 1);
-        int followUpThreshold = Math.max(0, Math.min(Objects.requireNonNullElse(process.getAiFollowUpThreshold(), 70), 100));
-        boolean needsFollowUp = averageScore < followUpThreshold && answeredRounds < maxQuestionRounds;
-        if (answeredRounds >= minQuestionRounds && currentAverage >= process.getAiThresholdScore() && !needsFollowUp) {
-            process.setStageStatus("WAITING_APPROVAL");
-            process.setProcessStatusView("AI待审批");
-        } else if (answeredRounds >= maxQuestionRounds) {
-            process.setOverallStatus("REJECTED");
-            process.setStageStatus("REJECTED");
-            process.setProcessStatusView("AI未达标自动结束");
-            auditLogService.log(process.getIntervieweeUserId(), "面试者", "INTERVIEWEE", "INTERVIEW", "AI_MAX_ROUNDS_REJECT", "INTERVIEW_PROCESS", String.valueOf(process.getId()), "AI均分" + currentAverage + "未达到阈值" + process.getAiThresholdScore() + "，已答" + answeredRounds + "轮达到最大轮数" + process.getAiMaxQuestionRounds());
-        } else {
-            if (needsFollowUp) {
-                generateFollowUpQuestion(process, record, request.getAnswerContent(), interviewerEvaluation.nextQuestion());
-            } else {
-                generateNextQuestion(process);
-            }
+        LlmEvaluation interviewerEvaluation;
+        LlmEvaluation scorerEvaluation;
+        try {
+            interviewerEvaluation = callLlmEvaluation(record.getQuestionContent(), record.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "INTERVIEWER", true, interviewerChunkConsumer);
+            scorerEvaluation = callLlmEvaluation(record.getQuestionContent(), record.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "SCORER", false);
+        } catch (Exception ex) {
+            String errorId = UUID.randomUUID().toString();
+            transactionTemplate.executeWithoutResult(status -> aiRecordMapper.failAnswer(claim.recordId(), claim.token(), errorId));
+            log.warn("AI answer evaluation failed [{}] for record {}", errorId, claim.recordId(), ex);
+            throw new BusinessException("AI评分失败，请使用相同回答重试（错误编号：" + errorId + "）");
         }
-        processMapper.updateById(process);
-        updateCandidateStage(process);
-        return toAiRecordVO(record, process);
+        return completeAiAnswer(claim, interviewerEvaluation, scorerEvaluation);
     }
 
     @Override
-    @Transactional
     public InterviewVO submitIntervieweeAiAnswer(AiAnswerRequest request, Long intervieweeUserId) {
         requireIntervieweeProcess(request.getProcessId(), intervieweeUserId);
         return submitAiAnswer(request);
@@ -661,9 +657,9 @@ public class InterviewServiceImpl implements InterviewService {
     public SseEmitter submitIntervieweeAiAnswerStream(AiAnswerRequest request, Long intervieweeUserId) {
         requireIntervieweeProcess(request.getProcessId(), intervieweeUserId);
         SseEmitter emitter = new SseEmitter(180000L);
-        CompletableFuture.runAsync(() -> {
+        interviewAiExecutor.execute(() -> {
             try {
-                InterviewVO result = submitAiAnswerInTransaction(request, chunk -> {
+                InterviewVO result = submitAiAnswer(request, chunk -> {
                     try {
                         sendSse(emitter, "token", chunk);
                     } catch (IOException ex) {
@@ -689,12 +685,46 @@ public class InterviewServiceImpl implements InterviewService {
         emitter.send(SseEmitter.event().name(event).data(data));
     }
 
-    private InterviewVO submitAiAnswerInTransaction(AiAnswerRequest request, Consumer<String> interviewerChunkConsumer) {
-        InterviewVO result = transactionTemplate.execute(status -> submitAiAnswer(request, interviewerChunkConsumer));
-        if (result == null) {
-            throw new BusinessException("AI answer submission did not return a result");
+    private AnswerClaim claimAiAnswer(AiAnswerRequest request) {
+        AnswerClaim claim = transactionTemplate.execute(status -> {
+            InterviewProcess process = requireProcess(request.getProcessId());
+            InterviewAiRecord record = requireRequestedAiRecord(process, request);
+            if (isCompletedAiAnswer(record)) {
+                if (StrUtil.equals(record.getAnswerContent(), request.getAnswerContent())) {
+                    return new AnswerClaim(AnswerClaimState.COMPLETED, record.getId(), null);
+                }
+                throw new BusinessException("该题已完成评分，不能修改回答");
+            }
+            if (StrUtil.isNotBlank(record.getAnswerContent()) && !StrUtil.equals(record.getAnswerContent(), request.getAnswerContent())) {
+                throw new BusinessException("该题已有不同回答正在处理或等待重试，不能修改回答");
+            }
+            ensureAiAnswerable(process, record);
+            if (isActiveAnswerLease(record)) {
+                return new AnswerClaim(AnswerClaimState.PROCESSING, record.getId(), null);
+            }
+            String token = UUID.randomUUID().toString();
+            LocalDateTime now = LocalDateTime.now();
+            int changed = aiRecordMapper.claimAnswer(record.getId(), request.getAnswerContent(), token, now,
+                    now.plusSeconds(AI_ANSWER_LEASE_SECONDS));
+            if (changed == 1) {
+                return new AnswerClaim(AnswerClaimState.CLAIMED, record.getId(), token);
+            }
+            InterviewAiRecord latest = requireAiRecord(record.getId());
+            if (isCompletedAiAnswer(latest) && StrUtil.equals(latest.getAnswerContent(), request.getAnswerContent())) {
+                return new AnswerClaim(AnswerClaimState.COMPLETED, latest.getId(), null);
+            }
+            if (isActiveAnswerLease(latest) && StrUtil.equals(latest.getAnswerContent(), request.getAnswerContent())) {
+                return new AnswerClaim(AnswerClaimState.PROCESSING, latest.getId(), null);
+            }
+            if (StrUtil.isNotBlank(latest.getAnswerContent()) && !StrUtil.equals(latest.getAnswerContent(), request.getAnswerContent())) {
+                throw new BusinessException("该题已有不同回答正在处理或等待重试，不能修改回答");
+            }
+            throw new BusinessException("AI回答状态已变化，请使用相同回答重试");
+        });
+        if (claim == null) {
+            throw new BusinessException("无法领取AI回答处理任务");
         }
-        return result;
+        return claim;
     }
 
     @Override
@@ -740,64 +770,148 @@ public class InterviewServiceImpl implements InterviewService {
         }
         InterviewAiRecord unanswered = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
                 .eq(InterviewAiRecord::getProcessStageId, stage.getId())
-                .isNull(InterviewAiRecord::getAnswerContent)
+                .eq(InterviewAiRecord::getQuestionStatus, "READY")
+                .and(query -> query.isNull(InterviewAiRecord::getAnswerContent)
+                        .or().eq(InterviewAiRecord::getAnswerStatus, "FAILED"))
                 .orderByAsc(InterviewAiRecord::getSequenceNo)
                 .last("LIMIT 1"));
-        if (unanswered == null && aiRecordMapper.selectCount(new LambdaQueryWrapper<InterviewAiRecord>()
-                .eq(InterviewAiRecord::getProcessStageId, stage.getId())) == 0) {
-            generateInitialQuestionSafely(process.getId());
-            unanswered = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
-                    .eq(InterviewAiRecord::getProcessStageId, stage.getId())
-                    .isNull(InterviewAiRecord::getAnswerContent)
-                    .orderByAsc(InterviewAiRecord::getSequenceNo)
-                    .last("LIMIT 1"));
-        }
         return unanswered == null ? null : toAiRecordVO(unanswered, process);
     }
 
-    private InterviewVO submitTemplateAiAnswer(InterviewProcess process, AiAnswerRequest request, InterviewAiRecord record, Consumer<String> interviewerChunkConsumer) {
+    private InterviewVO completeAiAnswer(AnswerClaim claim, LlmEvaluation interviewerEvaluation, LlmEvaluation scorerEvaluation) {
+        InterviewVO result = transactionTemplate.execute(status -> {
+            InterviewAiRecord record = requireAiRecord(claim.recordId());
+            InterviewProcess process = requireProcess(record.getProcessId());
+            int averageScore = Math.round((interviewerEvaluation.score() + scorerEvaluation.score()) / 2.0f);
+            if (aiRecordMapper.completeAnswer(record.getId(), claim.token(), interviewerEvaluation.score(), scorerEvaluation.score(),
+                    averageScore, interviewerEvaluation.comment()) != 1) {
+                InterviewAiRecord latest = requireAiRecord(record.getId());
+                if (isCompletedAiAnswer(latest)) {
+                    return toAiRecordVO(latest, process);
+                }
+                throw new BusinessException("AI回答处理租约已失效，请刷新后使用相同回答重试");
+            }
+            record.setInterviewerScore(interviewerEvaluation.score());
+            record.setScorerScore(scorerEvaluation.score());
+            record.setAverageScore(averageScore);
+            record.setInterviewerComment(interviewerEvaluation.comment());
+            record.setAnswerStatus("COMPLETED");
+            if (isTemplateProcess(process)) {
+                return completeTemplateAiAnswer(process, record, interviewerEvaluation);
+            }
+            return completeStandardAiAnswer(process, record, interviewerEvaluation);
+        });
+        if (result == null) {
+            throw new BusinessException("AI回答处理未返回结果");
+        }
+        return result;
+    }
+
+    private InterviewVO completeStandardAiAnswer(InterviewProcess process, InterviewAiRecord record,
+                                                 LlmEvaluation interviewerEvaluation) {
         ensureInProgress(process);
-        InterviewProcessStage stage = requireActiveProcessStage(process);
-        if (!"AI".equals(stage.getStageType()) || !"IN_PROGRESS".equals(stage.getStageStatus())) {
+        if (!StrUtil.equals(process.getCurrentStage(), "AI") || !StrUtil.equals(process.getStageStatus(), "IN_PROGRESS")) {
             throw new BusinessException("当前流程不在AI面试阶段");
         }
-        if (!Objects.equals(record.getProcessStageId(), stage.getId())) {
-            throw new BusinessException("该题不属于当前 AI 面试阶段");
+        List<InterviewAiRecord> answered = aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>()
+                .eq(InterviewAiRecord::getProcessId, process.getId())
+                .eq(InterviewAiRecord::getStageScopeId, 0L)
+                .eq(InterviewAiRecord::getAnswerStatus, "COMPLETED"));
+        int answeredRounds = answered.size();
+        int currentAverage = Math.round(answered.stream().mapToInt(InterviewAiRecord::getAverageScore).sum()
+                / (float) Math.max(answeredRounds, 1));
+        process.setAiAverageScore(currentAverage);
+        int minQuestionRounds = Math.max(Objects.requireNonNullElse(process.getAiMinQuestionRounds(), 5), 1);
+        int maxQuestionRounds = Math.max(Objects.requireNonNullElse(process.getAiMaxQuestionRounds(), 10), 1);
+        int followUpThreshold = Math.max(0, Math.min(Objects.requireNonNullElse(process.getAiFollowUpThreshold(), 70), 100));
+        boolean needsFollowUp = record.getAverageScore() < followUpThreshold && answeredRounds < maxQuestionRounds;
+        if (answeredRounds >= minQuestionRounds && currentAverage >= process.getAiThresholdScore() && !needsFollowUp) {
+            process.setStageStatus("WAITING_APPROVAL");
+            process.setProcessStatusView("AI待审批");
+        } else if (answeredRounds >= maxQuestionRounds) {
+            process.setOverallStatus("REJECTED");
+            process.setStageStatus("REJECTED");
+            process.setProcessStatusView("AI未达标自动结束");
+            auditLogService.log(process.getIntervieweeUserId(), "面试者", "INTERVIEWEE", "INTERVIEW", "AI_MAX_ROUNDS_REJECT", "INTERVIEW_PROCESS", String.valueOf(process.getId()), "AI均分" + currentAverage + "未达到阈值" + process.getAiThresholdScore() + "，已答" + answeredRounds + "轮达到最大轮数" + process.getAiMaxQuestionRounds());
+        } else if (needsFollowUp) {
+            enqueueQuestionGeneration(process, null, record, interviewerEvaluation.nextQuestion());
+        } else {
+            enqueueQuestionGeneration(process, null, null, null);
         }
-        record.setAnswerContent(request.getAnswerContent());
-        String materials = loadKnowledgeMaterials(record.getKnowledgeBaseId());
-        String jobRequirements = loadJobRequirements(process);
-        LlmEvaluation interviewerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "INTERVIEWER", true, interviewerChunkConsumer);
-        LlmEvaluation scorerEvaluation = callLlmEvaluation(record.getQuestionContent(), request.getAnswerContent(), record.getKnowledgePoint(), materials, jobRequirements, "SCORER", false);
-        int averageScore = Math.round((interviewerEvaluation.score() + scorerEvaluation.score()) / 2.0f);
-        record.setInterviewerScore(interviewerEvaluation.score());
-        record.setScorerScore(scorerEvaluation.score());
-        record.setAverageScore(averageScore);
-        record.setInterviewerComment(interviewerEvaluation.comment());
-        aiRecordMapper.updateById(record);
+        processMapper.updateById(process);
+        updateCandidateStage(process);
+        return toAiRecordVO(record, process);
+    }
 
+    private InterviewVO completeTemplateAiAnswer(InterviewProcess process, InterviewAiRecord record,
+                                                 LlmEvaluation interviewerEvaluation) {
+        ensureInProgress(process);
+        InterviewProcessStage stage = requireActiveProcessStage(process);
+        if (!"AI".equals(stage.getStageType()) || !"IN_PROGRESS".equals(stage.getStageStatus())
+                || !Objects.equals(record.getProcessStageId(), stage.getId())) {
+            throw new BusinessException("当前流程不在该AI面试阶段");
+        }
         List<InterviewAiRecord> answered = aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>()
                 .eq(InterviewAiRecord::getProcessStageId, stage.getId())
-                .isNotNull(InterviewAiRecord::getAverageScore));
+                .eq(InterviewAiRecord::getAnswerStatus, "COMPLETED"));
         int answeredRounds = answered.size();
-        int currentAverage = Math.round(answered.stream().mapToInt(InterviewAiRecord::getAverageScore).sum() / (float) Math.max(answeredRounds, 1));
+        int currentAverage = Math.round(answered.stream().mapToInt(InterviewAiRecord::getAverageScore).sum()
+                / (float) Math.max(answeredRounds, 1));
         process.setAiAverageScore(currentAverage);
         int minQuestionRounds = Math.max(Objects.requireNonNullElse(process.getAiMinQuestionRounds(), 5), 1);
         int maxQuestionRounds = Math.max(Objects.requireNonNullElse(process.getAiMaxQuestionRounds(), 10), minQuestionRounds);
         int followUpThreshold = Math.max(0, Math.min(Objects.requireNonNullElse(process.getAiFollowUpThreshold(), 70), 100));
-        boolean needsFollowUp = averageScore < followUpThreshold && answeredRounds < maxQuestionRounds;
+        boolean needsFollowUp = record.getAverageScore() < followUpThreshold && answeredRounds < maxQuestionRounds;
         if (answeredRounds >= minQuestionRounds && currentAverage >= process.getAiThresholdScore() && !needsFollowUp) {
             setTemplateStageStatus(process, stage, "WAITING_APPROVAL");
         } else if (answeredRounds >= maxQuestionRounds) {
             rejectTemplateProcess(process, stage, "未达到AI通过阈值");
         } else if (needsFollowUp) {
-            generateFollowUpQuestion(process, record, request.getAnswerContent(), interviewerEvaluation.nextQuestion());
+            enqueueQuestionGeneration(process, stage, record, interviewerEvaluation.nextQuestion());
         } else {
-            generateNextQuestion(process);
+            enqueueQuestionGeneration(process, stage, null, null);
         }
         processMapper.updateById(process);
         updateCandidateStage(process);
         return toAiRecordVO(record, process);
+    }
+
+    private void ensureAiAnswerable(InterviewProcess process, InterviewAiRecord record) {
+        ensureInProgress(process);
+        if (!"READY".equals(record.getQuestionStatus())) {
+            throw new BusinessException("题目尚未生成完成，请稍后刷新");
+        }
+        if (!isTemplateProcess(process)) {
+            if (!StrUtil.equals(process.getCurrentStage(), "AI") || !StrUtil.equals(process.getStageStatus(), "IN_PROGRESS")
+                    || !Objects.equals(record.getStageScopeId(), 0L)) {
+                throw new BusinessException("当前流程不在AI面试阶段");
+            }
+            return;
+        }
+        InterviewProcessStage stage = requireActiveProcessStage(process);
+        if (!"AI".equals(stage.getStageType()) || !"IN_PROGRESS".equals(stage.getStageStatus())
+                || !Objects.equals(record.getProcessStageId(), stage.getId())) {
+            throw new BusinessException("该题不属于当前 AI 面试阶段");
+        }
+    }
+
+    private boolean isCompletedAiAnswer(InterviewAiRecord record) {
+        return "COMPLETED".equals(record.getAnswerStatus())
+                || (record.getAverageScore() != null && StrUtil.isNotBlank(record.getAnswerContent()));
+    }
+
+    private boolean isActiveAnswerLease(InterviewAiRecord record) {
+        return "PROCESSING".equals(record.getAnswerStatus())
+                && record.getAnswerLeaseExpiresAt() != null
+                && record.getAnswerLeaseExpiresAt().isAfter(LocalDateTime.now());
+    }
+
+    private InterviewAiRecord requireAiRecord(Long id) {
+        InterviewAiRecord record = aiRecordMapper.selectById(id);
+        if (record == null) {
+            throw new BusinessException("AI面试题不存在: " + id);
+        }
+        return record;
     }
 
     @Override
@@ -1437,6 +1551,8 @@ public class InterviewServiceImpl implements InterviewService {
             candidate.setApplicationStatus("REJECTED");
         } else if (StrUtil.equals(process.getOverallStatus(), "TERMINATED")) {
             candidate.setApplicationStatus("TERMINATED");
+        } else if (StrUtil.equals(process.getOverallStatus(), "PASSED")) {
+            candidate.setApplicationStatus("OFFER_PENDING");
         }
         recruitmentCandidateMapper.updateById(candidate);
     }
@@ -1770,7 +1886,7 @@ public class InterviewServiceImpl implements InterviewService {
         process.setStageStatus(nextStatus);
         process.setProcessStatusView(stageStatusView(nextStage.getStageName(), nextStatus));
         if ("AI".equals(nextStage.getStageType())) {
-            runAfterCommit(() -> CompletableFuture.runAsync(() -> generateInitialQuestionSafely(process.getId())));
+            runAfterCommit(() -> generateInitialQuestionSafely(process.getId()));
         } else {
             ensureVideoSession(process.getId(), nextStage.getId(), request.getApproverUserId(), request.getApproverName());
         }
@@ -1810,38 +1926,186 @@ public class InterviewServiceImpl implements InterviewService {
         });
     }
 
-    private synchronized void generateInitialQuestionSafely(Long processId) {
+    private void generateInitialQuestionSafely(Long processId) {
         try {
-            generateNextQuestion(requireProcess(processId));
+            transactionTemplate.executeWithoutResult(status -> {
+                InterviewProcess process = requireProcess(processId);
+                if (!isQuestionGenerationEligible(process, null)) {
+                    return;
+                }
+                InterviewProcessStage stage = isTemplateProcess(process) ? requireActiveProcessStage(process) : null;
+                Long stageScopeId = stage == null ? 0L : stage.getId();
+                InterviewAiRecord existing = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
+                        .eq(InterviewAiRecord::getProcessId, process.getId())
+                        .eq(InterviewAiRecord::getStageScopeId, stageScopeId)
+                        .orderByAsc(InterviewAiRecord::getSequenceNo)
+                        .last("LIMIT 1"));
+                if (existing != null) {
+                    if (isQuestionGenerationDue(existing)) {
+                        runAfterCommit(() -> scheduleQuestionGeneration(existing.getId()));
+                    }
+                    return;
+                }
+                enqueueQuestionGeneration(process, stage, null, null);
+            });
         } catch (Exception ex) {
-            saveQuestionGenerationFailure(processId, ex);
+            log.warn("Unable to queue the initial AI question for process {}", processId, ex);
         }
     }
 
-    private synchronized void saveQuestionGenerationFailure(Long processId, Exception ex) {
-        InterviewProcess process = requireProcess(processId);
-        InterviewProcessStage stage = isTemplateProcess(process) ? requireActiveProcessStage(process) : null;
-        InterviewAiRecord record = new InterviewAiRecord();
-        record.setProcessId(processId);
-        record.setProcessStageId(stage == null ? null : stage.getId());
-        record.setKnowledgePoint("题目生成异常");
-        record.setQuestionContent("AI题目生成失败，请联系管理员检查知识库权重、LLM配置或接口状态。错误：" + abbreviate(ex.getMessage()));
-        record.setSequenceNo(nextSequence(processId, stage == null ? null : stage.getId()));
-        aiRecordMapper.insert(record);
+    private Long enqueueQuestionGeneration(InterviewProcess process, InterviewProcessStage stage,
+                                           InterviewAiRecord previousRecord, String suggestedNextQuestion) {
+        Long stageScopeId = stage == null ? 0L : stage.getId();
+        InterviewAiRecord existing = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
+                .eq(InterviewAiRecord::getProcessId, process.getId())
+                .eq(InterviewAiRecord::getStageScopeId, stageScopeId)
+                .isNull(InterviewAiRecord::getAnswerContent)
+                .in(InterviewAiRecord::getQuestionStatus, "PENDING", "PROCESSING", "FAILED", "READY")
+                .orderByAsc(InterviewAiRecord::getSequenceNo)
+                .last("LIMIT 1"));
+        if (existing != null) {
+            if (isQuestionGenerationDue(existing)) {
+                runAfterCommit(() -> scheduleQuestionGeneration(existing.getId()));
+            }
+            return existing.getId();
+        }
+        Long knowledgeBaseId = previousRecord == null
+                ? (stage == null ? null : stage.getKnowledgeBaseId())
+                : previousRecord.getKnowledgeBaseId();
+        if (knowledgeBaseId == null) {
+            InterviewJobKnowledgeWeight weight = pickKnowledgeWeight(process);
+            knowledgeBaseId = weight == null ? null : weight.getKnowledgeBaseId();
+        }
+        for (int attempt = 0; attempt < AI_QUESTION_INSERT_MAX_ATTEMPTS; attempt++) {
+            InterviewAiRecord record = new InterviewAiRecord();
+            record.setProcessId(process.getId());
+            record.setProcessStageId(stage == null ? null : stage.getId());
+            record.setStageScopeId(stageScopeId);
+            record.setKnowledgeBaseId(knowledgeBaseId);
+            record.setKnowledgePoint(loadKnowledgeBaseName(knowledgeBaseId));
+            record.setQuestionContent("");
+            record.setQuestionStatus("PENDING");
+            record.setQuestionGenerationAttempts(0);
+            record.setPreviousRecordId(previousRecord == null ? null : previousRecord.getId());
+            record.setSuggestedNextQuestion(abbreviate(StrUtil.blankToDefault(suggestedNextQuestion, ""), 5000));
+            record.setAnswerStatus("PENDING");
+            record.setAnswerProcessingAttempts(0);
+            record.setSequenceNo(nextSequence(process.getId(), stageScopeId));
+            try {
+                aiRecordMapper.insert(record);
+                runAfterCommit(() -> scheduleQuestionGeneration(record.getId()));
+                return record.getId();
+            } catch (DataIntegrityViolationException ignored) {
+                InterviewAiRecord concurrentRecord = aiRecordMapper.selectOne(new LambdaQueryWrapper<InterviewAiRecord>()
+                        .eq(InterviewAiRecord::getProcessId, process.getId())
+                        .eq(InterviewAiRecord::getStageScopeId, stageScopeId)
+                        .isNull(InterviewAiRecord::getAnswerContent)
+                        .in(InterviewAiRecord::getQuestionStatus, "PENDING", "PROCESSING", "FAILED", "READY")
+                        .orderByAsc(InterviewAiRecord::getSequenceNo)
+                        .last("LIMIT 1"));
+                if (concurrentRecord != null) {
+                    if (isQuestionGenerationDue(concurrentRecord)) {
+                        runAfterCommit(() -> scheduleQuestionGeneration(concurrentRecord.getId()));
+                    }
+                    return concurrentRecord.getId();
+                }
+            }
+        }
+        throw new BusinessException("AI题目队列更新冲突，请重试");
     }
 
-    private synchronized void generateNextQuestion(InterviewProcess process) {
-        InterviewProcessStage stage = isTemplateProcess(process) ? requireActiveProcessStage(process) : null;
-        Long knowledgeBaseId = stage == null ? null : stage.getKnowledgeBaseId();
-        InterviewJobKnowledgeWeight weight = knowledgeBaseId == null ? pickKnowledgeWeight(process) : null;
-        InterviewAiRecord record = new InterviewAiRecord();
-        record.setProcessId(process.getId());
-        record.setProcessStageId(stage == null ? null : stage.getId());
-        record.setKnowledgeBaseId(knowledgeBaseId == null ? (weight == null ? null : weight.getKnowledgeBaseId()) : knowledgeBaseId);
-        record.setKnowledgePoint(loadKnowledgeBaseName(record.getKnowledgeBaseId()));
-        record.setQuestionContent(callLlmQuestion(record.getKnowledgePoint(), loadKnowledgeMaterials(record.getKnowledgeBaseId()), loadJobRequirements(process)));
-        record.setSequenceNo(nextSequence(process.getId(), stage == null ? null : stage.getId()));
-        aiRecordMapper.insert(record);
+    private void scheduleQuestionGeneration(Long recordId) {
+        try {
+            interviewAiExecutor.execute(() -> generateQuestionSafely(recordId));
+        } catch (RuntimeException ex) {
+            log.warn("AI question worker queue is full for record {}", recordId, ex);
+        }
+    }
+
+    private void generateQuestionSafely(Long recordId) {
+        QuestionClaim claim = claimQuestionGeneration(recordId);
+        if (claim == null) {
+            return;
+        }
+        try {
+            InterviewAiRecord record = requireAiRecord(recordId);
+            InterviewProcess process = requireProcess(record.getProcessId());
+            if (!isQuestionGenerationEligible(process, record)) {
+                transactionTemplate.executeWithoutResult(status -> aiRecordMapper.cancelQuestionGeneration(recordId, claim.token()));
+                return;
+            }
+            String question = generateQuestionContent(process, record);
+            transactionTemplate.executeWithoutResult(status -> {
+                if (aiRecordMapper.completeQuestionGeneration(recordId, claim.token(), question) != 1) {
+                    log.info("AI question generation result for record {} was superseded", recordId);
+                }
+            });
+        } catch (Exception ex) {
+            String errorId = UUID.randomUUID().toString();
+            transactionTemplate.executeWithoutResult(status -> {
+                InterviewAiRecord latest = aiRecordMapper.selectById(recordId);
+                int attempts = latest == null ? 1 : Math.max(Objects.requireNonNullElse(latest.getQuestionGenerationAttempts(), 1), 1);
+                aiRecordMapper.failQuestionGeneration(recordId, claim.token(), nextQuestionRetryAt(attempts), errorId);
+            });
+            log.warn("AI question generation failed [{}] for record {}", errorId, recordId, ex);
+        }
+    }
+
+    private QuestionClaim claimQuestionGeneration(Long recordId) {
+        return transactionTemplate.execute(status -> {
+            InterviewAiRecord record = aiRecordMapper.selectById(recordId);
+            if (record == null || !isQuestionGenerationDue(record)) {
+                return null;
+            }
+            String token = UUID.randomUUID().toString();
+            LocalDateTime now = LocalDateTime.now();
+            if (aiRecordMapper.claimQuestionGeneration(recordId, token, now, now.plusSeconds(AI_QUESTION_LEASE_SECONDS)) != 1) {
+                return null;
+            }
+            return new QuestionClaim(recordId, token);
+        });
+    }
+
+    private String generateQuestionContent(InterviewProcess process, InterviewAiRecord record) {
+        if (record.getPreviousRecordId() == null) {
+            return callLlmQuestion(record.getKnowledgePoint(), loadKnowledgeMaterials(record.getKnowledgeBaseId()), loadJobRequirements(process));
+        }
+        if (StrUtil.isNotBlank(record.getSuggestedNextQuestion())) {
+            return record.getSuggestedNextQuestion().replace("\n", " ").trim();
+        }
+        InterviewAiRecord previous = requireAiRecord(record.getPreviousRecordId());
+        return callLlmFollowUpQuestion(previous, previous.getAnswerContent(), loadKnowledgeMaterials(record.getKnowledgeBaseId()), loadJobRequirements(process));
+    }
+
+    private boolean isQuestionGenerationDue(InterviewAiRecord record) {
+        LocalDateTime now = LocalDateTime.now();
+        if ("PENDING".equals(record.getQuestionStatus())) {
+            return true;
+        }
+        if ("FAILED".equals(record.getQuestionStatus())) {
+            return record.getQuestionNextRetryAt() == null || !record.getQuestionNextRetryAt().isAfter(now);
+        }
+        return "PROCESSING".equals(record.getQuestionStatus()) && record.getQuestionLeaseExpiresAt() != null
+                && !record.getQuestionLeaseExpiresAt().isAfter(now);
+    }
+
+    private boolean isQuestionGenerationEligible(InterviewProcess process, InterviewAiRecord record) {
+        if (!StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS") || !StrUtil.equals(process.getCurrentStage(), "AI")
+                || !StrUtil.equals(process.getStageStatus(), "IN_PROGRESS")) {
+            return false;
+        }
+        if (!isTemplateProcess(process)) {
+            return record == null || Objects.equals(record.getStageScopeId(), 0L);
+        }
+        InterviewProcessStage stage = requireActiveProcessStage(process);
+        return "AI".equals(stage.getStageType()) && "IN_PROGRESS".equals(stage.getStageStatus())
+                && (record == null || Objects.equals(record.getProcessStageId(), stage.getId()));
+    }
+
+    private LocalDateTime nextQuestionRetryAt(int attempts) {
+        int exponent = Math.min(Math.max(attempts - 1, 0), 5);
+        long delaySeconds = Math.min(AI_QUESTION_RETRY_MAX_SECONDS, 30L * (1L << exponent));
+        return LocalDateTime.now().plusSeconds(delaySeconds);
     }
 
     private String loadKnowledgeBaseName(Long knowledgeBaseId) {
@@ -1884,21 +2148,6 @@ public class InterviewServiceImpl implements InterviewService {
             throw new BusinessException("LLM未返回面试题内容");
         }
         return question;
-    }
-
-    private synchronized void generateFollowUpQuestion(InterviewProcess process, InterviewAiRecord previousRecord,
-                                                       String previousAnswer, String nextQuestion) {
-        String followUpQuestion = StrUtil.isBlank(nextQuestion)
-                ? callLlmFollowUpQuestion(previousRecord, previousAnswer, loadKnowledgeMaterials(previousRecord.getKnowledgeBaseId()), loadJobRequirements(process))
-                : nextQuestion;
-        InterviewAiRecord record = new InterviewAiRecord();
-        record.setProcessId(process.getId());
-        record.setProcessStageId(previousRecord.getProcessStageId());
-        record.setKnowledgeBaseId(previousRecord.getKnowledgeBaseId());
-        record.setKnowledgePoint(previousRecord.getKnowledgePoint());
-        record.setQuestionContent(followUpQuestion.replace("\n", " ").trim());
-        record.setSequenceNo(nextSequence(process.getId(), previousRecord.getProcessStageId()));
-        aiRecordMapper.insert(record);
     }
 
     private String callLlmFollowUpQuestion(InterviewAiRecord previousRecord, String previousAnswer, String materials, String jobRequirements) {
@@ -2193,7 +2442,7 @@ public class InterviewServiceImpl implements InterviewService {
 
     private String callOpenAiChat(InterviewLlmConfig config, String systemPrompt, String userPrompt) {
         cn.hutool.json.JSONObject payload = buildChatPayload(config, systemPrompt, userPrompt, false);
-        debugLlm("REQUEST", config, systemPrompt, userPrompt, null, null);
+        debugLlmMetadata("REQUEST", config, systemPrompt, userPrompt, null, null);
         cn.hutool.http.HttpResponse httpResponse;
         try {
             httpResponse = cn.hutool.http.HttpRequest.post(resolveChatCompletionsUrl(config.getBaseUrl()))
@@ -2206,7 +2455,7 @@ public class InterviewServiceImpl implements InterviewService {
             throw new BusinessException("LLM接口调用失败: " + abbreviate(ex.getMessage()));
         }
         String responseText = httpResponse.body();
-        debugLlm("RESPONSE", config, systemPrompt, userPrompt, httpResponse.getStatus(), responseText);
+        debugLlmMetadata("RESPONSE", config, systemPrompt, userPrompt, httpResponse.getStatus(), responseText);
         if (!httpResponse.isOk()) {
             throw new BusinessException("LLM接口调用失败，HTTP " + httpResponse.getStatus() + ": " + abbreviate(responseText));
         }
@@ -2234,7 +2483,7 @@ public class InterviewServiceImpl implements InterviewService {
 
     private String callOpenAiChatStream(InterviewLlmConfig config, String systemPrompt, String userPrompt, Consumer<String> chunkConsumer) {
         cn.hutool.json.JSONObject payload = buildChatPayload(config, systemPrompt, userPrompt, true);
-        debugLlm("STREAM_REQUEST", config, systemPrompt, userPrompt, null, null);
+        debugLlmMetadata("STREAM_REQUEST", config, systemPrompt, userPrompt, null, null);
         java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(resolveChatCompletionsUrl(config.getBaseUrl())))
                 .header("Authorization", "Bearer " + config.getApiKey())
                 .header("Content-Type", "application/json")
@@ -2270,7 +2519,7 @@ public class InterviewServiceImpl implements InterviewService {
         } catch (IOException ex) {
             throw new BusinessException("读取LLM流式输出失败: " + abbreviate(ex.getMessage()));
         }
-        debugLlm("STREAM_RESPONSE", config, systemPrompt, userPrompt, response.statusCode(), fullText.toString());
+        debugLlmMetadata("STREAM_RESPONSE", config, systemPrompt, userPrompt, response.statusCode(), fullText.toString());
         if (StrUtil.isBlank(fullText.toString())) {
             throw new BusinessException("LLM流式接口未返回有效内容");
         }
@@ -2304,6 +2553,79 @@ public class InterviewServiceImpl implements InterviewService {
         }
     }
 
+    private void debugLlmMetadata(String phase, InterviewLlmConfig config, String systemPrompt, String userPrompt,
+                                  Integer httpStatus, String output) {
+        if (!llmDebug) {
+            return;
+        }
+        String system = StrUtil.blankToDefault(systemPrompt, "");
+        String user = StrUtil.blankToDefault(userPrompt, "");
+        String response = StrUtil.blankToDefault(output, "");
+        String text = "timestamp=" + LocalDateTime.now()
+                + " phase=" + phase
+                + " configId=" + config.getId()
+                + " role=" + safeLogToken(config.getModelRole())
+                + " providerHost=" + llmProviderHost(config)
+                + " model=" + safeLogToken(config.getModelName())
+                + " httpStatus=" + (httpStatus == null ? "none" : httpStatus)
+                + " systemLength=" + system.length()
+                + " userLength=" + user.length()
+                + " outputLength=" + response.length()
+                + " systemSha256=" + sha256(system)
+                + " userSha256=" + sha256(user)
+                + " outputSha256=" + sha256(response)
+                + System.lineSeparator();
+        try {
+            Path directory = Paths.get(System.getProperty("user.dir"), "logs");
+            Files.createDirectories(directory);
+            deleteExpiredLlmDebugLogs(directory);
+            Files.writeString(directory.resolve("llm-debug-" + LocalDate.now() + ".log"), text,
+                    StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException ex) {
+            log.debug("Unable to write LLM debug metadata", ex);
+        }
+    }
+
+    private String llmProviderHost(InterviewLlmConfig config) {
+        try {
+            return safeLogToken(StrUtil.blankToDefault(
+                    URI.create(resolveChatCompletionsUrl(config.getBaseUrl())).getHost(), "unknown"));
+        } catch (IllegalArgumentException ex) {
+            return "invalid";
+        }
+    }
+
+    private String sha256(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception ex) {
+            return "unavailable";
+        }
+    }
+
+    private String safeLogToken(String value) {
+        return StrUtil.blankToDefault(value, "unknown").replaceAll("[\\r\\n\\s]+", "_");
+    }
+
+    private void deleteExpiredLlmDebugLogs(Path directory) throws IOException {
+        LocalDate cutoff = LocalDate.now().minusDays(3);
+        try (var paths = Files.list(directory)) {
+            for (Path path : paths.filter(entry -> entry.getFileName().toString().startsWith("llm-debug-")
+                    && entry.getFileName().toString().endsWith(".log")).toList()) {
+                String fileName = path.getFileName().toString();
+                String day = fileName.substring("llm-debug-".length(), fileName.length() - ".log".length());
+                try {
+                    if (LocalDate.parse(day).isBefore(cutoff)) {
+                        Files.deleteIfExists(path);
+                    }
+                } catch (java.time.format.DateTimeParseException ignored) {
+                    // Keep files that were not created by this rotation scheme.
+                }
+            }
+        }
+    }
+
     private void debugLlm(String phase, InterviewLlmConfig config, String systemPrompt, String userPrompt, Integer httpStatus, String output) {
         if (!llmDebug) {
             return;
@@ -2319,7 +2641,7 @@ public class InterviewServiceImpl implements InterviewService {
                 + "--- USER 输入 ---\n" + StrUtil.blankToDefault(userPrompt, "") + "\n"
                 + "--- LLM 输出 ---\n" + StrUtil.blankToDefault(output, "") + "\n";
         try {
-            Files.writeString(Paths.get(System.getProperty("user.dir"), "LLM.txt"), text, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            Files.deleteIfExists(Paths.get(System.getProperty("user.dir"), "LLM.txt"));
         } catch (IOException ignored) {
         }
     }
@@ -2353,11 +2675,15 @@ public class InterviewServiceImpl implements InterviewService {
         return StrUtil.equalsIgnoreCase(mode, "STREAM") ? "STREAM" : "NORMAL";
     }
 
-    private int nextSequence(Long processId, Long processStageId) {
+    private int nextSequence(Long processId, Long stageScopeId) {
         return aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>()
                 .eq(InterviewAiRecord::getProcessId, processId)
-                .eq(processStageId != null, InterviewAiRecord::getProcessStageId, processStageId)
-                .isNull(processStageId == null, InterviewAiRecord::getProcessStageId)).size() + 1;
+                .eq(stageScopeId != null, InterviewAiRecord::getStageScopeId, stageScopeId)
+                .isNull(stageScopeId == null, InterviewAiRecord::getStageScopeId)).stream()
+                .map(InterviewAiRecord::getSequenceNo)
+                .filter(Objects::nonNull)
+                .max(Integer::compareTo)
+                .orElse(0) + 1;
     }
 
     private InterviewVO toKnowledgeBaseVO(InterviewKnowledgeBase entity) {
@@ -2416,6 +2742,7 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setId(entity.getId());
         vo.setTemplateId(entity.getId());
         vo.setTemplateName(entity.getTemplateName());
+        vo.setVersion(entity.getVersion());
         vo.setDescription(entity.getDescription());
         vo.setStatus(entity.getStatus());
         vo.setCreatedAt(entity.getCreatedAt());
@@ -2562,7 +2889,10 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setKnowledgeBaseId(entity.getKnowledgeBaseId());
         vo.setKnowledgePoint(entity.getKnowledgePoint());
         vo.setQuestionContent(entity.getQuestionContent());
+        vo.setQuestionStatus(entity.getQuestionStatus());
+        vo.setQuestionNextRetryAt(entity.getQuestionNextRetryAt());
         vo.setAnswerContent(entity.getAnswerContent());
+        vo.setAnswerStatus(entity.getAnswerStatus());
         vo.setInterviewerScore(entity.getInterviewerScore());
         vo.setScorerScore(entity.getScorerScore());
         vo.setAverageScore(entity.getAverageScore());

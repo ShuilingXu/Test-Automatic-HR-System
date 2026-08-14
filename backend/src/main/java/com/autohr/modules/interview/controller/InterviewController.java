@@ -1,7 +1,10 @@
 package com.autohr.modules.interview.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.common.api.PageQuery;
+import com.autohr.common.api.PageResponse;
 import com.autohr.common.exception.BusinessException;
+import com.autohr.common.file.DownloadUrlResponse;
 import com.autohr.common.file.FileDownloadSupport;
 import com.autohr.common.file.S3ObjectStorageService;
 import com.autohr.common.file.UploadPaths;
@@ -101,9 +104,12 @@ public class InterviewController {
     }
 
     @GetMapping("/hr/knowledge-bases")
-    public ApiResponse<List<InterviewVO>> listKnowledgeBases(@RequestParam(required = false) Integer status,
-                                                             @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(interviewService.listKnowledgeBases(status, keyword));
+    public ApiResponse<PageResponse<InterviewVO>> listKnowledgeBases(@RequestParam(required = false) Integer status,
+                                                                       @RequestParam(required = false) String keyword,
+                                                                       @RequestParam(required = false) Integer page,
+                                                                       @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(PageResponse.slice(interviewService.listKnowledgeBases(status, keyword),
+                PageQuery.of(page, pageSize)));
     }
 
     @PostMapping("/hr/knowledge-bases/{id}/delete")
@@ -124,9 +130,12 @@ public class InterviewController {
     }
 
     @GetMapping("/hr/knowledge-items")
-    public ApiResponse<List<InterviewVO>> listKnowledgeItems(@RequestParam(required = false) Long knowledgeBaseId,
-                                                             @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(interviewService.listKnowledgeItems(knowledgeBaseId, keyword));
+    public ApiResponse<PageResponse<InterviewVO>> listKnowledgeItems(@RequestParam(required = false) Long knowledgeBaseId,
+                                                                       @RequestParam(required = false) String keyword,
+                                                                       @RequestParam(required = false) Integer page,
+                                                                       @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(PageResponse.slice(interviewService.listKnowledgeItems(knowledgeBaseId, keyword),
+                PageQuery.of(page, pageSize)));
     }
 
     @PostMapping("/hr/knowledge-items/{id}/delete")
@@ -141,8 +150,11 @@ public class InterviewController {
     }
 
     @GetMapping("/hr/job-knowledge-weights")
-    public ApiResponse<List<InterviewVO>> listJobKnowledgeWeights(@RequestParam(required = false) Long jobId) {
-        return ApiResponse.success(interviewService.listJobKnowledgeWeights(jobId));
+    public ApiResponse<PageResponse<InterviewVO>> listJobKnowledgeWeights(@RequestParam(required = false) Long jobId,
+                                                                            @RequestParam(required = false) Integer page,
+                                                                            @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(PageResponse.slice(interviewService.listJobKnowledgeWeights(jobId),
+                PageQuery.of(page, pageSize)));
     }
 
     @PostMapping("/hr/job-knowledge-weights/{id}/delete")
@@ -157,9 +169,12 @@ public class InterviewController {
     }
 
     @GetMapping("/it/llm-configs")
-    public ApiResponse<List<InterviewVO>> listLlmConfigs(@RequestParam(required = false) String modelRole,
-                                                         @RequestParam(required = false) Integer status) {
-        return ApiResponse.success(interviewService.listLlmConfigs(modelRole, status));
+    public ApiResponse<PageResponse<InterviewVO>> listLlmConfigs(@RequestParam(required = false) String modelRole,
+                                                                   @RequestParam(required = false) Integer status,
+                                                                   @RequestParam(required = false) Integer page,
+                                                                   @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(PageResponse.slice(interviewService.listLlmConfigs(modelRole, status),
+                PageQuery.of(page, pageSize)));
     }
 
     @PostMapping("/it/llm-configs/{id}/delete")
@@ -174,9 +189,12 @@ public class InterviewController {
     }
 
     @GetMapping("/hr/process-templates")
-    public ApiResponse<List<InterviewVO>> listProcessTemplates(@RequestParam(required = false) Integer status,
-                                                                 @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(interviewService.listProcessTemplates(status, keyword));
+    public ApiResponse<PageResponse<InterviewVO>> listProcessTemplates(@RequestParam(required = false) Integer status,
+                                                                         @RequestParam(required = false) String keyword,
+                                                                         @RequestParam(required = false) Integer page,
+                                                                         @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(PageResponse.slice(interviewService.listProcessTemplates(status, keyword),
+                PageQuery.of(page, pageSize)));
     }
 
     @GetMapping("/hr/process-templates/{id}")
@@ -185,8 +203,8 @@ public class InterviewController {
     }
 
     @PostMapping("/hr/process-templates/{id}/delete")
-    public ApiResponse<Void> deleteProcessTemplate(@PathVariable Long id) {
-        interviewService.deleteProcessTemplate(id);
+    public ApiResponse<Void> deleteProcessTemplate(@PathVariable Long id, @RequestParam Integer version) {
+        interviewService.deleteProcessTemplate(id, version);
         return ApiResponse.success("deleted", null);
     }
 
@@ -196,10 +214,13 @@ public class InterviewController {
     }
 
     @GetMapping("/hr/processes")
-    public ApiResponse<List<InterviewVO>> listProcesses(@RequestParam(required = false) String overallStatus,
-                                                        @RequestParam(required = false) String stageStatus,
-                                                        @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(interviewService.listProcesses(overallStatus, stageStatus, keyword));
+    public ApiResponse<PageResponse<InterviewVO>> listProcesses(@RequestParam(required = false) String overallStatus,
+                                                                  @RequestParam(required = false) String stageStatus,
+                                                                  @RequestParam(required = false) String keyword,
+                                                                  @RequestParam(required = false) Integer page,
+                                                                  @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(PageResponse.slice(interviewService.listProcesses(overallStatus, stageStatus, keyword),
+                PageQuery.of(page, pageSize)));
     }
 
     @GetMapping("/interviewee/process/{processId}")
@@ -238,15 +259,21 @@ public class InterviewController {
     }
 
     @GetMapping("/hr/ai-records")
-    public ApiResponse<List<InterviewVO>> listAiRecords(@RequestParam Long processId) {
-        return ApiResponse.success(interviewService.listAiRecords(processId));
+    public ApiResponse<PageResponse<InterviewVO>> listAiRecords(@RequestParam Long processId,
+                                                                  @RequestParam(required = false) Integer page,
+                                                                  @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(PageResponse.slice(interviewService.listAiRecords(processId),
+                PageQuery.of(page, pageSize)));
     }
 
     @GetMapping("/interviewee/ai-records")
-    public ApiResponse<List<InterviewVO>> listIntervieweeAiRecords(Authentication authentication,
-                                                                   @RequestParam Long processId) {
+    public ApiResponse<PageResponse<InterviewVO>> listIntervieweeAiRecords(Authentication authentication,
+                                                                             @RequestParam Long processId,
+                                                                             @RequestParam(required = false) Integer page,
+                                                                             @RequestParam(required = false) Integer pageSize) {
         SessionUserVO current = currentUser(authentication);
-        return ApiResponse.success(interviewService.listIntervieweeAiRecords(processId, current.getId()));
+        return ApiResponse.success(PageResponse.slice(interviewService.listIntervieweeAiRecords(processId, current.getId()),
+                PageQuery.of(page, pageSize)));
     }
 
     @PostMapping("/hr/video-session/{processId}")
@@ -357,10 +384,16 @@ public class InterviewController {
         var session = interviewService.getDownloadableVideoSession(processId, processStageId);
         String path = session.getMergedRecordingPath() == null ? session.getRecordingPath() : session.getMergedRecordingPath();
         String fileName = session.getMergedRecordingFileName() == null ? session.getRecordingFileName() : session.getMergedRecordingFileName();
-        return s3ObjectStorageService.presignExternalDownloadIfAvailable("interview-recordings/" + fileName)
-                .<ResponseEntity<Resource>>map(url -> ResponseEntity.status(302).location(url).build())
-                .orElseGet(() -> FileDownloadSupport.buildInlineResponse(
-                        path, UploadPaths.RECORDING_DIR, fileName, "video/webm", "录制文件不可访问"));
+        return FileDownloadSupport.buildInlineResponse(
+                path, UploadPaths.RECORDING_DIR, fileName, "video/webm", "录制文件不可访问");
+    }
+
+    @GetMapping("/hr/video-recording/{processId}/download-url")
+    public ApiResponse<DownloadUrlResponse> getRecordingDownloadUrl(@PathVariable Long processId,
+                                                                      @RequestParam(required = false) Long processStageId) {
+        var session = interviewService.getDownloadableVideoSession(processId, processStageId);
+        String fileName = session.getMergedRecordingFileName() == null ? session.getRecordingFileName() : session.getMergedRecordingFileName();
+        return externalDownloadUrl("interview-recordings/" + fileName);
     }
 
     @PostMapping("/hr/video-summary/{processId}/retry")
@@ -372,11 +405,16 @@ public class InterviewController {
     public ResponseEntity<Resource> downloadAiRecording(@PathVariable Long processId,
                                                          @RequestParam(required = false) Long processStageId) {
         var process = processStageId == null ? interviewService.getProcess(processId) : interviewService.getProcessStage(processId, processStageId);
-        return s3ObjectStorageService.presignExternalDownloadIfAvailable("interview-recordings/" + process.getAiRecordingFileName())
-                .<ResponseEntity<Resource>>map(url -> ResponseEntity.status(302).location(url).build())
-                .orElseGet(() -> FileDownloadSupport.buildInlineResponse(
-                        process.getAiRecordingPath(), UploadPaths.RECORDING_DIR, process.getAiRecordingFileName(),
-                        "video/webm", "AI问答视频不可访问"));
+        return FileDownloadSupport.buildInlineResponse(
+                process.getAiRecordingPath(), UploadPaths.RECORDING_DIR, process.getAiRecordingFileName(),
+                "video/webm", "AI问答视频不可访问");
+    }
+
+    @GetMapping("/hr/ai-recording/{processId}/download-url")
+    public ApiResponse<DownloadUrlResponse> getAiRecordingDownloadUrl(@PathVariable Long processId,
+                                                                        @RequestParam(required = false) Long processStageId) {
+        var process = processStageId == null ? interviewService.getProcess(processId) : interviewService.getProcessStage(processId, processStageId);
+        return externalDownloadUrl("interview-recordings/" + process.getAiRecordingFileName());
     }
 
     @PostMapping("/hr/approve-ai/{processId}")
@@ -421,6 +459,12 @@ public class InterviewController {
 
     private SessionUserVO currentUser(Authentication authentication) {
         return authService.loadUserByUsername(authentication.getName());
+    }
+
+    private ApiResponse<DownloadUrlResponse> externalDownloadUrl(String objectName) {
+        return ApiResponse.success(s3ObjectStorageService.presignExternalDownloadIfAvailable(objectName)
+                .map(url -> new DownloadUrlResponse(url.toString()))
+                .orElseGet(DownloadUrlResponse::localFallback));
     }
 
     private List<String> splitUrls(String urls) {

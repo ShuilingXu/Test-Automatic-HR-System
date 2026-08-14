@@ -1,6 +1,9 @@
 package com.autohr.modules.recruitment.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.common.api.PageQuery;
+import com.autohr.common.api.PageResponse;
+import com.autohr.common.file.DownloadUrlResponse;
 import com.autohr.common.file.FileDownloadSupport;
 import com.autohr.common.file.S3ObjectStorageService;
 import com.autohr.common.file.UploadPaths;
@@ -51,11 +54,14 @@ public class RecruitmentController {
     }
 
     @GetMapping("/admin/jobs")
-    public ApiResponse<List<JobVO>> listAdminJobs(@RequestParam(required = false) Integer status,
+    public ApiResponse<PageResponse<JobVO>> listAdminJobs(@RequestParam(required = false) Integer status,
                                                   @RequestParam(required = false) String departmentName,
                                                   @RequestParam(required = false) String jobType,
-                                                  @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(recruitmentService.listJobs(status, departmentName, jobType, keyword));
+                                                  @RequestParam(required = false) String keyword,
+                                                  @RequestParam(required = false) Integer page,
+                                                  @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(recruitmentService.listJobs(status, departmentName, jobType, keyword,
+                PageQuery.of(page, pageSize)));
     }
 
     @DeleteMapping("/admin/jobs/{id}")
@@ -68,11 +74,14 @@ public class RecruitmentController {
     }
 
     @GetMapping("/admin/candidates")
-    public ApiResponse<List<CandidateVO>> listCandidates(@RequestParam(required = false) Long jobId,
+    public ApiResponse<PageResponse<CandidateVO>> listCandidates(@RequestParam(required = false) Long jobId,
                                                           @RequestParam(required = false) String status,
                                                           @RequestParam(required = false) String interviewStageStatus,
-                                                          @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(recruitmentService.listCandidates(jobId, status, interviewStageStatus, keyword));
+                                                          @RequestParam(required = false) String keyword,
+                                                          @RequestParam(required = false) Integer page,
+                                                          @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(recruitmentService.listCandidates(jobId, status, interviewStageStatus, keyword,
+                PageQuery.of(page, pageSize)));
     }
 
     @GetMapping("/admin/candidates/{id}")
@@ -108,8 +117,10 @@ public class RecruitmentController {
     }
 
     @GetMapping("/jobs")
-    public ApiResponse<List<JobVO>> listOpenJobs(@RequestParam(required = false) String keyword) {
-        return ApiResponse.success(recruitmentService.listJobs(1, null, null, keyword));
+    public ApiResponse<PageResponse<JobVO>> listOpenJobs(@RequestParam(required = false) String keyword,
+                                                         @RequestParam(required = false) Integer page,
+                                                         @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(recruitmentService.listJobs(1, null, null, keyword, PageQuery.of(page, pageSize)));
     }
 
     @PostMapping("/candidates")
@@ -119,8 +130,10 @@ public class RecruitmentController {
     }
 
     @GetMapping("/candidates/mine")
-    public ApiResponse<List<CandidateVO>> listMyCandidates(Authentication authentication) {
-        return ApiResponse.success(recruitmentService.listMyCandidates(authentication.getName()));
+    public ApiResponse<PageResponse<CandidateVO>> listMyCandidates(Authentication authentication,
+                                                                   @RequestParam(required = false) Integer page,
+                                                                   @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(recruitmentService.listMyCandidates(authentication.getName(), PageQuery.of(page, pageSize)));
     }
 
     @PostMapping("/candidates/{candidateId}/resume")
@@ -136,11 +149,21 @@ public class RecruitmentController {
         SessionUserVO current = currentUser(authentication);
         boolean privileged = List.of("IT_ADMIN", "HR_ADMIN", "HR_USER").contains(current.getRoleCode());
         RecruitmentResumeFile resumeFile = recruitmentService.getResumeFile(id, authentication.getName(), privileged);
-        return s3ObjectStorageService.presignExternalDownloadIfAvailable("resumes/" + resumeFile.getStoredFileName())
-                .<ResponseEntity<Resource>>map(url -> ResponseEntity.status(302).location(url).build())
-                .orElseGet(() -> FileDownloadSupport.buildAttachmentResponse(
-                        resumeFile.getFilePath(), UploadPaths.RESUME_DIR, resumeFile.getOriginalFileName(),
-                        resumeFile.getContentType(), "简历文件不可访问"));
+        return FileDownloadSupport.buildAttachmentResponse(
+                resumeFile.getFilePath(), UploadPaths.RESUME_DIR, resumeFile.getOriginalFileName(),
+                resumeFile.getContentType(), "简历文件不可访问");
+    }
+
+    @GetMapping("/resumes/{id}/download-url")
+    public ApiResponse<DownloadUrlResponse> getResumeDownloadUrl(Authentication authentication,
+                                                                   @PathVariable Long id) {
+        SessionUserVO current = currentUser(authentication);
+        boolean privileged = List.of("IT_ADMIN", "HR_ADMIN", "HR_USER").contains(current.getRoleCode());
+        RecruitmentResumeFile resumeFile = recruitmentService.getResumeFile(id, authentication.getName(), privileged);
+        return ApiResponse.success(s3ObjectStorageService
+                .presignExternalDownloadIfAvailable("resumes/" + resumeFile.getStoredFileName())
+                .map(url -> new DownloadUrlResponse(url.toString()))
+                .orElseGet(DownloadUrlResponse::localFallback));
     }
 
     private SessionUserVO currentUser(Authentication authentication) {

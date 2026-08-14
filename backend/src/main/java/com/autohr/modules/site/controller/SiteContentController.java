@@ -1,6 +1,8 @@
 package com.autohr.modules.site.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.common.api.PageQuery;
+import com.autohr.common.api.PageResponse;
 import com.autohr.modules.site.service.SiteContentService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -9,9 +11,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -22,13 +24,17 @@ public class SiteContentController {
     private final SiteContentService siteContentService;
 
     @GetMapping
-    public ApiResponse<List<Map<String, Object>>> published() {
-        return ApiResponse.success(siteContentService.list(true));
+    public ApiResponse<PageResponse<Map<String, Object>>> published(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(siteContentService.list(true, PageQuery.of(page, pageSize)));
     }
 
     @GetMapping("/admin")
-    public ApiResponse<List<Map<String, Object>>> all() {
-        return ApiResponse.success(siteContentService.list(false));
+    public ApiResponse<PageResponse<Map<String, Object>>> all(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(siteContentService.list(false, PageQuery.of(page, pageSize)));
     }
 
     @PostMapping("/admin")

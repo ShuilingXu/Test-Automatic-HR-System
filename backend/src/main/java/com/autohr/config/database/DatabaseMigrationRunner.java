@@ -59,6 +59,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
                 execute(statement, sql);
             }
             migrateInterviewProcessColumns(connection, statement);
+            migrateInterviewProcessTemplateColumns(connection, statement);
             migrateInterviewAiRecordColumns(connection, statement);
             migrateInterviewVideoSessionColumns(connection, statement);
             migrateInterviewProcessStageColumns(connection, statement);
@@ -66,6 +67,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
             migrateRecruitmentJobColumns(connection, statement);
             migrateHrEmployeeColumns(connection, statement);
             migrateSysUserColumns(connection, statement);
+            migrateReferentialIntegrityConstraints(connection, statement);
             assertNoDuplicateBusinessKeys(statement);
             migrateDatabaseGeneratedPrimaryKeys(connection, statement);
             for (String sql : statements.stream().filter(this::isCreateIndex).toList()) {
@@ -143,8 +145,31 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "interview_process", "template_name", "VARCHAR(128)");
     }
 
+    private void migrateInterviewProcessTemplateColumns(Connection connection, Statement statement) throws SQLException {
+        addColumnIfMissing(connection, statement, "interview_process_template", "version", "INTEGER NOT NULL DEFAULT 0");
+    }
+
     private void migrateInterviewAiRecordColumns(Connection connection, Statement statement) throws SQLException {
         addColumnIfMissing(connection, statement, "interview_ai_record", "process_stage_id", "INTEGER");
+        addColumnIfMissing(connection, statement, "interview_ai_record", "stage_scope_id", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, statement, "interview_ai_record", "question_status", "VARCHAR(32) NOT NULL DEFAULT 'READY'");
+        addColumnIfMissing(connection, statement, "interview_ai_record", "question_generation_attempts", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, statement, "interview_ai_record", "question_generation_token", "VARCHAR(64)");
+        addColumnIfMissing(connection, statement, "interview_ai_record", "question_lease_expires_at", dateTimeType());
+        addColumnIfMissing(connection, statement, "interview_ai_record", "question_next_retry_at", dateTimeType());
+        addColumnIfMissing(connection, statement, "interview_ai_record", "question_generation_error", "VARCHAR(1000)");
+        addColumnIfMissing(connection, statement, "interview_ai_record", "previous_record_id", "INTEGER");
+        addColumnIfMissing(connection, statement, "interview_ai_record", "suggested_next_question", "VARCHAR(5000)");
+        addColumnIfMissing(connection, statement, "interview_ai_record", "answer_status", "VARCHAR(32) NOT NULL DEFAULT 'PENDING'");
+        addColumnIfMissing(connection, statement, "interview_ai_record", "answer_processing_token", "VARCHAR(64)");
+        addColumnIfMissing(connection, statement, "interview_ai_record", "answer_lease_expires_at", dateTimeType());
+        addColumnIfMissing(connection, statement, "interview_ai_record", "answer_processing_attempts", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, statement, "interview_ai_record", "answer_error", "VARCHAR(1000)");
+        statement.executeUpdate("UPDATE interview_ai_record SET stage_scope_id = COALESCE(process_stage_id, 0)");
+        statement.executeUpdate("UPDATE interview_ai_record SET question_status = COALESCE(question_status, 'READY')");
+        statement.executeUpdate("UPDATE interview_ai_record SET answer_status = CASE "
+                + "WHEN answer_content IS NOT NULL AND average_score IS NOT NULL THEN 'COMPLETED' "
+                + "WHEN answer_content IS NOT NULL THEN 'FAILED' ELSE COALESCE(answer_status, 'PENDING') END");
     }
 
     private void migrateInterviewVideoSessionColumns(Connection connection, Statement statement) throws SQLException {
@@ -198,6 +223,65 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "hr_employee", "notes", "VARCHAR(1000)");
     }
 
+    private void migrateReferentialIntegrityConstraints(Connection connection, Statement statement) throws SQLException {
+        if (activeDatabase.type() == DatabaseType.SQLITE) {
+            // SQLite cannot add foreign-key constraints to existing tables without rebuilding them.
+            return;
+        }
+        ensureForeignKey(connection, statement, "fk_hr_employee_manager", "hr_employee", "manager_employee_id", "hr_employee");
+        ensureForeignKey(connection, statement, "fk_hr_department_parent", "hr_department", "parent_department_id", "hr_department");
+        ensureForeignKey(connection, statement, "fk_hr_department_manager", "hr_department", "manager_employee_id", "hr_employee");
+        ensureForeignKey(connection, statement, "fk_hr_employee_source_candidate", "hr_employee", "source_candidate_id", "recruitment_candidate");
+        ensureForeignKey(connection, statement, "fk_binding_employee", "hr_integration_binding", "employee_id", "hr_employee");
+        ensureForeignKey(connection, statement, "fk_candidate_interviewee_user", "recruitment_candidate", "interviewee_user_id", "sys_user");
+        ensureForeignKey(connection, statement, "fk_process_candidate", "interview_process", "recruitment_candidate_id", "recruitment_candidate");
+        ensureForeignKey(connection, statement, "fk_process_interviewee_user", "interview_process", "interviewee_user_id", "sys_user");
+        ensureForeignKey(connection, statement, "fk_process_approver_user", "interview_process", "approved_hr_user_id", "sys_user");
+        ensureForeignKey(connection, statement, "fk_process_template", "interview_process", "template_id", "interview_process_template");
+        ensureForeignKey(connection, statement, "fk_process_stage_process", "interview_process_stage", "process_id", "interview_process");
+        ensureForeignKey(connection, statement, "fk_process_stage_approver", "interview_process_stage", "approved_hr_user_id", "sys_user");
+        ensureForeignKey(connection, statement, "fk_ai_record_process", "interview_ai_record", "process_id", "interview_process");
+        ensureForeignKey(connection, statement, "fk_ai_record_stage", "interview_ai_record", "process_stage_id", "interview_process_stage");
+        ensureForeignKey(connection, statement, "fk_video_session_process", "interview_video_session", "process_id", "interview_process");
+        ensureForeignKey(connection, statement, "fk_video_session_stage", "interview_video_session", "process_stage_id", "interview_process_stage");
+        ensureForeignKey(connection, statement, "fk_video_session_approver", "interview_video_session", "approver_user_id", "sys_user");
+    }
+
+    private void ensureForeignKey(Connection connection, Statement statement, String constraintName, String table,
+                                  String column, String referencedTable) throws SQLException {
+        if (foreignKeyExists(connection, table, column, referencedTable)) {
+            return;
+        }
+        assertNoOrphanedReferences(statement, table, column, referencedTable);
+        execute(statement, "ALTER TABLE " + table + " ADD CONSTRAINT " + constraintName
+                + " FOREIGN KEY (" + column + ") REFERENCES " + referencedTable + "(id) ON DELETE RESTRICT");
+    }
+
+    private boolean foreignKeyExists(Connection connection, String table, String column, String referencedTable) throws SQLException {
+        DatabaseMetaData metaData = connection.getMetaData();
+        try (ResultSet keys = metaData.getImportedKeys(null, null, table)) {
+            while (keys.next()) {
+                if (column.equalsIgnoreCase(keys.getString("FKCOLUMN_NAME"))
+                        && referencedTable.equalsIgnoreCase(keys.getString("PKTABLE_NAME"))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void assertNoOrphanedReferences(Statement statement, String table, String column, String referencedTable)
+            throws SQLException {
+        String sql = "SELECT COUNT(*) FROM " + table + " child LEFT JOIN " + referencedTable
+                + " parent ON child." + column + " = parent.id WHERE child." + column + " IS NOT NULL AND parent.id IS NULL";
+        try (ResultSet resultSet = statement.executeQuery(sql)) {
+            if (resultSet.next() && resultSet.getLong(1) > 0) {
+                throw new IllegalStateException("Cannot enforce foreign key " + table + "." + column
+                        + " because orphaned references exist. Resolve them before deployment.");
+            }
+        }
+    }
+
     private void addColumnIfMissing(Connection connection, Statement statement, String table, String column, String definition) throws SQLException {
         if (columnExists(connection, table, column)) {
             return;
@@ -248,6 +332,8 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
                 "recruitment_candidate_id IS NOT NULL", "interview processes for one candidate");
         assertNoDuplicateBusinessKey(statement, "hr_employee", "source_candidate_id",
                 "source_candidate_id IS NOT NULL", "employees generated from one candidate");
+        assertNoDuplicateBusinessKey(statement, "interview_ai_record", "process_id, stage_scope_id, sequence_no",
+                "sequence_no IS NOT NULL", "AI questions with one process stage and sequence number");
     }
 
     private void assertNoDuplicateBusinessKey(Statement statement, String table, String columns,

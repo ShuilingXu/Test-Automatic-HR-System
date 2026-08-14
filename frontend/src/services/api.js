@@ -37,6 +37,16 @@ async function openAuthorizedFile(path, params = {}) {
   const popup = window.open('about:blank', '_blank')
   try {
     popup && (popup.opener = null)
+    const downloadUrlResponse = await request.get(`${normalizedPath}/download-url`, { params })
+    const externalUrl = downloadUrlResponse?.data?.url
+    if (externalUrl) {
+      if (popup) {
+        popup.location.replace(externalUrl)
+      } else {
+        window.location.assign(externalUrl)
+      }
+      return
+    }
     const blob = await request.get(normalizedPath, { params, responseType: 'blob' })
     const objectUrl = URL.createObjectURL(blob)
     if (popup) {
@@ -54,28 +64,53 @@ async function openAuthorizedFile(path, params = {}) {
   }
 }
 
+const defaultPageParams = { page: 1, pageSize: 200 }
+
+async function requestPage(path, params) {
+  const pageParams = { ...defaultPageParams, ...params }
+  const response = await request.get(path, { params: pageParams })
+  const pagination = response?.data
+  if (Array.isArray(pagination)) return response
+
+  const items = [...(pagination?.items || [])]
+  const total = Number(pagination?.total || 0)
+  const page = Number(pagination?.page || pageParams.page)
+  const pageSize = Number(pagination?.pageSize || pageParams.pageSize)
+  const pageCount = pageSize > 0 ? Math.ceil(total / pageSize) : 1
+
+  // Existing management screens are list-oriented. Follow the paginated contract
+  // until they gain dedicated controls so records are never silently hidden at 200.
+  for (let nextPage = page + 1; nextPage <= pageCount; nextPage += 1) {
+    const nextResponse = await request.get(path, {
+      params: { ...pageParams, page: nextPage, pageSize },
+    })
+    items.push(...(nextResponse?.data?.items || []))
+  }
+  return { ...response, data: items, pagination: { ...pagination, loaded: items.length } }
+}
+
 export const hrApi = {
   getDashboard() { return request.get('/hr/dashboard') },
-  listDepartments(params) { return request.get('/hr/departments', { params }) },
+  listDepartments(params) { return requestPage('/hr/departments', params) },
   saveDepartment(payload) { return request.post('/hr/departments', payload) },
   deleteDepartment(id) { return request.delete(`/hr/departments/${id}`) },
-  listEmployees(params) { return request.get('/hr/employees', { params }) },
+  listEmployees(params) { return requestPage('/hr/employees', params) },
   saveEmployee(payload) { return request.post('/hr/employees', payload) },
   deleteEmployee(id) { return request.delete(`/hr/employees/${id}`) },
 }
 
 export const recruitmentApi = {
   saveJob(payload) { return request.post('/recruitment/admin/jobs', payload) },
-  listAdminJobs(params) { return request.get('/recruitment/admin/jobs', { params }) },
+  listAdminJobs(params) { return requestPage('/recruitment/admin/jobs', params) },
   deleteJob(id) { return request.delete(`/recruitment/admin/jobs/${id}`) },
-  listCandidates(params) { return request.get('/recruitment/admin/candidates', { params }) },
+  listCandidates(params) { return requestPage('/recruitment/admin/candidates', params) },
   getCandidate(id) { return request.get(`/recruitment/admin/candidates/${id}`) },
   rejectCandidateResume(id) { return request.post(`/recruitment/admin/candidates/${id}/reject-resume`) },
   reevaluateResumeLlm(id) { return request.post(`/recruitment/admin/candidates/${id}/reevaluate-resume-llm`) },
   deleteCandidate(id) { return request.delete(`/recruitment/admin/candidates/${id}`) },
-  listOpenJobs(params) { return request.get('/recruitment/jobs', { params }) },
+  listOpenJobs(params) { return requestPage('/recruitment/jobs', params) },
   apply(payload) { return request.post('/recruitment/candidates', payload) },
-  listMyCandidates() { return request.get('/recruitment/candidates/mine') },
+  listMyCandidates(params) { return requestPage('/recruitment/candidates/mine', params) },
   uploadResume(candidateId, file) {
     const formData = new FormData()
     formData.append('file', file)
@@ -96,8 +131,8 @@ export const authApi = {
   getSession() { return request.get('/auth/me') },
   changePassword(payload) { return request.post('/auth/change-password', payload) },
   updateProfile(payload) { return request.post('/auth/profile', payload) },
-  listUsers(params) { return request.get('/auth/admin/users', { params }) },
-  listAuditLogs(params) { return request.get('/auth/admin/audit-logs', { params }) },
+  listUsers(params) { return requestPage('/auth/admin/users', params) },
+  listAuditLogs(params) { return requestPage('/auth/admin/audit-logs', params) },
   updateUser(id, payload) { return request.post(`/auth/admin/users/${id}`, payload) },
   deleteUser(id) { return request.delete(`/auth/admin/users/${id}`) },
   logout() {
@@ -114,8 +149,8 @@ export const systemApi = {
 }
 
 export const siteContentApi = {
-  listPublished() { return request.get('/site-content') },
-  listAdmin() { return request.get('/site-content/admin') },
+  listPublished(params) { return requestPage('/site-content', params) },
+  listAdmin(params) { return requestPage('/site-content/admin', params) },
   save(payload) { return request.post('/site-content/admin', payload) },
   remove(id) { return request.delete(`/site-content/admin/${id}`) },
 }
@@ -124,7 +159,7 @@ export const interviewApi = {
   getRuntimeConfig() { return request.get('/interview/runtime-config') },
   getIceServers() { return request.get('/interview/ice-servers') },
   saveKnowledgeBase(payload) { return request.post('/interview/hr/knowledge-bases', payload) },
-  listKnowledgeBases(params) { return request.get('/interview/hr/knowledge-bases', { params }) },
+  listKnowledgeBases(params) { return requestPage('/interview/hr/knowledge-bases', params) },
   deleteKnowledgeBase(id) { return request.post(`/interview/hr/knowledge-bases/${id}/delete`) },
   saveKnowledgeItem(payload) { return request.post('/interview/hr/knowledge-items', payload) },
   importKnowledgeItems(knowledgeBaseId, file) {
@@ -135,24 +170,24 @@ export const interviewApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
-  listKnowledgeItems(params) { return request.get('/interview/hr/knowledge-items', { params }) },
+  listKnowledgeItems(params) { return requestPage('/interview/hr/knowledge-items', params) },
   deleteKnowledgeItem(id) { return request.post(`/interview/hr/knowledge-items/${id}/delete`) },
   saveJobKnowledgeWeight(payload) { return request.post('/interview/hr/job-knowledge-weights', payload) },
-  listJobKnowledgeWeights(params) { return request.get('/interview/hr/job-knowledge-weights', { params }) },
+  listJobKnowledgeWeights(params) { return requestPage('/interview/hr/job-knowledge-weights', params) },
   deleteJobKnowledgeWeight(id) { return request.post(`/interview/hr/job-knowledge-weights/${id}/delete`) },
   saveLlmConfig(payload) { return request.post('/interview/it/llm-configs', payload) },
-  listLlmConfigs(params) { return request.get('/interview/it/llm-configs', { params }) },
+  listLlmConfigs(params) { return requestPage('/interview/it/llm-configs', params) },
   deleteLlmConfig(id) { return request.post(`/interview/it/llm-configs/${id}/delete`) },
   saveProcessTemplate(payload) { return request.post('/interview/hr/process-templates', payload) },
-  listProcessTemplates(params) { return request.get('/interview/hr/process-templates', { params }) },
+  listProcessTemplates(params) { return requestPage('/interview/hr/process-templates', params) },
   getProcessTemplate(id) { return request.get(`/interview/hr/process-templates/${id}`) },
-  deleteProcessTemplate(id) { return request.post(`/interview/hr/process-templates/${id}/delete`) },
+  deleteProcessTemplate(id, version) { return request.post(`/interview/hr/process-templates/${id}/delete`, null, { params: { version } }) },
   startProcess(payload) { return request.post('/interview/hr/processes', payload) },
-  listProcesses(params) { return request.get('/interview/hr/processes', { params }) },
+  listProcesses(params) { return requestPage('/interview/hr/processes', params) },
   getIntervieweeProcess(processId) { return request.get(`/interview/interviewee/process/${processId}`) },
   getNextAiQuestion(processId) { return request.get(`/interview/interviewee/next-question/${processId}`) },
-  listAiRecords(params) { return request.get('/interview/hr/ai-records', { params }) },
-  listIntervieweeAiRecords(params) { return request.get('/interview/interviewee/ai-records', { params }) },
+  listAiRecords(params) { return requestPage('/interview/hr/ai-records', params) },
+  listIntervieweeAiRecords(params) { return requestPage('/interview/interviewee/ai-records', params) },
   createVideoSession(processId) { return request.post(`/interview/hr/video-session/${processId}`) },
   publishVideoOffer(processId, payload) { return request.post(`/interview/hr/video-offer/${processId}`, payload) },
   getVideoState(processId) { return request.get(`/interview/interviewee/video-state/${processId}`) },
@@ -201,10 +236,13 @@ export const interviewApi = {
   terminateProcess(processId, payload) { return request.post(`/interview/hr/terminate/${processId}`, payload) },
   updateProcessRemark(processId, payload) { return request.post(`/interview/hr/processes/${processId}/remark`, payload) },
   submitAiAnswer(payload) { return request.post('/interview/interviewee/ai-answer', payload, { timeout: 120000 }) },
-  async submitAiAnswerStream(payload, onEvent) {
+  async submitAiAnswerStream(payload, onEvent, options = {}) {
     const token = window.localStorage.getItem('demo-token')
     const streamUrl = `${apiBaseUrl.replace(/\/$/, '')}/interview/interviewee/ai-answer/stream`
     const abortController = new AbortController()
+    const abortFromCaller = () => abortController.abort()
+    if (options.signal?.aborted) abortFromCaller()
+    else options.signal?.addEventListener('abort', abortFromCaller, { once: true })
     let timedOut = false
     let reader = null
     const timeoutId = window.setTimeout(() => {
@@ -263,6 +301,7 @@ export const interviewApi = {
       throw error
     } finally {
       window.clearTimeout(timeoutId)
+      options.signal?.removeEventListener('abort', abortFromCaller)
       reader?.releaseLock()
     }
   },

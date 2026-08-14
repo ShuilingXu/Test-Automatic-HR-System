@@ -35,7 +35,7 @@ public interface InterviewService {
     InterviewVO saveProcessTemplate(InterviewProcessTemplateSaveRequest request);
     List<InterviewVO> listProcessTemplates(Integer status, String keyword);
     InterviewVO getProcessTemplate(Long id);
-    void deleteProcessTemplate(Long id);
+    void deleteProcessTemplate(Long id, Integer version);
     InterviewVO startInterviewProcess(StartInterviewProcessRequest request);
     List<InterviewVO> listProcesses(String overallStatus, String stageStatus, String keyword);
     InterviewVO getProcess(Long processId);

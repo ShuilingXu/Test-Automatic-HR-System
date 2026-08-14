@@ -1,6 +1,8 @@
 package com.autohr.modules.auth.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.common.api.PageQuery;
+import com.autohr.common.api.PageResponse;
 import com.autohr.modules.auth.dto.CandidateProfileUpdateRequest;
 import com.autohr.modules.auth.dto.CandidateRegisterRequest;
 import com.autohr.modules.auth.dto.CaptchaVO;
@@ -108,12 +110,15 @@ public class AuthController {
     }
 
     @GetMapping("/admin/users")
-    public ApiResponse<List<SessionUserVO>> listUsers(Authentication authentication,
+    public ApiResponse<PageResponse<SessionUserVO>> listUsers(Authentication authentication,
                                                       @RequestParam(required = false) String roleCode,
                                                       @RequestParam(required = false) Integer status,
-                                                      @RequestParam(required = false) String keyword) {
+                                                      @RequestParam(required = false) String keyword,
+                                                      @RequestParam(required = false) Integer page,
+                                                      @RequestParam(required = false) Integer pageSize) {
         SessionUserVO current = authService.loadUserByUsername(authentication.getName());
-        return ApiResponse.success(authService.listUsers(roleCode, status, keyword, current.getRoleCode()));
+        return ApiResponse.success(authService.listUsers(roleCode, status, keyword, current.getRoleCode(),
+                PageQuery.of(page, pageSize)));
     }
 
     @PostMapping("/admin/users/{id}")
@@ -136,9 +141,11 @@ public class AuthController {
     }
 
     @GetMapping("/admin/audit-logs")
-    public ApiResponse<List<AuditLogVO>> listAuditLogs(@RequestParam(required = false) String moduleCode,
+    public ApiResponse<PageResponse<AuditLogVO>> listAuditLogs(@RequestParam(required = false) String moduleCode,
                                                        @RequestParam(required = false) String actionCode,
-                                                       @RequestParam(required = false) String keyword) {
-        return ApiResponse.success(auditLogService.list(moduleCode, actionCode, keyword));
+                                                       @RequestParam(required = false) String keyword,
+                                                       @RequestParam(required = false) Integer page,
+                                                       @RequestParam(required = false) Integer pageSize) {
+        return ApiResponse.success(auditLogService.list(moduleCode, actionCode, keyword, PageQuery.of(page, pageSize)));
     }
 }

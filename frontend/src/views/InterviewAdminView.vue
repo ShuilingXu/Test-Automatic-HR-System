@@ -144,7 +144,7 @@
           <el-table-column prop="description" label="说明" min-width="220" />
           <el-table-column label="流程阶段" min-width="260"><template #default="scope"><span class="template-stage-summary">{{ templateStageSummary(scope.row) }}</span></template></el-table-column>
           <el-table-column label="状态" width="90"><template #default="scope"><el-tag :type="scope.row.status === 1 ? 'success' : 'info'">{{ scope.row.status === 1 ? '启用' : '停用' }}</el-tag></template></el-table-column>
-          <el-table-column v-if="isTemplateManager" label="操作" width="160"><template #default="scope"><el-button text @click.stop="editProcessTemplate(scope.row)">编辑</el-button><el-button text type="danger" @click.stop="deleteProcessTemplate(scope.row.id)">删除</el-button></template></el-table-column>
+          <el-table-column v-if="isTemplateManager" label="操作" width="160"><template #default="scope"><el-button text @click.stop="editProcessTemplate(scope.row)">编辑</el-button><el-button text type="danger" @click.stop="deleteProcessTemplate(scope.row)">删除</el-button></template></el-table-column>
         </el-table>
       </section>
 
@@ -419,6 +419,8 @@ let hrRecordingStopInProgress = false
 let handledHrRecordingEndSignal = ''
 let hrRecordingEndTimer = null
 let hrVideoPollInProgress = false
+let processDetailLoadGeneration = 0
+let adminLoadGeneration = 0
 
 const kbForm = reactive({ id: null, knowledgeBaseName: '', techCategory: '', jobCategory: '', status: 1 })
 const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '', knowledgeContent: '', status: 1 })
@@ -549,32 +551,59 @@ function sortAiRecords(left, right) {
 }
 function isAiApprovalPending(process) { return process?.overallStatus === 'IN_PROGRESS' && process?.currentStage === 'AI' && process?.stageStatus === 'WAITING_APPROVAL' }
 async function loadAll() {
+  const generation = ++adminLoadGeneration
   try {
-    sessionUser.value = (await authApi.getSession()).data
-    knowledgeBases.value = (await interviewApi.listKnowledgeBases()).data
+    const sessionResponse = await authApi.getSession()
+    if (generation !== adminLoadGeneration) return
+    sessionUser.value = sessionResponse.data
+    const knowledgeBasesResponse = await interviewApi.listKnowledgeBases()
+    if (generation !== adminLoadGeneration) return
+    knowledgeBases.value = knowledgeBasesResponse.data
     if (isItAdmin.value) {
-      llmConfigs.value = (await interviewApi.listLlmConfigs()).data
-      Object.assign(systemConfig, (await systemApi.getConfig()).data)
+      const [llmConfigsResponse, systemConfigResponse] = await Promise.all([
+        interviewApi.listLlmConfigs(),
+        systemApi.getConfig(),
+      ])
+      if (generation !== adminLoadGeneration) return
+      llmConfigs.value = llmConfigsResponse.data
+      Object.assign(systemConfig, systemConfigResponse.data)
       syncLlmForms()
     } else {
       llmConfigs.value = []
       if (activeTab.value === 'llm') router.replace('/interview/hr/knowledge-bases')
     }
-    jobs.value = (await recruitmentApi.listAdminJobs()).data
-    departments.value = (await hrApi.listDepartments({ status: 1 })).data
-    recruitmentCandidates.value = (await recruitmentApi.listCandidates()).data
-    processTemplates.value = (await interviewApi.listProcessTemplates()).data
-    processes.value = (await interviewApi.listProcesses()).data
+    const [jobsResponse, departmentsResponse, candidatesResponse, templatesResponse, processesResponse] = await Promise.all([
+      recruitmentApi.listAdminJobs(),
+      hrApi.listDepartments({ status: 1 }),
+      recruitmentApi.listCandidates(),
+      interviewApi.listProcessTemplates(),
+      interviewApi.listProcesses(),
+    ])
+    if (generation !== adminLoadGeneration) return
+    jobs.value = jobsResponse.data
+    departments.value = departmentsResponse.data
+    recruitmentCandidates.value = candidatesResponse.data
+    processTemplates.value = templatesResponse.data
+    processes.value = processesResponse.data
     if (selectedProcess.value) {
       selectedProcess.value = processes.value.find((item) => item.id === selectedProcess.value.id) || selectedProcess.value
       if (isProcessDetail.value) {
-        aiRecords.value = (await interviewApi.listAiRecords({ processId: selectedProcess.value.id })).data
-        selectedCandidate.value = selectedProcess.value.recruitmentCandidateId ? (await recruitmentApi.getCandidate(selectedProcess.value.recruitmentCandidateId)).data : null
+        const currentProcess = selectedProcess.value
+        const [recordsResponse, candidateResponse] = await Promise.all([
+          interviewApi.listAiRecords({ processId: currentProcess.id }),
+          currentProcess.recruitmentCandidateId ? recruitmentApi.getCandidate(currentProcess.recruitmentCandidateId) : Promise.resolve(null),
+        ])
+        if (generation !== adminLoadGeneration || selectedProcess.value?.id !== currentProcess.id) return
+        aiRecords.value = recordsResponse.data
+        selectedCandidate.value = candidateResponse?.data || null
         processRemark.value = selectedProcess.value.remark || ''
       }
     }
+    if (generation !== adminLoadGeneration) return
     await syncRouteState()
-  } catch (error) { fail(error) }
+  } catch (error) {
+    if (generation === adminLoadGeneration) fail(error)
+  }
 }
 async function selectKnowledgeBase(row) { itemForm.knowledgeBaseId = row.id; knowledgeItems.value = (await interviewApi.listKnowledgeItems({ knowledgeBaseId: row.id })).data }
 async function openKnowledgeBase(row) { await router.push(`/interview/hr/knowledge-bases/${row.id}`) }
@@ -597,7 +626,7 @@ function systemConfigPayload() {
   return Object.fromEntries(Object.entries(systemConfig).filter(([key, value]) => !retainOnBlankConfigKeys.has(key) || String(value || '').trim()))
 }
 async function saveSystemConfig() { savingSystemConfig.value = true; try { await systemApi.saveConfig(systemConfigPayload()); ElMessage.success('系统配置已保存'); Object.assign(systemConfig, (await systemApi.getConfig()).data) } catch (error) { fail(error) } finally { savingSystemConfig.value = false } }
-function createTemplateForm() { return { id: null, templateName: '', description: '', status: 1, stages: [] } }
+function createTemplateForm() { return { id: null, version: null, templateName: '', description: '', status: 1, stages: [] } }
 function createTemplateStage() { return { key: `${Date.now()}-${Math.random()}`, stageName: '', stageType: 'AI', knowledgeBaseId: null } }
 function resetTemplateForm() { Object.assign(templateForm, createTemplateForm()) }
 function addTemplateStage() { templateForm.stages.push(createTemplateStage()) }
@@ -608,9 +637,9 @@ function stageStatusLabel(status) { return ({ PENDING: '待开始', READY: '待�
 function stageStatusTagType(status) { return ({ PASSED: 'success', REJECTED: 'danger', WAITING_APPROVAL: 'warning', IN_PROGRESS: 'primary', UPLOADING: 'warning' })[status] || 'info' }
 function summaryStatusLabel(status) { return ({ PENDING_MERGE: '等待合并', PENDING: '等待生成', PROCESSING: '生成中', COMPLETED: '已生成', FAILED_MERGE: '合并失败', FAILED: '生成失败', MISSING_RECORDING: '录像缺失（不阻止审批）' })[status] || status || '未生成' }
 function handleTemplateRowClick(row) { if (isTemplateManager.value) void editProcessTemplate(row) }
-async function editProcessTemplate(row) { try { const template = (await interviewApi.getProcessTemplate(row.id)).data; Object.assign(templateForm, { id: template.id, templateName: template.templateName, description: template.description || '', status: template.status ?? 1, stages: (template.stages || []).map((stage) => ({ key: `${stage.id}-${Date.now()}`, stageName: stage.stageName, stageType: stage.stageType, knowledgeBaseId: stage.knowledgeBaseId || null })) }); } catch (error) { fail(error) } }
-async function saveProcessTemplate() { if (!templateForm.templateName.trim()) { ElMessage.warning('请填写模板名称'); return } if (!templateForm.stages.length) { ElMessage.warning('请至少添加一个面试阶段'); return } const invalidAiStage = templateForm.stages.find((stage) => stage.stageType === 'AI' && !stage.knowledgeBaseId); if (invalidAiStage) { ElMessage.warning(`请为“${invalidAiStage.stageName || 'AI 面试'}”选择题库`); return } const invalidName = templateForm.stages.find((stage) => !stage.stageName.trim()); if (invalidName) { ElMessage.warning('请填写每个阶段的展示名称'); return } savingTemplate.value = true; try { const saved = (await interviewApi.saveProcessTemplate({ id: templateForm.id, templateName: templateForm.templateName.trim(), description: templateForm.description.trim(), status: templateForm.status, stages: templateForm.stages.map((stage, index) => ({ stageName: stage.stageName.trim(), stageType: stage.stageType, knowledgeBaseId: stage.stageType === 'AI' ? stage.knowledgeBaseId : null, sequenceNo: index + 1 })) })).data; ElMessage.success('流程模板已保存'); await loadAll(); await editProcessTemplate(saved) } catch (error) { fail(error) } finally { savingTemplate.value = false } }
-async function deleteProcessTemplate(id) { try { await confirmDelete('删除后无法恢复该流程模板，已开始的面试流程不受影响。'); await interviewApi.deleteProcessTemplate(id); ElMessage.success('流程模板已删除'); if (templateForm.id === id) resetTemplateForm(); await loadAll() } catch (error) { if (error !== 'cancel' && error !== 'close') fail(error) } }
+async function editProcessTemplate(row) { try { const template = (await interviewApi.getProcessTemplate(row.id)).data; Object.assign(templateForm, { id: template.id, version: template.version, templateName: template.templateName, description: template.description || '', status: template.status ?? 1, stages: (template.stages || []).map((stage) => ({ key: `${stage.id}-${Date.now()}`, stageName: stage.stageName, stageType: stage.stageType, knowledgeBaseId: stage.knowledgeBaseId || null })) }); } catch (error) { fail(error) } }
+async function saveProcessTemplate() { if (!templateForm.templateName.trim()) { ElMessage.warning('请填写模板名称'); return } if (!templateForm.stages.length) { ElMessage.warning('请至少添加一个面试阶段'); return } const invalidAiStage = templateForm.stages.find((stage) => stage.stageType === 'AI' && !stage.knowledgeBaseId); if (invalidAiStage) { ElMessage.warning(`请为“${invalidAiStage.stageName || 'AI 面试'}”选择题库`); return } const invalidName = templateForm.stages.find((stage) => !stage.stageName.trim()); if (invalidName) { ElMessage.warning('请填写每个阶段的展示名称'); return } savingTemplate.value = true; try { const saved = (await interviewApi.saveProcessTemplate({ id: templateForm.id, version: templateForm.version, templateName: templateForm.templateName.trim(), description: templateForm.description.trim(), status: templateForm.status, stages: templateForm.stages.map((stage, index) => ({ stageName: stage.stageName.trim(), stageType: stage.stageType, knowledgeBaseId: stage.stageType === 'AI' ? stage.knowledgeBaseId : null, sequenceNo: index + 1 })) })).data; ElMessage.success('流程模板已保存'); await loadAll(); await editProcessTemplate(saved) } catch (error) { fail(error) } finally { savingTemplate.value = false } }
+async function deleteProcessTemplate(template) { try { await confirmDelete('删除后无法恢复该流程模板，已开始的面试流程不受影响。'); await interviewApi.deleteProcessTemplate(template.id, template.version); ElMessage.success('流程模板已删除'); if (templateForm.id === template.id) resetTemplateForm(); await loadAll() } catch (error) { if (error !== 'cancel' && error !== 'close') fail(error) } }
 function editLlmConfig(row) { Object.assign(llmFormByRole(row.modelRole), { ...row, apiKey: '' }) }
 function createLlmForm(role) { return { id: null, configName: role === 'SCORER' ? '评分模型' : role === 'RESUME_REVIEW' ? '简历初筛模型' : role === 'VIDEO_SUMMARY' ? '视频会议概要模型' : '面试官模型', modelRole: role, baseUrl: '', apiKey: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 } }
 function llmFormByRole(role) { return role === 'SCORER' ? scorerLlmForm : role === 'RESUME_REVIEW' ? resumeReviewLlmForm : role === 'VIDEO_SUMMARY' ? videoSummaryLlmForm : interviewerLlmForm }
@@ -644,10 +673,16 @@ async function startProcess() {
   }
 }
 async function loadProcessDetail(row) {
+  const generation = ++processDetailLoadGeneration
   selectedProcess.value = row
   processRemark.value = row?.remark || ''
-  aiRecords.value = (await interviewApi.listAiRecords({ processId: row.id })).data
-  selectedCandidate.value = row.recruitmentCandidateId ? (await recruitmentApi.getCandidate(row.recruitmentCandidateId)).data : null
+  const [recordsResponse, candidateResponse] = await Promise.all([
+    interviewApi.listAiRecords({ processId: row.id }),
+    row.recruitmentCandidateId ? recruitmentApi.getCandidate(row.recruitmentCandidateId) : Promise.resolve(null),
+  ])
+  if (generation !== processDetailLoadGeneration || selectedProcess.value?.id !== row.id) return
+  aiRecords.value = recordsResponse.data
+  selectedCandidate.value = candidateResponse?.data || null
 }
 function isFinalApproval(process) {
   if (!process?.templateId) return process?.currentStage === 'ONSITE'
@@ -1034,9 +1069,9 @@ onMounted(loadAll)
 .ai-stage-kicker { color: var(--primary); font-size: 12px; font-weight: 800; letter-spacing: .04em; }
 .ai-stage-count { color: var(--text-muted); font-size: 13px; }
 .empty-stage-review { margin: 14px 0 0; color: var(--text-muted); }
-.ai-question-panel, .action-panel { grid-column: 1 / -1; }
-.ai-question-panel { display: grid; min-width: 0; gap: 16px; overflow: hidden; }
-.ai-review-content { min-width: 0; width: 100%; max-width: 100%; overflow: hidden; }
+.ai-question-panel { grid-column: 1; display: grid; min-width: 0; height: min(760px, calc(100dvh - 48px)); grid-template-rows: auto minmax(0, 1fr); gap: 16px; overflow: hidden; }
+.action-panel { grid-column: 2; position: sticky; top: 16px; align-self: start; }
+.ai-review-content { min-width: 0; width: 100%; max-width: 100%; padding-right: 8px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .ai-question-list { display: grid; min-width: 0; gap: 0; margin: 12px 0 0; padding: 0; list-style: none; }
 .ai-question-review { min-width: 0; padding: 20px 0; border-top: 1px solid var(--border); }
 .ai-question-review:first-child { border-top: 0; }
@@ -1083,7 +1118,7 @@ onMounted(loadAll)
 .config-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }.config-heading h3, .config-panel-head h3 { margin: 0; }.config-heading .serial-line { margin: 8px 0 0; }.env-badge { padding: 5px 9px; border: 1px solid #bfd3c9; border-radius: 5px; background: #edf6f1; color: #175c50; font-size: 12px; font-weight: 700; }
 .config-tabs, .model-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0; padding-bottom: 12px; border-bottom: 1px solid var(--border); }.config-tabs button, .model-tabs button { padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink-soft); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }.config-tabs button:hover, .model-tabs button:hover { color: var(--primary); border-color: var(--primary); }.config-tabs button.active, .model-tabs button.active { color: #fff; background: var(--primary); border-color: var(--primary); }
 .config-panel-head { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin: 6px 0 18px; }.config-panel-head p { margin: 7px 0 0; color: var(--text-muted); line-height: 1.6; }.config-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }.model-editor { max-width: 880px; }.key-state { color: var(--text-muted); font-size: 13px; }.model-editor .action-row { margin-top: 18px; }
-@media (max-width: 900px) { .topline, .detail-headline { flex-direction: column; } .form-grid, .video-grid, .llm-config-grid, .preview-grid, .process-workbench, .candidate-info-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .topline, .detail-headline { flex-direction: column; } .form-grid, .video-grid, .llm-config-grid, .preview-grid, .process-workbench, .candidate-info-grid { grid-template-columns: 1fr; } .ai-question-panel, .action-panel { grid-column: 1 / -1; } .ai-question-panel { height: auto; grid-template-rows: auto; overflow: visible; } .ai-review-content { padding-right: 0; overflow: visible; } .action-panel { position: static; } }
 @media (max-width: 900px) { .template-stage-row { grid-template-columns: 32px 1fr; }.stage-type-switch, .template-stage-row > .el-select, .human-stage-note, .stage-row-actions { grid-column: 2; }.stage-row-actions { flex-wrap: wrap; } }
 @media (max-width: 700px) { .ai-response-grid { grid-template-columns: 1fr; } .ai-question-copy { padding-left: 0; } .ai-response-grid { margin-left: 0; } }
 @media (max-width: 700px) { .config-form-grid { grid-template-columns: 1fr; } .config-heading, .config-panel-head { flex-direction: column; } }

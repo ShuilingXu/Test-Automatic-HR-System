@@ -1,6 +1,8 @@
 package com.autohr.modules.hr.service.impl;
 
 import cn.hutool.core.util.StrUtil;
+import com.autohr.common.api.PageQuery;
+import com.autohr.common.api.PageResponse;
 import com.autohr.common.exception.BusinessException;
 import com.autohr.modules.hr.dto.DepartmentSaveRequest;
 import com.autohr.modules.hr.dto.DepartmentVO;
@@ -19,6 +21,7 @@ import com.autohr.modules.hr.mapper.IntegrationBindingMapper;
 import com.autohr.modules.hr.service.HrService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -63,8 +66,10 @@ public class HrServiceImpl implements HrService {
     }
 
     @Override
-    public List<DepartmentVO> listDepartments(Long parentDepartmentId, Integer status, String keyword) {
-        List<Department> departments = departmentMapper.selectList(new LambdaQueryWrapper<Department>()
+    public PageResponse<DepartmentVO> listDepartments(Long parentDepartmentId, Integer status, String keyword,
+                                                       PageQuery pageQuery) {
+        Page<Department> result = departmentMapper.selectPage(new Page<>(pageQuery.page(), pageQuery.pageSize()),
+                new LambdaQueryWrapper<Department>()
                 .eq(parentDepartmentId != null, Department::getParentDepartmentId, parentDepartmentId)
                 .eq(status != null, Department::getStatus, status)
                 .and(StrUtil.isNotBlank(keyword), q -> q.like(Department::getDepartmentName, keyword)
@@ -74,7 +79,8 @@ public class HrServiceImpl implements HrService {
                 .orderByAsc(Department::getId));
         Map<Long, Department> departmentMap = loadDepartmentMap();
         Map<Long, Employee> employeeMap = loadEmployeeMap();
-        return departments.stream().map(item -> toDepartmentVO(item, departmentMap, employeeMap)).toList();
+        return PageResponse.of(result.getRecords().stream().map(item -> toDepartmentVO(item, departmentMap, employeeMap)).toList(),
+                result.getTotal(), pageQuery);
     }
 
     @Override
@@ -96,7 +102,7 @@ public class HrServiceImpl implements HrService {
     @Override
     @Transactional
     public EmployeeVO saveEmployee(EmployeeSaveRequest request) {
-        Long resolvedId = resolveEmployeeId(request);
+        Long resolvedId = request.getId();
         validateEmployee(request.getDepartmentId(), request.getManagerEmployeeId(), resolvedId);
         validateEmployeeUnique(request, resolvedId);
         Employee employee = resolvedId == null ? new Employee() : requireEmployee(resolvedId);
@@ -116,8 +122,10 @@ public class HrServiceImpl implements HrService {
     }
 
     @Override
-    public List<EmployeeVO> listEmployees(Long departmentId, Integer employmentStatus, String keyword) {
-        List<Employee> employees = employeeMapper.selectList(new LambdaQueryWrapper<Employee>()
+    public PageResponse<EmployeeVO> listEmployees(Long departmentId, Integer employmentStatus, String keyword,
+                                                   PageQuery pageQuery) {
+        Page<Employee> result = employeeMapper.selectPage(new Page<>(pageQuery.page(), pageQuery.pageSize()),
+                new LambdaQueryWrapper<Employee>()
                 .eq(departmentId != null, Employee::getDepartmentId, departmentId)
                 .eq(employmentStatus != null, Employee::getEmploymentStatus, employmentStatus)
                 .and(StrUtil.isNotBlank(keyword), q -> q.like(Employee::getFullName, keyword)
@@ -127,7 +135,8 @@ public class HrServiceImpl implements HrService {
                 .orderByDesc(Employee::getId));
         Map<Long, Department> departmentMap = loadDepartmentMap();
         Map<Long, Employee> employeeMap = loadEmployeeMap();
-        return employees.stream().map(item -> toEmployeeVO(item, departmentMap, employeeMap)).toList();
+        return PageResponse.of(result.getRecords().stream().map(item -> toEmployeeVO(item, departmentMap, employeeMap)).toList(),
+                result.getTotal(), pageQuery);
     }
 
     @Override
@@ -143,7 +152,11 @@ public class HrServiceImpl implements HrService {
         if (departmentManagerCount > 0) {
             throw new BusinessException("该员工仍被作为部门负责人引用，不能删除");
         }
-        integrationBindingMapper.delete(new LambdaQueryWrapper<IntegrationBinding>().eq(IntegrationBinding::getEmployeeId, id));
+        Long bindingCount = integrationBindingMapper.selectCount(new LambdaQueryWrapper<IntegrationBinding>()
+                .eq(IntegrationBinding::getEmployeeId, id));
+        if (bindingCount > 0) {
+            throw new BusinessException("该员工仍被外部集成绑定引用，不能删除");
+        }
         employeeMapper.deleteById(id);
     }
 
@@ -171,15 +184,18 @@ public class HrServiceImpl implements HrService {
     }
 
     @Override
-    public List<IntegrationBindingVO> listBindings(String moduleCode, Long employeeId, Long departmentId) {
-        List<IntegrationBinding> bindings = integrationBindingMapper.selectList(new LambdaQueryWrapper<IntegrationBinding>()
+    public PageResponse<IntegrationBindingVO> listBindings(String moduleCode, Long employeeId, Long departmentId,
+                                                             PageQuery pageQuery) {
+        Page<IntegrationBinding> result = integrationBindingMapper.selectPage(new Page<>(pageQuery.page(), pageQuery.pageSize()),
+                new LambdaQueryWrapper<IntegrationBinding>()
                 .eq(StrUtil.isNotBlank(moduleCode), IntegrationBinding::getModuleCode, moduleCode)
                 .eq(employeeId != null, IntegrationBinding::getEmployeeId, employeeId)
                 .eq(departmentId != null, IntegrationBinding::getDepartmentId, departmentId)
                 .orderByDesc(IntegrationBinding::getId));
         Map<Long, Department> departmentMap = loadDepartmentMap();
         Map<Long, Employee> employeeMap = loadEmployeeMap();
-        return bindings.stream().map(item -> toBindingVO(item, departmentMap, employeeMap)).toList();
+        return PageResponse.of(result.getRecords().stream().map(item -> toBindingVO(item, departmentMap, employeeMap)).toList(),
+                result.getTotal(), pageQuery);
     }
 
     @Override
@@ -250,19 +266,6 @@ public class HrServiceImpl implements HrService {
         if (departmentMapper.selectCount(wrapper) > 0) {
             throw new BusinessException("部门编码已存在");
         }
-    }
-
-    private Long resolveEmployeeId(EmployeeSaveRequest request) {
-        if (request.getId() != null) {
-            return request.getId();
-        }
-        if (StrUtil.isBlank(request.getEmployeeCode())) {
-            return null;
-        }
-        Employee existing = employeeMapper.selectOne(new LambdaQueryWrapper<Employee>()
-                .eq(Employee::getEmployeeCode, request.getEmployeeCode())
-                .last("LIMIT 1"));
-        return existing == null ? null : existing.getId();
     }
 
     private void ensureUnique(SFunction<Employee, String> column, String value, Long currentId, String message) {

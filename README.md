@@ -574,10 +574,20 @@ npm run format
 
 - 生产环境必须修改 `JWT_SECRET`，不要使用默认开发密钥。
 - 默认账号保留初始密码 `123456`，首次登录必须按强密码规则完成改密；可在用户管理中按需禁用账号。
+- 默认情况下，保留默认密码的账号会在每次启动时继续被标记为必须改密。仅在临时运维例外时，可在部署 `.env` 设置 `AUTH_BOOTSTRAP_DEFAULT_PASSWORD_EXEMPT_USERNAMES=itadmin`；该设置会让该账号保留 `123456` 且不进入改密页。恢复强制改密时删除该变量并重启服务。
 - 视频面试依赖浏览器摄像头、麦克风和 WebRTC 能力。
 - 公网视频面试建议配置 TURN，否则部分网络环境可能无法建立连接。
 - 文件上传目录位于后端运行目录下的 `uploads`，迁移部署时需要一并备份。
 - 前端 API 基础路径固定为 `/api`，开发环境通过 Vite 代理到后端。
+
+## Consistency And Operations
+
+- List endpoints return `{ items, total, page, pageSize }`. The web client keeps existing views compatible by exposing `items` as response data and retaining pagination metadata separately.
+- AI questions are durable background tasks. Question generation retries automatically with bounded exponential backoff; failed generation never becomes an answerable error question. AI answers use a database lease: a retry with identical content is idempotent, while a different answer for the same question is rejected.
+- Process templates use a version field for optimistic concurrency. A stale save or delete is rejected and the editor must refresh before trying again. A completed final interview changes the candidate state to `OFFER_PENDING`.
+- PostgreSQL and MySQL deployments add restrictive foreign keys for user, employee, candidate, process, stage, AI-record, and video-session relationships. Migration first checks for orphaned rows and stops if any are found. SQLite keeps its existing schema because adding foreign keys to existing SQLite tables requires a table rebuild.
+- LLM debug logging is disabled by default. When explicitly enabled, only provider/model metadata, lengths, and SHA-256 digests are written under `logs/`; daily metadata logs older than three days are removed. Prompt, answer, and provider-response text are not persisted.
+- Every main-branch build publishes a prerelease package. The workflow retains the latest five prereleases across all release pages and permanently retains formal `v*` releases.
 
 ## S3 兼容对象存储
 
@@ -593,3 +603,5 @@ npm run format
 到外网 `S3_ENDPOINT`；关闭该开关时上传和访问均使用外网 Endpoint。归档对象不可用
 时下载自动回退至本地文件。该身份需要对指定 Bucket 与前缀拥有
 `s3:PutObject`、`s3:GetObject` 和 `s3:HeadObject` 权限。短信、语音转写和 S3 均使用独立凭据。
+
+归档文件下载先由已登录用户通过 Bearer 请求获取五分钟有效的预签名 URL，再由浏览器直接打开该 URL；浏览器不会将 JWT 发送到对象存储。对象尚未归档或对象存储不可用时，前端必须回退到原有的同源、带 Bearer 的文件下载接口。

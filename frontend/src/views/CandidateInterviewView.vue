@@ -165,11 +165,16 @@ let lastSwitchReportAt = 0
 let aiExamRecorder = null
 let aiExamRecordedChunks = []
 let aiExamRecordingStopInProgress = false
+let aiAnswerAbortController = null
 
 const currentAiRecords = computed(() => processSummary.value?.processStageId
   ? aiRecords.value.filter((item) => item.processStageId === processSummary.value.processStageId)
   : aiRecords.value)
-const answeredAiRecords = computed(() => currentAiRecords.value.filter((item) => item.answerContent))
+const answeredAiRecords = computed(() => currentAiRecords.value.filter((item) => item.answerStatus === 'COMPLETED'))
+const pendingQuestionRecord = computed(() => currentAiRecords.value.find((item) =>
+  ['PENDING', 'PROCESSING', 'FAILED'].includes(item.questionStatus) && !item.answerContent,
+))
+const processingAnswerRecord = computed(() => currentAiRecords.value.find((item) => item.answerStatus === 'PROCESSING'))
 const isAiTerminal = computed(() => processSummary.value?.currentStage === 'AI' && (
   processSummary.value?.stageStatus === 'WAITING_APPROVAL'
   || processSummary.value?.stageStatus === 'REJECTED'
@@ -210,6 +215,8 @@ const aiStatusHint = computed(() => {
   if (aiPendingRefresh.active) return '请求已超时但不代表失败，系统会自动刷新最新面试状态'
   if (processSummary.value?.overallStatus === 'REJECTED') return '你的回答与录像已保存，可返回报名记录查看流程状态'
   if (processSummary.value?.stageStatus === 'WAITING_APPROVAL') return '请保持关注流程状态，HR审批后会进入下一阶段'
+  if (processingAnswerRecord.value) return '正在处理已提交的相同回答，请保持当前页面，系统会自动刷新'
+  if (pendingQuestionRecord.value?.questionStatus === 'FAILED') return '题目生成暂时失败，系统正在自动重试'
   if (!currentQuestion.value && processSummary.value?.currentStage === 'AI') return '系统会自动刷新题目，请不要重复提交'
   return '提交后按钮会锁定，避免重复提交'
 })
@@ -252,6 +259,9 @@ async function loadProcessRecords(options = {}) {
     antiCheat.switchCount = processSummary.value?.antiCheatSwitchCount || 0
     currentQuestion.value = questionResponse.data
     aiRecords.value = recordsResponse.data
+    if (currentQuestion.value?.answerStatus === 'FAILED' && !aiAnswer.answerContent) {
+      aiAnswer.answerContent = currentQuestion.value.answerContent || ''
+    }
     refreshState.retryCount = 0
     refreshState.lastError = ''
     cacheInterviewSession()
@@ -323,7 +333,13 @@ async function submitAiAnswer() {
     if (isStreamMode.value) {
       await submitAiAnswerStream()
     } else {
-      await interviewApi.submitAiAnswer({ processId: sessionForm.processId, questionId: currentQuestion.value.id, answerContent: aiAnswer.answerContent })
+      const response = await interviewApi.submitAiAnswer({ processId: sessionForm.processId, questionId: currentQuestion.value.id, answerContent: aiAnswer.answerContent })
+      if (response.data?.answerStatus === 'PROCESSING') {
+        aiPendingRefresh.active = true
+        aiPendingRefresh.attempts = 0
+        schedulePendingAiRefresh()
+        return
+      }
     }
     aiSubmitState.message = '正在同步最新面试状态'
     aiPendingRefresh.active = false
@@ -333,6 +349,7 @@ async function submitAiAnswer() {
     ElMessage.success('AI 回答已提交')
     await loadProcessRecords()
   } catch (error) {
+    if (componentDisposed || error?.name === 'AbortError') return
     if (isTimeoutError(error)) {
       aiSubmitState.message = 'AI仍在后台处理，正在自动刷新状态'
       aiPendingRefresh.active = true
@@ -362,6 +379,17 @@ async function refreshPendingAiState() {
   aiSubmitState.message = `AI仍在后台处理，正在第 ${aiPendingRefresh.attempts} 次同步状态`
   try {
     await loadProcessRecords({ silent: true })
+    const pendingRecord = aiRecords.value.find((item) => item.id === aiPendingRefresh.questionId)
+    if (pendingRecord?.answerStatus === 'FAILED') {
+      aiPendingRefresh.active = false
+      aiPendingRefresh.attempts = 0
+      aiPendingRefresh.questionId = null
+      aiSubmitState.submitting = false
+      aiSubmitState.message = ''
+      aiAnswer.answerContent = pendingRecord.answerContent || aiAnswer.answerContent
+      ElMessage.error('AI 评分失败，请使用相同回答重新提交')
+      return
+    }
     if (!isPendingAiResolved()) {
       schedulePendingAiRefresh()
       return
@@ -383,7 +411,7 @@ function isPendingAiResolved() {
     return true
   }
   const pendingRecord = aiRecords.value.find((item) => item.id === aiPendingRefresh.questionId)
-  if (pendingRecord?.answerContent) {
+  if (pendingRecord?.answerStatus === 'COMPLETED') {
     return true
   }
   return currentQuestion.value && currentQuestion.value.id !== aiPendingRefresh.questionId
@@ -408,15 +436,20 @@ async function enterAiExamMode() {
 
 async function submitAiAnswerStream() {
   aiStreamText.value = ''
-  await interviewApi.submitAiAnswerStream({ processId: sessionForm.processId, questionId: currentQuestion.value.id, answerContent: aiAnswer.answerContent }, ({ event, data }) => {
-    const text = parseStreamData(data)
-    if (event === 'error') throw new Error(text || '流式提交失败')
-    if (event === 'token' && text) {
-      aiStreamText.value += text
-      aiSubmitState.message = 'AI正在实时输出'
-    }
-    if (event === 'done') aiSubmitState.message = 'AI处理完成'
-  })
+  aiAnswerAbortController = new AbortController()
+  try {
+    await interviewApi.submitAiAnswerStream({ processId: sessionForm.processId, questionId: currentQuestion.value.id, answerContent: aiAnswer.answerContent }, ({ event, data }) => {
+      const text = parseStreamData(data)
+      if (event === 'error') throw new Error(text || '流式提交失败')
+      if (event === 'token' && text) {
+        aiStreamText.value += text
+        aiSubmitState.message = 'AI正在实时输出'
+      }
+      if (event === 'done') aiSubmitState.message = 'AI处理完成'
+    }, { signal: aiAnswerAbortController.signal })
+  } finally {
+    aiAnswerAbortController = null
+  }
 }
 
 function parseStreamData(data) {
@@ -800,6 +833,7 @@ async function loadRuntimeConfig() {
 
 onBeforeUnmount(() => {
   componentDisposed = true
+  aiAnswerAbortController?.abort()
   clearAiRefresh()
   document.removeEventListener('keydown', handleRestrictedShortcut, true)
   document.removeEventListener('contextmenu', handleContextMenu, true)

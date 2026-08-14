@@ -47,6 +47,18 @@ jobs:
           else
             gh release create "$RELEASE_TAG" release/auto-hr-release.zip "${release_args[@]}"
           fi
+      - name: Retain latest five prereleases
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t expired_tags < <(gh api --paginate --slurp \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '[.[][] | select(.prerelease == true and .draft == false)] | sort_by(.created_at) | reverse | .[5:] | .[].tag_name')
+          for tag in "${expired_tags[@]}"; do
+            gh release delete "$tag" --cleanup-tag --yes
+          done
 
   deploy:
     needs: package

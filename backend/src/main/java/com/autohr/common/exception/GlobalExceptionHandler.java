@@ -1,6 +1,7 @@
 package com.autohr.common.exception;
 
 import com.autohr.common.api.ApiResponse;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -27,6 +28,12 @@ public class GlobalExceptionHandler {
         FieldError fieldError = ex.getBindingResult().getFieldError();
         String message = fieldError != null ? fieldError.getField() + ": " + fieldError.getDefaultMessage() : "请求参数校验失败";
         return ApiResponse.fail(message);
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ApiResponse<Void> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        return ApiResponse.fail("该记录仍被其他数据引用，无法完成当前操作");
     }
 
     @ExceptionHandler(Exception.class)

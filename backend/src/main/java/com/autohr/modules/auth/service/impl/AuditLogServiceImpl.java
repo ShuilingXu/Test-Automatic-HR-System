@@ -1,15 +1,16 @@
 package com.autohr.modules.auth.service.impl;
 
+import com.autohr.common.api.PageQuery;
+import com.autohr.common.api.PageResponse;
 import com.autohr.modules.auth.dto.AuditLogVO;
 import com.autohr.modules.auth.entity.SysAuditLog;
 import com.autohr.modules.auth.mapper.SysAuditLogMapper;
 import com.autohr.modules.auth.service.AuditLogService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
-
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -32,17 +33,18 @@ public class AuditLogServiceImpl implements AuditLogService {
     }
 
     @Override
-    public List<AuditLogVO> list(String moduleCode, String actionCode, String keyword) {
+    public PageResponse<AuditLogVO> list(String moduleCode, String actionCode, String keyword, PageQuery pageQuery) {
         boolean adminCategory = "ADMIN".equals(moduleCode);
-        return auditLogMapper.selectList(new LambdaQueryWrapper<SysAuditLog>()
+        Page<SysAuditLog> result = auditLogMapper.selectPage(new Page<>(pageQuery.page(), pageQuery.pageSize()),
+                new LambdaQueryWrapper<SysAuditLog>()
                 .eq(moduleCode != null && !moduleCode.isBlank() && !adminCategory, SysAuditLog::getModuleCode, moduleCode)
                 .notIn(adminCategory, SysAuditLog::getModuleCode, "INTERVIEW", "RECRUITMENT")
                 .eq(actionCode != null && !actionCode.isBlank(), SysAuditLog::getActionCode, actionCode)
                 .and(keyword != null && !keyword.isBlank(), q -> q.like(SysAuditLog::getOperatorUsername, keyword)
                         .or().like(SysAuditLog::getDetail, keyword)
                         .or().like(SysAuditLog::getTargetId, keyword))
-                .orderByDesc(SysAuditLog::getId))
-                .stream().map(this::toVO).toList();
+                .orderByDesc(SysAuditLog::getId));
+        return PageResponse.of(result.getRecords().stream().map(this::toVO).toList(), result.getTotal(), pageQuery);
     }
 
     private AuditLogVO toVO(SysAuditLog log) {

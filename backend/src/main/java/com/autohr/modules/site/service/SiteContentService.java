@@ -1,8 +1,12 @@
 package com.autohr.modules.site.service;
 
+import com.autohr.common.api.PageQuery;
+import com.autohr.common.api.PageResponse;
+import com.autohr.common.exception.BusinessException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -18,28 +22,52 @@ import java.util.Map;
 
 /** Small file-backed store for the public information pages. Content is independent from .env. */
 @Service
-@RequiredArgsConstructor
 public class SiteContentService {
 
     private final ObjectMapper objectMapper;
-    private final Path contentPath = Paths.get(".site-content.json");
+    private final Path contentPath;
 
-    public synchronized List<Map<String, Object>> list(boolean publishedOnly) {
+    @Autowired
+    public SiteContentService(ObjectMapper objectMapper,
+                              @Value("${site-content.path:.site-content.json}") String contentPath) {
+        this(objectMapper, Paths.get(contentPath));
+    }
+
+    SiteContentService(ObjectMapper objectMapper, Path contentPath) {
+        this.objectMapper = objectMapper;
+        this.contentPath = contentPath;
+    }
+
+    public synchronized PageResponse<Map<String, Object>> list(boolean publishedOnly, PageQuery pageQuery) {
         List<Map<String, Object>> items = read();
-        return items.stream()
+        List<Map<String, Object>> filteredItems = items.stream()
                 .filter(item -> !publishedOnly || Boolean.TRUE.equals(item.get("published")))
                 .sorted(Comparator.comparing(item -> String.valueOf(item.getOrDefault("publishedAt", "")), Comparator.reverseOrder()))
                 .toList();
+        return PageResponse.slice(filteredItems, pageQuery);
     }
 
     public synchronized Map<String, Object> save(Map<String, Object> incoming) {
         List<Map<String, Object>> items = read();
-        Map<String, Object> item = new LinkedHashMap<>(incoming == null ? Map.of() : incoming);
-        long id = number(item.get("id"));
+        Map<String, Object> updates = incoming == null ? Map.of() : incoming;
+        long id = number(updates.get("id"));
+        long requestedId = id;
+        Map<String, Object> existingItem = id == 0 ? null : items.stream()
+                .filter(item -> number(item.get("id")) == requestedId)
+                .findFirst()
+                .orElse(null);
+        if (id != 0 && existingItem == null) {
+            throw new BusinessException("Site content does not exist. Create it without an id.");
+        }
+        Map<String, Object> item = new LinkedHashMap<>();
+        if (existingItem != null) {
+            item.putAll(existingItem);
+        }
+        item.putAll(updates);
         if (id == 0) {
             id = items.stream().mapToLong(existing -> number(existing.get("id"))).max().orElse(0) + 1;
-            item.put("id", id);
         }
+        item.put("id", id);
         item.putIfAbsent("type", "announcement");
         item.putIfAbsent("published", Boolean.FALSE);
         item.putIfAbsent("publishedAt", "");

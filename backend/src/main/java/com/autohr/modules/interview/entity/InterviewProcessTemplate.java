@@ -17,6 +17,7 @@ public class InterviewProcessTemplate {
     private String templateName;
     private String description;
     private Integer status;
+    private Integer version;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE)
