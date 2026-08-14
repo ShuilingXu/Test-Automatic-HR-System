@@ -221,10 +221,11 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi, hrApi, interviewApi, recruitmentApi, siteContentApi } from '../services/api'
+import { readSessionUser } from '../utils/session'
 
 const router = useRouter()
 const route = useRoute()
-const sessionUser = ref(JSON.parse(localStorage.getItem('session-user') || 'null'))
+const sessionUser = ref(readSessionUser())
 const isItAdmin = computed(() => sessionUser.value?.roleCode === 'IT_ADMIN')
 const isHrAdmin = computed(() => sessionUser.value?.roleCode === 'HR_ADMIN')
 const tabs = computed(() => {

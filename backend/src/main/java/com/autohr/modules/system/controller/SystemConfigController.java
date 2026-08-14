@@ -30,6 +30,10 @@ public class SystemConfigController {
             "RESUME_OCR_ENABLED", "RESUME_OCR_TESSERACT_PATH", "RESUME_OCR_LANGUAGE", "RESUME_OCR_DPI", "RESUME_OCR_MAX_PAGES"
     };
     private static final Set<String> CONFIG_KEY_SET = Set.of(CONFIG_KEYS);
+    private static final Set<String> RETAIN_ON_BLANK_KEYS = Set.of(
+            "ALIYUN_SMS_ACCESS_KEY_SECRET", "SMTP_PASSWORD", "S3_SECRET_ACCESS_KEY",
+            "ALIYUN_STT_ACCESS_KEY_SECRET", "DB_PASSWORD", "JWT_SECRET", "INTERVIEW_TURN_CREDENTIAL"
+    );
 
     private final SystemConfigService systemConfigService;
 
@@ -55,9 +59,9 @@ public class SystemConfigController {
     public ApiResponse<Map<String, String>> saveConfig(@RequestBody Map<String, String> updates) {
         Map<String, String> safeUpdates = new LinkedHashMap<>(updates);
         safeUpdates.entrySet().removeIf(entry -> !CONFIG_KEY_SET.contains(entry.getKey()));
-        updates = safeUpdates;
-        updates.entrySet().removeIf(e -> "****".equals(e.getValue()) || (e.getValue() != null && e.getValue().contains("****")));
-        systemConfigService.saveConfig(updates);
+        safeUpdates.entrySet().removeIf(e -> "****".equals(e.getValue()) || (e.getValue() != null && e.getValue().contains("****")));
+        safeUpdates.entrySet().removeIf(e -> RETAIN_ON_BLANK_KEYS.contains(e.getKey()) && (e.getValue() == null || e.getValue().isBlank()));
+        systemConfigService.saveConfig(safeUpdates);
         Map<String, String> config = systemConfigService.loadConfig(CONFIG_KEYS);
         maskSecrets(config);
         return ApiResponse.success("配置已保存，部分配置需要重启服务生效", config);

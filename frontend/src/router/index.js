@@ -7,6 +7,9 @@ import CandidateInterviewView from '../views/CandidateInterviewView.vue'
 import CandidateDetailView from '../views/CandidateDetailView.vue'
 import InterviewAdminView from '../views/InterviewAdminView.vue'
 import UserPortalView from '../views/UserPortalView.vue'
+import { readSessionUser } from '../utils/session'
+
+const KNOWN_ROLES = new Set(['IT_ADMIN', 'HR_ADMIN', 'HR_USER', 'INTERVIEWEE'])
 
 const routes = [
   { path: '/', name: 'home', component: HomeView },
@@ -57,11 +60,10 @@ router.beforeEach((to) => {
   if (!to.meta.requiresAuth) {
     return true
   }
-  const raw = localStorage.getItem('session-user')
-  if (!raw) {
+  const session = readSessionUser()
+  if (!session || !KNOWN_ROLES.has(session.roleCode)) {
     return '/login'
   }
-  const session = JSON.parse(raw)
   if (to.meta.roles && !to.meta.roles.includes(session.roleCode)) {
     return session.roleCode === 'INTERVIEWEE' ? '/user' : '/admin'
   }

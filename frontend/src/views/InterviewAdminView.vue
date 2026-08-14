@@ -342,9 +342,10 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi, interviewApi, recruitmentApi, systemApi } from '../services/api'
-import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, isRelayIceCandidate, playVideo, requestCameraAndMicrophone } from '../utils/media'
+import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, playVideo, requestCameraAndMicrophone } from '../utils/media'
+import { readSessionUser } from '../utils/session'
 
-const sessionUser = ref(JSON.parse(localStorage.getItem('session-user') || 'null'))
+const sessionUser = ref(readSessionUser())
 const route = useRoute()
 const router = useRouter()
 const isItAdmin = computed(() => sessionUser.value?.roleCode === 'IT_ADMIN')
@@ -367,10 +368,15 @@ const savingRemark = ref(false)
 const savingSystemConfig = ref(false)
 const configTab = ref('notifications')
 const modelTab = ref('INTERVIEWER')
+const retainOnBlankConfigKeys = new Set([
+  'ALIYUN_SMS_ACCESS_KEY_SECRET', 'SMTP_PASSWORD', 'S3_SECRET_ACCESS_KEY',
+  'ALIYUN_STT_ACCESS_KEY_SECRET', 'DB_PASSWORD', 'JWT_SECRET', 'INTERVIEW_TURN_CREDENTIAL',
+])
 
 const hrLocalVideo = ref(null)
 const hrRemoteVideo = ref(null)
 let hrLocalStream = null
+let componentDisposed = false
 let hrPeer = null
 let hrPollTimer = null
 let hrRecorder = null
@@ -553,7 +559,10 @@ async function saveWeight() { try { await interviewApi.saveJobKnowledgeWeight({ 
 async function deleteWeight(id) { try { await interviewApi.deleteJobKnowledgeWeight(id); ElMessage.success('权重已删除'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
 async function saveRoleLlmConfig(form, role) { try { await interviewApi.saveLlmConfig({ ...form, modelRole: role }); ElMessage.success('LLM配置已保存'); form.apiKey = ''; await loadAll() } catch (error) { fail(error) } }
 async function deleteLlmConfig(id) { try { await interviewApi.deleteLlmConfig(id); ElMessage.success('LLM配置已删除'); await loadAll() } catch (error) { fail(error) } }
-async function saveSystemConfig() { savingSystemConfig.value = true; try { await systemApi.saveConfig({ ...systemConfig }); ElMessage.success('系统配置已保存'); Object.assign(systemConfig, (await systemApi.getConfig()).data) } catch (error) { fail(error) } finally { savingSystemConfig.value = false } }
+function systemConfigPayload() {
+  return Object.fromEntries(Object.entries(systemConfig).filter(([key, value]) => !retainOnBlankConfigKeys.has(key) || String(value || '').trim()))
+}
+async function saveSystemConfig() { savingSystemConfig.value = true; try { await systemApi.saveConfig(systemConfigPayload()); ElMessage.success('系统配置已保存'); Object.assign(systemConfig, (await systemApi.getConfig()).data) } catch (error) { fail(error) } finally { savingSystemConfig.value = false } }
 function createTemplateForm() { return { id: null, templateName: '', description: '', status: 1, stages: [] } }
 function createTemplateStage() { return { key: `${Date.now()}-${Math.random()}`, stageName: '', stageType: 'AI', knowledgeBaseId: null } }
 function resetTemplateForm() { Object.assign(templateForm, createTemplateForm()) }
@@ -644,7 +653,12 @@ async function startHrVideoCall() {
       approverName: sessionUser.value?.displayName || sessionUser.value?.username,
     })
     selectedProcess.value.videoJoinLink = sessionResponse.data?.videoJoinLink || selectedProcess.value.videoJoinLink
-    hrLocalStream = await requestCameraAndMicrophone()
+    const stream = await requestCameraAndMicrophone()
+    if (componentDisposed) {
+      stream.getTracks().forEach((track) => track.stop())
+      return
+    }
+    hrLocalStream = stream
     hrLocalVideo.value.srcObject = hrLocalStream
     playVideo(hrLocalVideo.value)
     hrPeer = createPeerConnection(await loadIceServers())
@@ -659,7 +673,7 @@ async function startHrVideoCall() {
       }
     }
     hrPeer.onicecandidate = async (event) => {
-      if (isRelayIceCandidate(event.candidate)) {
+      if (event.candidate) {
         await interviewApi.addHrIce(selectedProcess.value.id, { iceCandidate: JSON.stringify(event.candidate) })
       }
     }
@@ -815,6 +829,7 @@ async function loadIceServers() {
 }
 
 onBeforeUnmount(() => {
+  componentDisposed = true
   disconnectHrVideo()
 })
 
