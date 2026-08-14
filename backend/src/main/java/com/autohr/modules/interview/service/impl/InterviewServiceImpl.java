@@ -72,7 +72,10 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -646,10 +649,21 @@ public class InterviewServiceImpl implements InterviewService {
 
     @Override
     public List<InterviewVO> listAiRecords(Long processId) {
+        Map<Long, Integer> stageOrder = new HashMap<>();
+        if (processId != null) {
+            listProcessStages(processId).forEach(stage -> stageOrder.put(
+                    stage.getId(), Objects.requireNonNullElse(stage.getSequenceNo(), Integer.MAX_VALUE)));
+        }
         return aiRecordMapper.selectList(new LambdaQueryWrapper<InterviewAiRecord>()
                 .eq(processId != null, InterviewAiRecord::getProcessId, processId)
                 .orderByAsc(InterviewAiRecord::getSequenceNo)
-                .orderByAsc(InterviewAiRecord::getId)).stream().map(item -> toAiRecordVO(item, null)).toList();
+                .orderByAsc(InterviewAiRecord::getId)).stream()
+                .sorted(Comparator
+                        .comparingInt((InterviewAiRecord item) -> stageOrder.getOrDefault(item.getProcessStageId(), Integer.MAX_VALUE))
+                        .thenComparingInt(item -> Objects.requireNonNullElse(item.getSequenceNo(), Integer.MAX_VALUE))
+                        .thenComparingLong(item -> Objects.requireNonNullElse(item.getId(), Long.MAX_VALUE)))
+                .map(item -> toAiRecordVO(item, null))
+                .toList();
     }
 
     @Override

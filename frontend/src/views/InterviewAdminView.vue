@@ -271,20 +271,35 @@
           </section>
           <section class="workbench-panel ai-question-panel">
             <div class="panel-title-row">
-              <h3>AI问答题号</h3>
+              <h3>AI问答与面试官评价</h3>
               <a v-if="selectedProcess.aiRecordingPath || selectedProcess.aiRecordingFileName" :href="interviewApi.getAiRecordingUrl(selectedProcess.id, selectedProcess.processStageId)" target="_blank" class="video-link">查看AI问答视频</a>
             </div>
-            <div class="question-number-grid">
-              <button v-for="item in aiRecords" :key="item.id" class="question-number" :class="{ answered: item.answerContent }">Q{{ item.sequenceNo }}</button>
+            <div v-if="aiRecordGroups.length" class="ai-stage-review-list">
+              <section v-for="group in aiRecordGroups" :key="group.key" class="ai-stage-review">
+                <div class="ai-stage-heading">
+                  <div>
+                    <span class="ai-stage-kicker">{{ group.sequenceNo ? `第 ${group.sequenceNo} 轮 AI 面试` : 'AI 面试' }}</span>
+                    <h4>{{ group.stageName }}</h4>
+                  </div>
+                  <span class="ai-stage-count">{{ group.items.length }} 题</span>
+                </div>
+                <div v-if="group.items.length" class="question-number-grid">
+                  <button v-for="item in group.items" :key="item.id" class="question-number" :class="{ answered: item.answerContent }">Q{{ item.sequenceNo }}</button>
+                </div>
+                <p v-else class="empty-stage-review">本轮尚未生成题目。</p>
+                <el-table v-if="group.items.length" :data="group.items" stripe class="data-table compact-ai-table">
+                  <el-table-column prop="sequenceNo" label="题号" width="70" />
+                  <el-table-column prop="knowledgePoint" label="知识点" min-width="120" />
+                  <el-table-column prop="questionContent" label="提问" min-width="220" />
+                  <el-table-column prop="answerContent" label="回答" min-width="220" />
+                  <el-table-column prop="averageScore" label="均分" width="80" />
+                  <el-table-column label="AI面试官评价" min-width="240">
+                    <template #default="scope"><p class="ai-interviewer-feedback">{{ scope.row.interviewerComment || '暂无评价' }}</p></template>
+                  </el-table-column>
+                </el-table>
+              </section>
             </div>
-            <el-table :data="aiRecords" stripe class="data-table compact-ai-table">
-              <el-table-column v-if="selectedProcess.stages?.length" prop="stageName" label="阶段" min-width="120" />
-              <el-table-column prop="sequenceNo" label="题号" width="70" />
-              <el-table-column prop="knowledgePoint" label="知识点" min-width="120" />
-              <el-table-column prop="questionContent" label="提问" min-width="220" />
-              <el-table-column prop="answerContent" label="回答" min-width="220" />
-              <el-table-column prop="averageScore" label="均分" width="80" />
-            </el-table>
+            <p v-else class="empty-stage-review">暂无 AI 面试题目记录。</p>
           </section>
           <section class="workbench-panel action-panel">
             <h3>操作区</h3>
@@ -450,6 +465,27 @@ const filteredProcessCandidates = computed(() => {
     .some((value) => String(value || '').toLowerCase().includes(keyword)))
 })
 const processCandidatePreview = computed(() => recruitmentCandidates.value.find((item) => item.id === processForm.recruitmentCandidateId) || null)
+const aiRecordGroups = computed(() => {
+  const records = [...aiRecords.value].sort(sortAiRecords)
+  const aiStages = (selectedProcess.value?.stages || []).filter((stage) => stage.stageType === 'AI')
+  if (!aiStages.length) {
+    return records.length ? [{ key: 'legacy-ai', stageName: 'AI 面试', stageType: 'AI', sequenceNo: null, items: records }] : []
+  }
+  const groups = aiStages.map((stage) => {
+    const stageId = stage.processStageId || stage.id
+    return {
+      key: String(stageId),
+      stageName: stage.stageName || 'AI 面试',
+      stageType: stage.stageType,
+      sequenceNo: stage.sequenceNo,
+      items: records.filter((record) => String(record.processStageId) === String(stageId)),
+    }
+  })
+  const groupedIds = new Set(groups.flatMap((group) => group.items.map((item) => item.id)))
+  const unassigned = records.filter((record) => !groupedIds.has(record.id))
+  if (unassigned.length) groups.push({ key: 'unassigned-ai', stageName: '未分配 AI 题目', stageType: 'AI', sequenceNo: null, items: unassigned })
+  return groups
+})
 
 function fail(error) { ElMessage.error(error.message || '操作失败') }
 function summaryLines(markdown) {
@@ -460,6 +496,10 @@ function summaryLines(markdown) {
   })
 }
 function resumeLlmStatusLabel(status) { return ({ PENDING: '评分中', COMPLETED: '已完成', FAILED: '评分失败' })[status] || '-' }
+function sortAiRecords(left, right) {
+  return (Number(left.sequenceNo ?? Number.MAX_SAFE_INTEGER) - Number(right.sequenceNo ?? Number.MAX_SAFE_INTEGER))
+    || (Number(left.id ?? Number.MAX_SAFE_INTEGER) - Number(right.id ?? Number.MAX_SAFE_INTEGER))
+}
 function isAiApprovalPending(process) { return process?.overallStatus === 'IN_PROGRESS' && process?.currentStage === 'AI' && process?.stageStatus === 'WAITING_APPROVAL' }
 async function loadAll() {
   try {
@@ -821,7 +861,16 @@ onMounted(loadAll)
 .question-number-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .question-number { border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 7px 12px; font-weight: 700; }
 .question-number.answered { background: var(--primary); color: #ffffff; border-color: var(--primary); }
+.ai-stage-review-list { display: grid; gap: 24px; margin-top: 18px; }
+.ai-stage-review { padding-top: 18px; border-top: 1px solid var(--border); }
+.ai-stage-review:first-child { padding-top: 0; border-top: 0; }
+.ai-stage-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.ai-stage-heading h4 { margin: 4px 0 0; color: var(--ink); font-size: 17px; }
+.ai-stage-kicker { color: var(--primary); font-size: 12px; font-weight: 800; letter-spacing: .04em; }
+.ai-stage-count { color: var(--text-muted); font-size: 13px; }
+.empty-stage-review { margin: 14px 0 0; color: var(--text-muted); }
 .compact-ai-table { margin-top: 8px; }
+.ai-interviewer-feedback { margin: 0; white-space: pre-wrap; line-height: 1.6; color: var(--ink-soft); }
 .process-stats { display: grid; gap: 4px; margin-bottom: 12px; }
 .process-stats p { margin: 0; color: var(--ink-soft); }
 .action-button-grid { min-width: 0; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
