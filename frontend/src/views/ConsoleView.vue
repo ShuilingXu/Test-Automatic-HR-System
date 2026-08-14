@@ -522,6 +522,7 @@ function syncRouteState() {
 
 <style scoped>
 .console-main { min-width: 0; min-height: calc(100vh - 61px); display: grid; gap: 18px; max-width: 1440px; margin: 0 auto; padding: 30px 28px 48px; }
+.console-main > .page-card { width: 100%; }
 .topline { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 20px; }
 .topline h2 { margin: 6px 0 0; }
 .metric-grid { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 14px; }
