@@ -102,6 +102,7 @@ jobs:
               printf '%s' "$DEPLOY_INITIAL_ENV_B64" | base64 --decode | sudo tee /opt/auto-hr/.env >/dev/null
               sudo chmod 0600 /opt/auto-hr/.env
             fi
+            sudo chmod 0600 /opt/auto-hr/.env
             sudo rm -rf /tmp/auto-hr-release
             sudo python3 -c 'import zipfile; zipfile.ZipFile("/tmp/auto-hr-release.zip").extractall("/tmp/auto-hr-release")'
             sudo cp -a /tmp/auto-hr-release/auto-hr-release/. /opt/auto-hr/
