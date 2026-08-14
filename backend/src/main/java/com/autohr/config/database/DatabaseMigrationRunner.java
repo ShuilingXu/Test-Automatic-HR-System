@@ -267,7 +267,9 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
                 transactionStatement.executeUpdate("CREATE TABLE IF NOT EXISTS database_migration_orphan_archive ("
                         + "table_name VARCHAR(64) NOT NULL, column_name VARCHAR(64) NOT NULL, "
                         + "child_id INTEGER NOT NULL, invalid_reference_id INTEGER NOT NULL, "
-                        + "archived_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)");
+                        + "archived_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, row_data JSONB)");
+                transactionStatement.executeUpdate("ALTER TABLE database_migration_orphan_archive "
+                        + "ADD COLUMN IF NOT EXISTS row_data JSONB");
                 transactionStatement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_migration_orphan_archive_expiry "
                         + "ON database_migration_orphan_archive (archived_at)");
                 transactionStatement.executeUpdate("DELETE FROM database_migration_orphan_archive "
