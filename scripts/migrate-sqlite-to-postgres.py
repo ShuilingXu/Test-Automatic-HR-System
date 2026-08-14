@@ -2,9 +2,13 @@
 """One-time, transactional SQLite to PostgreSQL data migration for Auto HR."""
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
+import shutil
 import sqlite3
+import subprocess
+import sys
 
 try:
     import psycopg
@@ -27,6 +31,8 @@ TYPE_COLUMNS = {
     "boolean", "date", "time without time zone", "time with time zone",
     "timestamp without time zone", "timestamp with time zone",
 }
+
+DEFAULT_BACKUP_DIR = Path(__file__).resolve().parent.parent / "backups" / "postgres-migration"
 
 
 def quote(identifier):
@@ -94,52 +100,95 @@ def reset_sequences(cursor):
             cursor.execute("SELECT setval(%s, %s, %s)", (sequence, maximum or 1, maximum is not None))
 
 
-def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False):
+def backup_postgres(postgres_dsn, backup_dir, retention_days):
+    pg_dump = shutil.which("pg_dump")
+    if pg_dump is None:
+        raise SystemExit("pg_dump is required before --force-overwrite can modify PostgreSQL.")
+    destination_dir = Path(backup_dir).resolve()
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc)
+    destination = destination_dir / f"autohr-before-overwrite-{timestamp:%Y%m%dT%H%M%SZ}.dump"
+    environment = os.environ.copy()
+    environment["PGDATABASE"] = postgres_dsn
+    try:
+        subprocess.run(
+            [pg_dump, "--format=custom", "--file", str(destination)],
+            check=True,
+            env=environment,
+        )
+    except subprocess.CalledProcessError as error:
+        destination.unlink(missing_ok=True)
+        raise SystemExit("PostgreSQL backup failed; overwrite migration was not started.") from error
+    prune_expired_backups(destination_dir, retention_days, timestamp)
+    print(f"PostgreSQL backup created: {destination}")
+    return destination
+
+
+def prune_expired_backups(backup_dir, retention_days, now):
+    cutoff = now - timedelta(days=retention_days)
+    for backup in backup_dir.glob("autohr-before-overwrite-*.dump"):
+        modified_at = datetime.fromtimestamp(backup.stat().st_mtime, timezone.utc)
+        if modified_at < cutoff:
+            backup.unlink()
+            print(f"Expired PostgreSQL backup removed: {backup}")
+
+
+def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False,
+            backup_dir=DEFAULT_BACKUP_DIR, backup_retention_days=5):
     source_path = Path(sqlite_path)
     if not source_path.is_file():
         raise SystemExit(f"SQLite source file does not exist: {source_path}")
+    if backup_retention_days < 1:
+        raise SystemExit("Backup retention must be at least one day.")
+    if force_overwrite and not dry_run:
+        backup_postgres(postgres_dsn, backup_dir, backup_retention_days)
     source = sqlite3.connect(f"{source_path.resolve().as_uri()}?mode=ro", uri=True)
     source.row_factory = sqlite3.Row
     try:
         source.execute("BEGIN")
         with psycopg.connect(postgres_dsn) as target:
-            with target.cursor() as cursor:
-                if not dry_run and not force_overwrite:
-                    require_empty_target(cursor)
-                if not dry_run:
-                    cursor.execute("SET CONSTRAINTS ALL DEFERRED")
-                    if force_overwrite:
-                        target_tables = [table for table in TABLES if target_table_exists(cursor, table)]
-                        if target_tables:
-                            table_list = ", ".join(quote(table) for table in target_tables)
-                            cursor.execute(f"TRUNCATE TABLE {table_list} CASCADE")
-                for table in TABLES:
-                    columns = [row[1] for row in source.execute(f"PRAGMA table_info({quote(table)})")]
-                    if not columns:
-                        print(f"{table}: skipped (not present in SQLite source)")
-                        continue
-                    if not target_table_exists(cursor, table):
-                        raise SystemExit(f"Target PostgreSQL table is missing: {table}")
-                    target_types = target_column_types(cursor, table)
-                    missing_columns = [column for column in columns if column not in target_types]
-                    if missing_columns:
-                        raise SystemExit(f"Target PostgreSQL table {table} is missing columns: {', '.join(missing_columns)}")
-                    rows = source.execute(f"SELECT * FROM {quote(table)}").fetchall()
-                    print(f"{table}: {len(rows)} rows")
-                    if dry_run:
-                        continue
-                    if rows:
-                        column_list = ", ".join(quote(column) for column in columns)
-                        placeholders = ", ".join(["%s"] * len(columns))
-                        cursor.executemany(
-                            f"INSERT INTO {quote(table)} ({column_list}) VALUES ({placeholders})",
-                            [
-                                tuple(normalize_value(row[column], target_types[column]) for column in columns)
-                                for row in rows
-                            ],
-                        )
-                if not dry_run:
-                    reset_sequences(cursor)
+            try:
+                with target.cursor() as cursor:
+                    if not dry_run and not force_overwrite:
+                        require_empty_target(cursor)
+                    if not dry_run:
+                        cursor.execute("SET CONSTRAINTS ALL DEFERRED")
+                        if force_overwrite:
+                            target_tables = [table for table in TABLES if target_table_exists(cursor, table)]
+                            if target_tables:
+                                table_list = ", ".join(quote(table) for table in target_tables)
+                                cursor.execute(f"TRUNCATE TABLE {table_list} CASCADE")
+                    for table in TABLES:
+                        columns = [row[1] for row in source.execute(f"PRAGMA table_info({quote(table)})")]
+                        if not columns:
+                            print(f"{table}: skipped (not present in SQLite source)")
+                            continue
+                        if not target_table_exists(cursor, table):
+                            raise SystemExit(f"Target PostgreSQL table is missing: {table}")
+                        target_types = target_column_types(cursor, table)
+                        missing_columns = [column for column in columns if column not in target_types]
+                        if missing_columns:
+                            raise SystemExit(f"Target PostgreSQL table {table} is missing columns: {', '.join(missing_columns)}")
+                        rows = source.execute(f"SELECT * FROM {quote(table)}").fetchall()
+                        print(f"{table}: {len(rows)} rows")
+                        if dry_run:
+                            continue
+                        if rows:
+                            column_list = ", ".join(quote(column) for column in columns)
+                            placeholders = ", ".join(["%s"] * len(columns))
+                            cursor.executemany(
+                                f"INSERT INTO {quote(table)} ({column_list}) VALUES ({placeholders})",
+                                [
+                                    tuple(normalize_value(row[column], target_types[column]) for column in columns)
+                                    for row in rows
+                                ],
+                            )
+                    if not dry_run:
+                        reset_sequences(cursor)
+            except BaseException:
+                target.rollback()
+                print("PostgreSQL migration failed; all target changes were rolled back.", file=sys.stderr)
+                raise
     finally:
         source.close()
 
@@ -150,10 +199,15 @@ def main():
     parser.add_argument("--dsn", default=os.environ.get("POSTGRES_DSN"))
     parser.add_argument("--force-overwrite", action="store_true", help="allow replacing a non-empty PostgreSQL target")
     parser.add_argument("--dry-run", action="store_true", help="validate tables and report source row counts without writing")
+    parser.add_argument("--backup-dir", default=str(DEFAULT_BACKUP_DIR),
+                        help="directory for pre-overwrite PostgreSQL backups")
+    parser.add_argument("--backup-retention-days", type=int, default=5,
+                        help="days to retain pre-overwrite backups (default: 5)")
     args = parser.parse_args()
     if not args.dsn:
         parser.error("--dsn or POSTGRES_DSN is required")
-    migrate(args.sqlite_path, args.dsn, args.force_overwrite, args.dry_run)
+    migrate(args.sqlite_path, args.dsn, args.force_overwrite, args.dry_run,
+            args.backup_dir, args.backup_retention_days)
 
 
 if __name__ == "__main__":

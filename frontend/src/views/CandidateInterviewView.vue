@@ -455,6 +455,7 @@ async function ensureAiExamRecordingStarted() {
     await reportAntiCheat('AI_RECORDING_STARTED', 'AI答题摄像头和麦克风录像已开始')
     ElMessage.success('AI答题录像已开始')
   } catch (error) {
+    stopAiExamStream()
     aiExamRecording.error = buildMediaErrorMessage(error)
     await reportAntiCheat('AI_RECORDING_DENIED', aiExamRecording.error)
     ElMessage.error(aiExamRecording.error)
@@ -648,7 +649,10 @@ async function joinVideo() {
       }
     }, 1000)
     ElMessage.success('已加入视频面，等待HR就绪后同步开始录制')
-  } catch (error) { ElMessage.error(buildMediaErrorMessage(error)) }
+  } catch (error) {
+    disconnectVideo()
+    ElMessage.error(buildMediaErrorMessage(error))
+  }
 }
 async function stopRecording() {
   try {

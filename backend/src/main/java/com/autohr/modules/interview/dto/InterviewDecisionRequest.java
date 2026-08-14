@@ -14,4 +14,5 @@ public class InterviewDecisionRequest {
     private String approverName;
     private Long approverUserId;
     private String comment;
+    private Long departmentId;
 }

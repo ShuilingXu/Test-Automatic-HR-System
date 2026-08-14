@@ -11,6 +11,7 @@ public class JobVO {
     private Long id;
     private String jobCode;
     private String jobTitle;
+    private Long departmentId;
     private String departmentName;
     private String workLocation;
     private String jobType;

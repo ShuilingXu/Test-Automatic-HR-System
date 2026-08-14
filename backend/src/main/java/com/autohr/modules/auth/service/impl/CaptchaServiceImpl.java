@@ -1,10 +1,11 @@
 package com.autohr.modules.auth.service.impl;
 
-import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import com.autohr.common.exception.BusinessException;
 import com.autohr.modules.auth.dto.CaptchaVO;
 import com.autohr.modules.auth.service.CaptchaService;
+import com.autohr.modules.auth.service.AuthRedisSecurityStore;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
@@ -14,24 +15,25 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
-import java.time.LocalDateTime;
+import java.security.SecureRandom;
 import java.util.Base64;
-import java.util.Map;
+import java.util.Locale;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
+@RequiredArgsConstructor
 public class CaptchaServiceImpl implements CaptchaService {
 
     private static final int EXPIRE_MINUTES = 5;
-    private final Map<String, CaptchaRecord> captchaStore = new ConcurrentHashMap<>();
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+    private final AuthRedisSecurityStore securityStore;
 
     @Override
     public CaptchaVO createCaptcha() {
-        cleanupExpired();
         String code = randomCode();
         String captchaId = UUID.randomUUID().toString();
-        captchaStore.put(captchaId, new CaptchaRecord(code, LocalDateTime.now().plusMinutes(EXPIRE_MINUTES)));
+        securityStore.storeCaptcha(captchaId, code, java.time.Duration.ofMinutes(EXPIRE_MINUTES));
         return new CaptchaVO(captchaId, createImageBase64(code));
     }
 
@@ -40,11 +42,11 @@ public class CaptchaServiceImpl implements CaptchaService {
         if (StrUtil.isBlank(captchaId) || StrUtil.isBlank(captchaCode)) {
             throw new BusinessException("图形验证码必填");
         }
-        CaptchaRecord record = captchaStore.remove(captchaId);
-        if (record == null || record.expiresAt().isBefore(LocalDateTime.now())) {
+        AuthRedisSecurityStore.CaptchaResult result = securityStore.consumeCaptcha(captchaId, captchaCode.trim().toUpperCase(Locale.ROOT));
+        if (result == AuthRedisSecurityStore.CaptchaResult.MISSING) {
             throw new BusinessException("图形验证码已过期，请刷新后重试");
         }
-        if (!StrUtil.equalsIgnoreCase(record.code(), captchaCode.trim())) {
+        if (result == AuthRedisSecurityStore.CaptchaResult.MISMATCHED) {
             throw new BusinessException("图形验证码错误");
         }
     }
@@ -59,14 +61,14 @@ public class CaptchaServiceImpl implements CaptchaService {
         graphics.fillRect(0, 0, width, height);
         for (int i = 0; i < 9; i++) {
             graphics.setColor(randomSoftColor());
-            graphics.drawLine(RandomUtil.randomInt(width), RandomUtil.randomInt(height), RandomUtil.randomInt(width), RandomUtil.randomInt(height));
+            graphics.drawLine(SECURE_RANDOM.nextInt(width), SECURE_RANDOM.nextInt(height), SECURE_RANDOM.nextInt(width), SECURE_RANDOM.nextInt(height));
         }
         graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 26));
         for (int i = 0; i < code.length(); i++) {
             graphics.setColor(randomTextColor());
             int pivotX = 24 + i * 25;
             int pivotY = 26;
-            double angle = Math.toRadians(RandomUtil.randomInt(-12, 13));
+            double angle = Math.toRadians(randomInt(-12, 13));
             graphics.rotate(angle, pivotX, pivotY);
             graphics.drawString(String.valueOf(code.charAt(i)), 16 + i * 25, 31);
             graphics.rotate(-angle, pivotX, pivotY);
@@ -81,26 +83,23 @@ public class CaptchaServiceImpl implements CaptchaService {
     }
 
     private Color randomSoftColor() {
-        return new Color(RandomUtil.randomInt(150, 220), RandomUtil.randomInt(150, 220), RandomUtil.randomInt(150, 220));
+        return new Color(randomInt(150, 220), randomInt(150, 220), randomInt(150, 220));
     }
 
     private Color randomTextColor() {
-        return new Color(RandomUtil.randomInt(25, 90), RandomUtil.randomInt(45, 110), RandomUtil.randomInt(60, 130));
+        return new Color(randomInt(25, 90), randomInt(45, 110), randomInt(60, 130));
     }
 
     private String randomCode() {
         String chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < 4; i++) {
-            builder.append(chars.charAt(RandomUtil.randomInt(chars.length())));
+            builder.append(chars.charAt(SECURE_RANDOM.nextInt(chars.length())));
         }
         return builder.toString();
     }
 
-    private void cleanupExpired() {
-        LocalDateTime now = LocalDateTime.now();
-        captchaStore.entrySet().removeIf(entry -> entry.getValue().expiresAt().isBefore(now));
+    private int randomInt(int origin, int bound) {
+        return origin + SECURE_RANDOM.nextInt(bound - origin);
     }
-
-    private record CaptchaRecord(String code, LocalDateTime expiresAt) {}
 }

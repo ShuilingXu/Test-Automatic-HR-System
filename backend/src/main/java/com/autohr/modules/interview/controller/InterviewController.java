@@ -1,6 +1,7 @@
 package com.autohr.modules.interview.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.common.exception.BusinessException;
 import com.autohr.common.file.FileDownloadSupport;
 import com.autohr.common.file.S3ObjectStorageService;
 import com.autohr.common.file.UploadPaths;
@@ -36,6 +37,12 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -54,11 +61,11 @@ public class InterviewController {
     @Value("${interview.webrtc.turn-urls:}")
     private String turnUrls;
 
-    @Value("${interview.webrtc.turn-username:}")
-    private String turnUsername;
+    @Value("${interview.webrtc.turn-shared-secret:}")
+    private String turnSharedSecret;
 
-    @Value("${interview.webrtc.turn-credential:}")
-    private String turnCredential;
+    @Value("${interview.webrtc.turn-credential-ttl-seconds:3600}")
+    private long turnCredentialTtlSeconds;
 
     @Value("${interview.security.disable-devtools-shortcuts:true}")
     private boolean disableDevtoolsShortcuts;
@@ -69,7 +76,7 @@ public class InterviewController {
     }
 
     @GetMapping("/ice-servers")
-    public ApiResponse<List<IceServerVO>> getIceServers() {
+    public ApiResponse<List<IceServerVO>> getIceServers(Authentication authentication) {
         List<IceServerVO> servers = new java.util.ArrayList<>();
         List<String> stun = splitUrls(stunUrls);
         if (!stun.isEmpty()) {
@@ -77,7 +84,13 @@ public class InterviewController {
         }
         List<String> turn = splitUrls(turnUrls);
         if (!turn.isEmpty()) {
-            servers.add(new IceServerVO(turn, blankToNull(turnUsername), blankToNull(turnCredential)));
+            if (turnSharedSecret == null || turnSharedSecret.isBlank()) {
+                throw new BusinessException("TURN 地址已配置，但缺少 INTERVIEW_TURN_SHARED_SECRET");
+            }
+            SessionUserVO current = currentUser(authentication);
+            long ttlSeconds = Math.max(60L, Math.min(turnCredentialTtlSeconds, 86400L));
+            String username = Instant.now().plusSeconds(ttlSeconds).getEpochSecond() + ":" + current.getId();
+            servers.add(new IceServerVO(turn, username, createTurnCredential(username)));
         }
         return ApiResponse.success(servers);
     }
@@ -313,10 +326,9 @@ public class InterviewController {
 
     @GetMapping("/interviewee/video-state/{processId}")
     public ApiResponse<VideoSignalVO> getVideoState(Authentication authentication,
-                                                    @PathVariable Long processId) {
+                                                     @PathVariable Long processId) {
         SessionUserVO current = currentUser(authentication);
-        interviewService.getIntervieweeProcess(processId, current.getId());
-        return ApiResponse.success(interviewService.getVideoSignalState(processId));
+        return ApiResponse.success(interviewService.getIntervieweeVideoSignalState(processId, current.getId()));
     }
 
     @PostMapping("/interviewee/video-recording/{processId}")
@@ -421,8 +433,14 @@ public class InterviewController {
                 .toList();
     }
 
-    private String blankToNull(String value) {
-        return value == null || value.isBlank() ? null : value;
+    private String createTurnCredential(String username) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA1");
+            mac.init(new SecretKeySpec(turnSharedSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA1"));
+            return Base64.getEncoder().encodeToString(mac.doFinal(username.getBytes(StandardCharsets.UTF_8)));
+        } catch (GeneralSecurityException ex) {
+            throw new IllegalStateException("无法生成 TURN 临时凭据", ex);
+        }
     }
 
     private void fillApprover(Authentication authentication, InterviewDecisionRequest request) {

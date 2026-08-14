@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 @Data
 @TableName("interview_process")
 public class InterviewProcess {
-    @TableId(type = IdType.INPUT)
+    @TableId(type = IdType.AUTO)
     private Long id;
     private Long recruitmentCandidateId;
     private Long intervieweeUserId;

@@ -229,6 +229,7 @@ npm.cmd run build
 #### 流程模板与审批
 
 - 模板入口：`/interview/hr/templates`。已被使用的模板不能删除，可停用以阻止后续发起。
+- 仅 `HR_ADMIN` 可以新建、编辑或删除流程模板；`HR_USER` 可以读取启用模板并在发起面试时选择。
 - AI 阶段沿用原有的题目生成、追问、评分和人工审批逻辑；题目、评分和录制按流程阶段隔离，因此同一流程中的多轮 AI 面试不会相互混用。
 - 视频阶段沿用原有的 WebRTC、录制、转写、总结和人工审批逻辑；每个人类视频面试都有独立会话和录制。
 - HR 审批通过后，系统自动进入模板中的下一个阶段；最后一个阶段通过后，候选人进入通过状态。任一阶段不通过会结束该流程。
@@ -266,6 +267,8 @@ npm.cmd run build
 5. 面试结束后上传录制文件。
 6. HR 审批视频面试结果。
 
+如果结束后 10 分钟仍未完整收到双方录像，系统会将会话标记为“录像缺失”并进入待审批，不阻止 HR 作出决定；迟到录像补齐后仍会自动触发合并和概要生成。
+
 WebRTC 默认使用以下 STUN：
 
 ```text
@@ -280,19 +283,27 @@ stun:stun.cloudflare.com:3478
 项目提供了 Docker 方式的本地 coturn 配置，用于 WebRTC TURN 中继转发测试。
 
 1. 安装 Docker Desktop 或 Docker Engine。
-2. 修改 `.env` 中 TURN 配置。浏览器和 coturn 在同一台机器时可用：
+2. 修改 `.env` 中 TURN 配置。后端只向已登录用户签发短期 HMAC-SHA1 凭据，不再向浏览器下发长期 TURN 密码。浏览器和 coturn 在同一台机器时可用：
 
 ```properties
 INTERVIEW_TURN_URLS=turn:127.0.0.1:3478?transport=udp,turn:127.0.0.1:3478?transport=tcp
-INTERVIEW_TURN_USERNAME=autohr
-INTERVIEW_TURN_CREDENTIAL=change-this-password
+INTERVIEW_TURN_SHARED_SECRET=replace-with-a-long-random-secret
+INTERVIEW_TURN_CREDENTIAL_TTL_SECONDS=3600
 TURN_HOST=127.0.0.1
-TURN_USERNAME=autohr
-TURN_CREDENTIAL=change-this-password
 TURN_REALM=autohr.local
 TURN_MIN_PORT=49160
 TURN_MAX_PORT=49200
 ```
+
+coturn 必须使用同一份共享密钥启用 REST 鉴权；删除静态 `user=` 配置，并启用：
+
+```properties
+use-auth-secret
+static-auth-secret=replace-with-a-long-random-secret
+realm=autohr.local
+```
+
+Docker Compose 会把 `.env` 中的 `INTERVIEW_TURN_SHARED_SECRET` 作为 `static-auth-secret` 传给 coturn；两者必须完全一致。真实密钥只保存在服务器配置中，不应提交到 Git；修改后需要同时重启后端和 coturn。
 
 如果使用手机或局域网其他机器访问前端，`127.0.0.1` 必须改为运行 coturn 的电脑局域网 IP，例如 `192.168.1.20`：
 
@@ -323,7 +334,7 @@ stop-coturn.bat
 ./stop-coturn.sh
 ```
 
-本地 Docker 配置会映射 `3478/tcp`、`3478/udp`、`5349/tcp`、`5349/udp` 和 `49160-49200/udp` 中继端口。Windows 或防火墙环境下需允许 Docker/WSL 访问这些端口。生产环境建议使用公网 IP/域名、强密码，并按需配置 TLS。
+本地 Docker 配置会映射 `3478/tcp`、`3478/udp`、`5349/tcp`、`5349/udp` 和 `49160-49200/udp` 中继端口。Windows 或防火墙环境下需允许 Docker/WSL 访问这些端口。生产环境应使用公网 IP/域名、长随机共享密钥和短期凭据，并按需配置 TLS。
 
 ### 13. 线下面试审批
 
@@ -370,6 +381,11 @@ spring:
 | `MIGRATION_ENABLED` | `true` | 是否执行表结构迁移 |
 | `JWT_SECRET` | 无（必填） | JWT 签名密钥，必须使用长度不少于 32 个字符的随机值 |
 | `JWT_EXPIRATION` | `86400000` | Token 有效期，单位毫秒 |
+| `REDIS_HOST` | `127.0.0.1` | 验证码、验证状态和限流使用的 Redis 地址 |
+| `REDIS_PORT` | `6379` | Redis 端口 |
+| `REDIS_PASSWORD` | 空 | Redis 密码，只保存在服务器 `.env` 中 |
+| `REDIS_SSL_ENABLED` | `false` | 是否使用 Redis TLS |
+| `AUTH_TRUST_FORWARDED_HEADERS` | `false` | 仅当可信反向代理覆盖 `X-Forwarded-For` 时启用 |
 
 ### SQLite 开发配置示例
 
@@ -378,6 +394,12 @@ DB_TYPE=sqlite
 SQLITE_FALLBACK_URL=jdbc:sqlite:autohr-dev.db
 JWT_SECRET=generate-a-unique-secret-with-at-least-32-characters
 ```
+
+### Redis 认证安全状态
+
+图形验证码、短信/邮件验证码以及登录和验证码发送限流均存储在 Redis 中。Redis 不可用时不会回退到进程内存，以免多实例状态不一致。生产 `.env` 必须配置 `REDIS_HOST`、`REDIS_PORT` 和 `REDIS_PASSWORD`；`REDIS_PASSWORD` 不得提交到 Git，也不会在系统配置页面暴露。仅当 OpenResty 或其他可信反向代理会覆盖 `X-Forwarded-For` 时，才设置 `AUTH_TRUST_FORWARDED_HEADERS=true`。
+
+新注册、找回密码、首次强制改密和管理员重置密码均要求至少 8 位且同时包含字母和数字。保留的默认账号初始密码仍为 `123456`，首次登录只能进入强制改密页面。
 
 ### MySQL 配置示例
 
@@ -400,6 +422,8 @@ JWT_SECRET=replace-with-a-secure-secret-at-least-32-chars
 ```
 
 开发环境可在 MySQL 或 PostgreSQL 连接失败时回退到 SQLite；生产环境必须显式配置 `DB_TYPE`，且非 SQLite 数据库必须提供 `DB_URL`。
+
+全库 22 张业务表统一使用数据库生成主键：SQLite 使用 `INTEGER PRIMARY KEY AUTOINCREMENT`，MySQL 使用 `AUTO_INCREMENT`，PostgreSQL 使用 Identity/Sequence。应用启动迁移会为既有 MySQL/PostgreSQL 表补齐生成器并将序列推进到现有最大主键之后，业务代码不再计算或手工写入下一主键。
 
 ### 生产 PostgreSQL 与邮件
 
@@ -426,6 +450,14 @@ SMTP_STARTTLS_ENABLED=true
 
 ### SQLite 迁移到 PostgreSQL
 
+迁移主机先安装 PostgreSQL 客户端并为迁移器创建独立 Python 环境：
+
+```bash
+sudo apt-get install -y postgresql-client python3-venv
+python3 -m venv .venv-migrate
+.venv-migrate/bin/pip install 'psycopg[binary]'
+```
+
 在已经由应用创建好 PostgreSQL 表结构后，先用只读检查确认源数据和目标表：
 
 ```bash
@@ -438,11 +470,14 @@ python3 scripts/migrate-sqlite-to-postgres.py autohr.db --dsn "$POSTGRES_DSN" --
 python3 scripts/migrate-sqlite-to-postgres.py autohr.db --dsn "$POSTGRES_DSN" --force-overwrite
 ```
 
-迁移在单个数据库事务中执行，包含流程模板、模板阶段和已创建的流程阶段；失败时 PostgreSQL 会回滚，源 SQLite 文件不会被改写。
+覆盖迁移要求系统已安装 PostgreSQL 客户端工具 `pg_dump`。开始覆盖前，脚本会把 PostgreSQL
+完整备份到 `backups/postgres-migration/`，默认保留 5 天并自动清理过期备份；可用
+`--backup-dir` 和 `--backup-retention-days` 调整。迁移在单个数据库事务中执行，包含流程模板、
+模板阶段和已创建的流程阶段；任何错误都会显式回滚全部目标库改动，源 SQLite 文件不会被改写。
 
 ### 一键发行包与 systemd
 
-GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。推送 `v*` 标签还会创建 GitHub Release。若在仓库 Secrets 配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_WEB_ROOT` 和可选的 `DEPLOY_PORT`，`main` 推送会自动发布到服务器；`DEPLOY_WEB_ROOT` 应为 OpenResty/Nginx 的站点静态目录，例如 1Panel OpenResty 的 `/opt/1panel/www/sites/hr.zroevn.cn/index`。首次部署还必须配置 `DEPLOY_INITIAL_ENV`，其内容为完整的 `.env` 文件，至少包含 `JWT_SECRET`、`DB_TYPE`、`DB_URL`、`DB_USERNAME`、`DB_PASSWORD`；已有服务器上的 `.env` 不会被覆盖。未配置部署 Secrets 时，构建仍会成功并安全跳过部署。
+GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。每次 `main` 构建都会创建或更新 `build-<运行编号>` GitHub 预发布版；推送 `v*` 标签会创建正式 Release，Release 发布不依赖部署 Secrets，不会因未配置服务器而跳过。若在仓库 Secrets 配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_WEB_ROOT` 和可选的 `DEPLOY_PORT`，`main` 推送会自动发布到服务器；`DEPLOY_WEB_ROOT` 应为 OpenResty/Nginx 的站点静态目录，例如 1Panel OpenResty 的 `/opt/1panel/www/sites/hr.zroevn.cn/index`。首次部署还必须配置 `DEPLOY_INITIAL_ENV`，其内容为完整的 `.env` 文件，至少包含 `JWT_SECRET`、`DB_TYPE`、`DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD` 和 `INTERVIEW_TURN_SHARED_SECRET`；已有服务器上的 `.env` 不会被覆盖。未配置部署 Secrets 时只跳过远端部署，构建产物和 GitHub 预发布版仍会正常生成。
 
 本地也可生成同一发行包：
 
@@ -467,8 +502,8 @@ sudo systemctl status auto-hr
 | `INTERVIEW_DISABLE_DEVTOOLS_SHORTCUTS` | `true` | 是否在面试页面禁用常见开发者工具快捷键 |
 | `INTERVIEW_STUN_URLS` | `stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478` | WebRTC STUN 地址，逗号分隔 |
 | `INTERVIEW_TURN_URLS` | 空 | WebRTC TURN 地址，逗号分隔 |
-| `INTERVIEW_TURN_USERNAME` | 空 | TURN 用户名 |
-| `INTERVIEW_TURN_CREDENTIAL` | 空 | TURN 密码或凭据 |
+| `INTERVIEW_TURN_SHARED_SECRET` | 空 | coturn REST 鉴权共享密钥；必须与 coturn 的 `static-auth-secret` 一致 |
+| `INTERVIEW_TURN_CREDENTIAL_TTL_SECONDS` | `3600` | 服务端签发的 TURN HMAC 临时凭据有效期，限制为 60 至 86400 秒 |
 
 ## API 模块概览
 
@@ -504,7 +539,7 @@ npm run format
 ## 注意事项
 
 - 生产环境必须修改 `JWT_SECRET`，不要使用默认开发密钥。
-- 默认账号密码仅适合本地演示，部署前应修改密码或删除默认账号。
+- 默认账号保留初始密码 `123456`，首次登录必须按强密码规则完成改密；可在用户管理中按需禁用账号。
 - 视频面试依赖浏览器摄像头、麦克风和 WebRTC 能力。
 - 公网视频面试建议配置 TURN，否则部分网络环境可能无法建立连接。
 - 文件上传目录位于后端运行目录下的 `uploads`，迁移部署时需要一并备份。

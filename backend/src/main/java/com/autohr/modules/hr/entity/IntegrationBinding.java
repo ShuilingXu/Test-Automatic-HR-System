@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 @TableName("hr_integration_binding")
 public class IntegrationBinding {
 
-    @TableId(type = IdType.INPUT)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private String moduleCode;

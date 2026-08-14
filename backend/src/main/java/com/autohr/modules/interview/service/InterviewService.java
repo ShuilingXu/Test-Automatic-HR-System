@@ -58,6 +58,7 @@ public interface InterviewService {
     VideoSignalVO addHrIceCandidate(Long processId, VideoSignalRequest request);
     VideoSignalVO addIntervieweeIceCandidate(Long processId, VideoSignalRequest request, Long intervieweeUserId, String intervieweeName);
     VideoSignalVO getVideoSignalState(Long processId);
+    VideoSignalVO getIntervieweeVideoSignalState(Long processId, Long intervieweeUserId);
     VideoSignalVO uploadHrRecording(Long processId, String originalFileName, String contentType, MultipartFile file);
     VideoSignalVO uploadIntervieweeRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file);
     InterviewVO uploadAiExamRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file);

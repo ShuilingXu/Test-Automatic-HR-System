@@ -12,11 +12,14 @@ FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 TURN_HOST="${TURN_HOST:-}"
 TURN_EXTERNAL_IP="${TURN_EXTERNAL_IP:-}"
 TURN_PRIVATE_IP="${TURN_PRIVATE_IP:-}"
-TURN_USERNAME="${TURN_USERNAME:-}"
-TURN_CREDENTIAL="${TURN_CREDENTIAL:-}"
+INTERVIEW_TURN_SHARED_SECRET="${INTERVIEW_TURN_SHARED_SECRET:-}"
 TURN_REALM="${TURN_REALM:-}"
 TURN_MIN_PORT="${TURN_MIN_PORT:-}"
 TURN_MAX_PORT="${TURN_MAX_PORT:-}"
+REDIS_HOST="${REDIS_HOST:-}"
+REDIS_PORT="${REDIS_PORT:-}"
+REDIS_PASSWORD="${REDIS_PASSWORD:-}"
+REDIS_SSL_ENABLED="${REDIS_SSL_ENABLED:-}"
 INTERVIEW_VIDEO_FFMPEG_PATH="${INTERVIEW_VIDEO_FFMPEG_PATH:-}"
 INTERVIEW_VIDEO_VIDEO_CODEC="${INTERVIEW_VIDEO_VIDEO_CODEC:-}"
 INTERVIEW_VIDEO_AUDIO_CODEC="${INTERVIEW_VIDEO_AUDIO_CODEC:-}"
@@ -45,6 +48,9 @@ ensure_dependencies() {
   install_package coturn
   install_package curl
   install_package ffmpeg
+  install_package postgresql-client
+  install_package python3-venv
+  install_package redis-tools
   install_package tesseract-ocr
   install_package tesseract-ocr-eng
   install_package tesseract-ocr-chi-sim
@@ -208,15 +214,20 @@ prepare_env() {
   TURN_HOST="${TURN_HOST:-$TURN_EXTERNAL_IP}"
   TURN_PRIVATE_IP="${TURN_PRIVATE_IP:-$(get_env_value TURN_PRIVATE_IP)}"
   TURN_PRIVATE_IP="${TURN_PRIVATE_IP:-$(detect_private_ip)}"
-  TURN_USERNAME="${TURN_USERNAME:-$(get_env_value TURN_USERNAME)}"
-  TURN_USERNAME="${TURN_USERNAME:-autohr}"
-  TURN_CREDENTIAL="${TURN_CREDENTIAL:-$(get_env_value TURN_CREDENTIAL)}"
+  INTERVIEW_TURN_SHARED_SECRET="${INTERVIEW_TURN_SHARED_SECRET:-$(get_env_value INTERVIEW_TURN_SHARED_SECRET)}"
   TURN_REALM="${TURN_REALM:-$(get_env_value TURN_REALM)}"
   TURN_REALM="${TURN_REALM:-autohr.local}"
   TURN_MIN_PORT="${TURN_MIN_PORT:-$(get_env_value TURN_MIN_PORT)}"
   TURN_MIN_PORT="${TURN_MIN_PORT:-49160}"
   TURN_MAX_PORT="${TURN_MAX_PORT:-$(get_env_value TURN_MAX_PORT)}"
   TURN_MAX_PORT="${TURN_MAX_PORT:-49200}"
+  REDIS_HOST="${REDIS_HOST:-$(get_env_value REDIS_HOST)}"
+  REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
+  REDIS_PORT="${REDIS_PORT:-$(get_env_value REDIS_PORT)}"
+  REDIS_PORT="${REDIS_PORT:-6379}"
+  REDIS_PASSWORD="${REDIS_PASSWORD:-$(get_env_value REDIS_PASSWORD)}"
+  REDIS_SSL_ENABLED="${REDIS_SSL_ENABLED:-$(get_env_value REDIS_SSL_ENABLED)}"
+  REDIS_SSL_ENABLED="${REDIS_SSL_ENABLED:-false}"
   INTERVIEW_VIDEO_FFMPEG_PATH="${INTERVIEW_VIDEO_FFMPEG_PATH:-$(get_env_value INTERVIEW_VIDEO_FFMPEG_PATH)}"
   INTERVIEW_VIDEO_FFMPEG_PATH="${INTERVIEW_VIDEO_FFMPEG_PATH:-ffmpeg}"
   INTERVIEW_VIDEO_VIDEO_CODEC="${INTERVIEW_VIDEO_VIDEO_CODEC:-$(get_env_value INTERVIEW_VIDEO_VIDEO_CODEC)}"
@@ -233,23 +244,41 @@ prepare_env() {
     exit 1
   fi
 
-  if [ -z "$TURN_CREDENTIAL" ]; then
-    TURN_CREDENTIAL="$(random_secret)"
+  if [ -z "$INTERVIEW_TURN_SHARED_SECRET" ]; then
+    INTERVIEW_TURN_SHARED_SECRET="$(random_secret)"
   fi
 
   set_env_value INTERVIEW_STUN_URLS "stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478"
   set_env_value INTERVIEW_TURN_URLS "turn:${TURN_HOST}:3478?transport=udp,turn:${TURN_HOST}:3478?transport=tcp"
-  set_env_value INTERVIEW_TURN_USERNAME "$TURN_USERNAME"
-  set_env_value INTERVIEW_TURN_CREDENTIAL "$TURN_CREDENTIAL"
+  set_env_value INTERVIEW_TURN_SHARED_SECRET "$INTERVIEW_TURN_SHARED_SECRET"
   set_env_value TURN_HOST "$TURN_HOST"
   set_env_value TURN_EXTERNAL_IP "$TURN_EXTERNAL_IP"
   set_env_value TURN_PRIVATE_IP "$TURN_PRIVATE_IP"
-  set_env_value TURN_USERNAME "$TURN_USERNAME"
-  set_env_value TURN_CREDENTIAL "$TURN_CREDENTIAL"
   set_env_value TURN_REALM "$TURN_REALM"
   set_env_value TURN_MIN_PORT "$TURN_MIN_PORT"
   set_env_value TURN_MAX_PORT "$TURN_MAX_PORT"
+  set_env_value REDIS_HOST "$REDIS_HOST"
+  set_env_value REDIS_PORT "$REDIS_PORT"
+  set_env_value REDIS_PASSWORD "$REDIS_PASSWORD"
+  set_env_value REDIS_SSL_ENABLED "$REDIS_SSL_ENABLED"
   set_env_value INTERVIEW_VIDEO_FFMPEG_PATH "$INTERVIEW_VIDEO_FFMPEG_PATH"
+}
+
+ensure_redis() {
+  local redis_response=""
+  local -a redis_tls_args=()
+  if [ "$REDIS_SSL_ENABLED" = "true" ]; then
+    redis_tls_args+=(--tls)
+  fi
+  if [ -n "$REDIS_PASSWORD" ]; then
+    redis_response="$(REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" "${redis_tls_args[@]}" ping 2>/dev/null || true)"
+  else
+    redis_response="$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" "${redis_tls_args[@]}" ping 2>/dev/null || true)"
+  fi
+  if [ "$redis_response" != "PONG" ]; then
+    echo "Redis is unavailable at ${REDIS_HOST}:${REDIS_PORT}. Check REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, and REDIS_SSL_ENABLED."
+    exit 1
+  fi
 }
 
 configure_coturn() {
@@ -266,10 +295,10 @@ listening-port=3478
 listening-ip=0.0.0.0
 ${external_ip_line}
 fingerprint
-lt-cred-mech
+use-auth-secret
+static-auth-secret=${INTERVIEW_TURN_SHARED_SECRET}
 realm=${TURN_REALM}
 server-name=${TURN_REALM}
-user=${TURN_USERNAME}:${TURN_CREDENTIAL}
 no-multicast-peers
 no-cli
 min-port=${TURN_MIN_PORT}
@@ -345,6 +374,7 @@ main() {
   mkdir -p "$LOG_DIR"
   ensure_dependencies
   prepare_env
+  ensure_redis
   ensure_video_codecs
   ensure_resume_ocr
   configure_coturn

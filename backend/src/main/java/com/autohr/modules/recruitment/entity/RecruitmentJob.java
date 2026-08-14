@@ -14,11 +14,12 @@ import java.time.LocalDateTime;
 @TableName("recruitment_job")
 public class RecruitmentJob {
 
-    @TableId(type = IdType.INPUT)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private String jobCode;
     private String jobTitle;
+    private Long departmentId;
     private String departmentName;
     private String workLocation;
     private String jobType;

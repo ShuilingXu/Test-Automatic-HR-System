@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 @Data
 @TableName("interview_process_template_stage")
 public class InterviewProcessTemplateStage {
-    @TableId(type = IdType.INPUT)
+    @TableId(type = IdType.AUTO)
     private Long id;
     private Long templateId;
     private String stageName;

@@ -13,8 +13,6 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 
-import java.util.List;
-import java.util.Objects;
 
 @Component
 @RequiredArgsConstructor
@@ -44,7 +42,6 @@ public class AuthBootstrapRunner implements CommandLineRunner {
             return;
         }
         SysUser user = new SysUser();
-        user.setId(nextId(sysUserMapper.selectList(null).stream().map(SysUser::getId).toList()));
         user.setUsername(username);
         user.setPassword(passwordEncoder.encode(password));
         user.setRoleCode(roleCode);
@@ -54,10 +51,6 @@ public class AuthBootstrapRunner implements CommandLineRunner {
         user.setTokenVersion(0);
         user.setMustChangePassword(1);
         sysUserMapper.insert(user);
-    }
-
-    private Long nextId(List<Long> ids) {
-        return ids.stream().filter(Objects::nonNull).max(Long::compareTo).map(id -> id + 1).orElse(1L);
     }
 
     private void ensureInterviewAiCommentColumn() {

@@ -8,6 +8,7 @@ import com.aliyun.teaopenapi.models.Config;
 import com.autohr.common.exception.BusinessException;
 import com.autohr.modules.auth.service.VerificationCodeService;
 import com.autohr.modules.auth.service.CaptchaService;
+import com.autohr.modules.auth.service.AuthRedisSecurityStore;
 import com.autohr.modules.system.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.mail.SimpleMailMessage;
@@ -15,11 +16,10 @@ import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @RequiredArgsConstructor
@@ -27,7 +27,6 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
 
     private static final String[] CONFIG_KEYS = {
             "ALIYUN_SMS_ACCESS_KEY_ID", "ALIYUN_SMS_ACCESS_KEY_SECRET", "ALIYUN_SMS_ENDPOINT", "ALIYUN_SMS_SIGN_NAME", "ALIYUN_SMS_TEMPLATE_CODE",
-            "ALIYUN_ACCESS_KEY_ID", "ALIYUN_ACCESS_KEY_SECRET",
             "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_SSL_ENABLED", "SMTP_STARTTLS_ENABLED"
     };
     private static final int EXPIRE_MINUTES = 5;
@@ -37,9 +36,9 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
     private static final String REGISTER_PURPOSE = "register";
     private static final String PASSWORD_RESET_PURPOSE = "password-reset";
 
-    private final Map<String, CodeRecord> codeStore = new ConcurrentHashMap<>();
     private final SystemConfigService systemConfigService;
     private final CaptchaService captchaService;
+    private final AuthRedisSecurityStore securityStore;
 
     @Override
     public void sendRegisterCode(String mobilePhone, String email, String captchaId, String captchaCode) {
@@ -64,17 +63,12 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
     private void sendCode(String purpose, String mobilePhone, String email, String captchaId, String captchaCode) {
         String target = normalizeTarget(mobilePhone, email);
         captchaService.verifyCaptcha(captchaId, captchaCode);
-        String codeKey = codeKey(purpose, target);
-        cleanupExpiredCodes();
-        LocalDateTime now = LocalDateTime.now();
         String code = String.format(Locale.ROOT, "%06d", SECURE_RANDOM.nextInt(1_000_000));
-        CodeRecord pendingRecord = new CodeRecord(code, now, now.plusMinutes(EXPIRE_MINUTES));
-        codeStore.compute(codeKey, (key, oldRecord) -> {
-            if (oldRecord != null && oldRecord.sentAt().plusSeconds(RESEND_SECONDS).isAfter(LocalDateTime.now())) {
-                throw new BusinessException("验证码发送过于频繁，请稍后再试");
-            }
-            return pendingRecord;
-        });
+        boolean stored = securityStore.replaceVerificationCode(purpose, target, code, Instant.now().getEpochSecond(),
+                RESEND_SECONDS, EXPIRE_MINUTES * 60);
+        if (!stored) {
+            throw new BusinessException("验证码发送过于频繁，请稍后再试");
+        }
         try {
             if (target.startsWith("sms:")) {
                 sendSms(target.substring(4), code);
@@ -82,37 +76,23 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
                 sendEmail(target.substring(6), code);
             }
         } catch (RuntimeException ex) {
-            codeStore.remove(codeKey, pendingRecord);
+            securityStore.discardVerificationCode(purpose, target, code);
             throw ex;
         }
     }
 
-    private synchronized void verifyCode(String purpose, String mobilePhone, String email, String code) {
-        cleanupExpiredCodes();
+    private void verifyCode(String purpose, String mobilePhone, String email, String code) {
         String target = normalizeTarget(mobilePhone, email);
-        String codeKey = codeKey(purpose, target);
-        CodeRecord record = codeStore.get(codeKey);
-        if (record == null) {
+        AuthRedisSecurityStore.VerificationResult result = securityStore.consumeVerificationCode(purpose, target, code, MAX_VERIFY_ATTEMPTS);
+        if (result == AuthRedisSecurityStore.VerificationResult.MISSING) {
             throw new BusinessException("验证码已过期，请重新获取");
         }
-        if (record.expiresAt().isBefore(LocalDateTime.now())) {
-            codeStore.remove(codeKey, record);
-            throw new BusinessException("验证码已过期，请重新获取");
+        if (result == AuthRedisSecurityStore.VerificationResult.LOCKED) {
+            throw new BusinessException("验证码错误次数过多，请重新获取验证码");
         }
-        if (!StrUtil.equals(record.code(), code)) {
-            int failedAttempts = record.failedAttempts() + 1;
-            if (failedAttempts >= MAX_VERIFY_ATTEMPTS) {
-                codeStore.remove(codeKey, record);
-                throw new BusinessException("验证码错误次数过多，请重新获取验证码");
-            }
-            codeStore.put(codeKey, record.withFailedAttempts(failedAttempts));
+        if (result == AuthRedisSecurityStore.VerificationResult.MISMATCHED) {
             throw new BusinessException("验证码错误");
         }
-        codeStore.remove(codeKey);
-    }
-
-    private String codeKey(String purpose, String target) {
-        return purpose + ':' + target;
     }
 
     private String normalizeTarget(String mobilePhone, String email) {
@@ -126,17 +106,14 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
 
     private void sendSms(String mobilePhone, String code) {
         Map<String, String> config = systemConfigService.loadConfig(CONFIG_KEYS);
-        // Deprecated generic credentials remain a read-only fallback for existing deployments.
-        config.put("ALIYUN_ACCESS_KEY_ID", firstNonBlank(config.get("ALIYUN_SMS_ACCESS_KEY_ID"), config.get("ALIYUN_ACCESS_KEY_ID")));
-        config.put("ALIYUN_ACCESS_KEY_SECRET", firstNonBlank(config.get("ALIYUN_SMS_ACCESS_KEY_SECRET"), config.get("ALIYUN_ACCESS_KEY_SECRET")));
-        requireConfig(config, "ALIYUN_ACCESS_KEY_ID", "阿里云AccessKey ID未配置");
-        requireConfig(config, "ALIYUN_ACCESS_KEY_SECRET", "阿里云AccessKey Secret未配置");
+        requireConfig(config, "ALIYUN_SMS_ACCESS_KEY_ID", "阿里云短信AccessKey ID未配置");
+        requireConfig(config, "ALIYUN_SMS_ACCESS_KEY_SECRET", "阿里云短信AccessKey Secret未配置");
         requireConfig(config, "ALIYUN_SMS_SIGN_NAME", "短信签名未配置");
         requireConfig(config, "ALIYUN_SMS_TEMPLATE_CODE", "短信模板Code未配置");
         try {
             Config aliyunConfig = new Config()
-                    .setAccessKeyId(config.get("ALIYUN_ACCESS_KEY_ID"))
-                    .setAccessKeySecret(config.get("ALIYUN_ACCESS_KEY_SECRET"));
+                    .setAccessKeyId(config.get("ALIYUN_SMS_ACCESS_KEY_ID"))
+                    .setAccessKeySecret(config.get("ALIYUN_SMS_ACCESS_KEY_SECRET"));
             aliyunConfig.endpoint = StrUtil.blankToDefault(config.get("ALIYUN_SMS_ENDPOINT"), "dysmsapi.aliyuncs.com");
             Client client = new Client(aliyunConfig);
             SendSmsRequest request = new SendSmsRequest()
@@ -192,10 +169,6 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
         }
     }
 
-    private String firstNonBlank(String preferred, String fallback) {
-        return StrUtil.isNotBlank(preferred) ? preferred : StrUtil.blankToDefault(fallback, "");
-    }
-
     private int parseSmtpPort(String value) {
         try {
             int port = Integer.parseInt(value);
@@ -208,18 +181,4 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
         }
     }
 
-    private void cleanupExpiredCodes() {
-        LocalDateTime now = LocalDateTime.now();
-        codeStore.entrySet().removeIf(entry -> entry.getValue().expiresAt().isBefore(now));
-    }
-
-    private record CodeRecord(String code, LocalDateTime sentAt, LocalDateTime expiresAt, int failedAttempts) {
-        private CodeRecord(String code, LocalDateTime sentAt, LocalDateTime expiresAt) {
-            this(code, sentAt, expiresAt, 0);
-        }
-
-        private CodeRecord withFailedAttempts(int value) {
-            return new CodeRecord(code, sentAt, expiresAt, value);
-        }
-    }
 }

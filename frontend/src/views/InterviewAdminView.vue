@@ -113,9 +113,9 @@
       <section v-if="activeTab === 'template'" class="surface">
         <div class="template-heading">
           <div><h3>面试流程模板</h3><p class="serial-line">配置可重复使用的 AI 与视频面试顺序；候选人发起后会生成独立快照。</p></div>
-          <el-button @click="resetTemplateForm">新建模板</el-button>
+          <el-button v-if="isTemplateManager" @click="resetTemplateForm">新建模板</el-button>
         </div>
-        <div class="template-editor">
+        <div v-if="isTemplateManager" class="template-editor">
           <el-form :model="templateForm" label-position="top" class="form-grid">
             <el-form-item label="模板名称"><el-input v-model="templateForm.templateName" maxlength="128" show-word-limit placeholder="例如：研发岗位三轮面试" /></el-form-item>
             <el-form-item label="状态"><el-select v-model="templateForm.status"><el-option label="启用" :value="1" /><el-option label="停用" :value="0" /></el-select></el-form-item>
@@ -139,12 +139,12 @@
           <div v-else class="empty-box">请添加至少一个 AI 面试或视频面试阶段。</div>
           <div class="action-row"><el-button type="primary" :loading="savingTemplate" @click="saveProcessTemplate">保存模板</el-button><el-button @click="resetTemplateForm">清空</el-button></div>
         </div>
-        <el-table :data="processTemplates" stripe class="data-table" @row-click="editProcessTemplate">
+        <el-table :data="processTemplates" stripe class="data-table" @row-click="handleTemplateRowClick">
           <el-table-column prop="templateName" label="模板名称" min-width="180" />
           <el-table-column prop="description" label="说明" min-width="220" />
           <el-table-column label="流程阶段" min-width="260"><template #default="scope"><span class="template-stage-summary">{{ templateStageSummary(scope.row) }}</span></template></el-table-column>
           <el-table-column label="状态" width="90"><template #default="scope"><el-tag :type="scope.row.status === 1 ? 'success' : 'info'">{{ scope.row.status === 1 ? '启用' : '停用' }}</el-tag></template></el-table-column>
-          <el-table-column label="操作" width="160"><template #default="scope"><el-button text @click.stop="editProcessTemplate(scope.row)">编辑</el-button><el-button text type="danger" @click.stop="deleteProcessTemplate(scope.row.id)">删除</el-button></template></el-table-column>
+          <el-table-column v-if="isTemplateManager" label="操作" width="160"><template #default="scope"><el-button text @click.stop="editProcessTemplate(scope.row)">编辑</el-button><el-button text type="danger" @click.stop="deleteProcessTemplate(scope.row.id)">删除</el-button></template></el-table-column>
         </el-table>
       </section>
 
@@ -158,7 +158,7 @@
           <el-form-item label="投递岗位"><el-select v-model="processForm.jobId" disabled><el-option v-for="job in jobs" :key="job.id" :label="job.jobTitle" :value="job.id" /></el-select></el-form-item>
           <el-form-item label="候选人唯一ID"><el-input :model-value="processCandidatePreview?.id || '-'" disabled /></el-form-item>
           <el-form-item label="流程模板"><el-select v-model="processForm.templateId" clearable placeholder="选择模板（不选则沿用旧流程）"><el-option v-for="item in enabledProcessTemplates" :key="item.id" :label="item.templateName" :value="item.id"><span>{{ item.templateName }}</span><small class="template-option-detail">{{ templateStageSummary(item) }}</small></el-option></el-select></el-form-item>
-          <el-form-item label="AI通过阈值"><el-input-number v-model="processForm.aiThresholdScore" :min="1" /></el-form-item>
+          <el-form-item label="AI通过阈值"><el-input-number v-model="processForm.aiThresholdScore" :min="0" :max="100" /></el-form-item>
           <el-form-item label="低分追问阈值"><el-input-number v-model="processForm.aiFollowUpThreshold" :min="0" :max="100" /></el-form-item>
           <el-form-item label="AI最少问答轮数"><el-input-number v-model="processForm.aiMinQuestionRounds" :min="1" /></el-form-item>
           <el-form-item label="AI最多问答轮数"><el-input-number v-model="processForm.aiMaxQuestionRounds" :min="1" /></el-form-item>
@@ -241,7 +241,7 @@
             <div v-if="selectedProcess.videoJoinLink || selectedProcess.videoSerialNo" class="serial-line">
               <span v-if="selectedProcess.videoSerialNo">视频流水号：{{ selectedProcess.videoSerialNo }}</span>
               <el-button v-if="selectedProcess.videoJoinLink" text class="video-link" @click="copyVideoJoinLink">复制候选人视频链接</el-button>
-              <a v-if="selectedProcess.recordingPath || selectedProcess.recordingFileName" :href="interviewApi.getRecordingUrl(selectedProcess.id, selectedProcess.processStageId)" target="_blank" class="video-link">查看合并录制文件</a>
+              <el-button v-if="selectedProcess.recordingPath || selectedProcess.recordingFileName" text class="video-link" @click="openRecording">查看合并录制文件</el-button>
             </div>
             <div class="video-grid">
               <div class="video-box"><span>HR本地视频</span><video ref="hrLocalVideo" autoplay muted playsinline></video></div>
@@ -249,9 +249,9 @@
             </div>
             <div class="video-summary-box">
               <div class="summary-status-row">
-                <span>音频转写/会议概要状态：{{ selectedProcess.summaryStatus || '未生成' }}</span>
+                <span>音频转写/会议概要状态：{{ summaryStatusLabel(selectedProcess.summaryStatus) }}</span>
                 <el-button
-                  v-if="selectedProcess.recordingPath || selectedProcess.recordingFileName"
+                  v-if="(selectedProcess.recordingPath || selectedProcess.recordingFileName) && selectedProcess.summaryStatus !== 'MISSING_RECORDING'"
                   size="small"
                   :loading="retryingVideoSummary"
                   @click="retryVideoSummary"
@@ -274,7 +274,7 @@
           <section class="workbench-panel ai-question-panel">
             <div class="panel-title-row">
               <h3>AI问答与面试官评价</h3>
-              <a v-if="selectedProcess.aiRecordingPath || selectedProcess.aiRecordingFileName" :href="interviewApi.getAiRecordingUrl(selectedProcess.id, selectedProcess.processStageId)" target="_blank" class="video-link">查看AI问答视频</a>
+              <el-button v-if="selectedProcess.aiRecordingPath || selectedProcess.aiRecordingFileName" text class="video-link" @click="openAiRecording">查看AI问答视频</el-button>
             </div>
             <div v-if="aiRecordGroups.length" class="ai-review-scroll">
               <div class="ai-stage-review-list">
@@ -315,6 +315,13 @@
               <p>AI轮数：{{ selectedProcess.aiMinQuestionRounds || '-' }} - {{ selectedProcess.aiMaxQuestionRounds || '-' }}</p>
               <p>切屏次数：{{ selectedProcess.antiCheatSwitchCount || 0 }} / {{ selectedProcess.antiCheatSwitchLimit || 5 }}</p>
             </div>
+            <el-form v-if="canApproveAi || canApproveVideo || canApproveOnsite" label-position="top" class="onboarding-department-form">
+              <el-form-item label="入职部门">
+                <el-select v-model="onboardingDepartmentId" filterable :disabled="Boolean(selectedProcess.jobDepartmentId)" placeholder="选择入职部门">
+                  <el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" />
+                </el-select>
+              </el-form-item>
+            </el-form>
             <div class="action-button-grid">
               <el-button v-if="canApproveAi" type="primary" @click="approveAi(selectedProcess, 1)">AI审批通过</el-button>
               <el-button v-if="canApproveAi" type="danger" plain @click="approveAi(selectedProcess, 0)">AI审批不通过</el-button>
@@ -342,8 +349,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { authApi, interviewApi, recruitmentApi, systemApi } from '../services/api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { authApi, hrApi, interviewApi, recruitmentApi, systemApi } from '../services/api'
 import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, playVideo, requestCameraAndMicrophone } from '../utils/media'
 import { readSessionUser } from '../utils/session'
 
@@ -351,6 +358,7 @@ const sessionUser = ref(readSessionUser())
 const route = useRoute()
 const router = useRouter()
 const isItAdmin = computed(() => sessionUser.value?.roleCode === 'IT_ADMIN')
+const isTemplateManager = computed(() => sessionUser.value?.roleCode === 'HR_ADMIN')
 const activeTab = computed(() => route.meta.interviewTab || 'process')
 const isProcessDetail = computed(() => route.name === 'interview-process-detail')
 const knowledgeBases = ref([])
@@ -358,6 +366,7 @@ const knowledgeItems = ref([])
 const weights = ref([])
 const llmConfigs = ref([])
 const jobs = ref([])
+const departments = ref([])
 const recruitmentCandidates = ref([])
 const processes = ref([])
 const processTemplates = ref([])
@@ -366,13 +375,14 @@ const selectedProcess = ref(null)
 const selectedCandidate = ref(null)
 const videoActive = ref(false)
 const processRemark = ref('')
+const onboardingDepartmentId = ref(null)
 const savingRemark = ref(false)
 const savingSystemConfig = ref(false)
 const configTab = ref('notifications')
 const modelTab = ref('INTERVIEWER')
 const retainOnBlankConfigKeys = new Set([
   'ALIYUN_SMS_ACCESS_KEY_SECRET', 'SMTP_PASSWORD', 'S3_SECRET_ACCESS_KEY',
-  'ALIYUN_STT_ACCESS_KEY_SECRET', 'DB_PASSWORD', 'JWT_SECRET', 'INTERVIEW_TURN_CREDENTIAL',
+  'ALIYUN_STT_ACCESS_KEY_SECRET', 'DB_PASSWORD', 'JWT_SECRET', 'INTERVIEW_TURN_SHARED_SECRET',
 ])
 
 const hrLocalVideo = ref(null)
@@ -419,7 +429,7 @@ const systemConfig = reactive({
   S3_ENABLED: '', S3_ENDPOINT: '', S3_INTERNAL_ENDPOINT_ENABLED: '', S3_INTERNAL_ENDPOINT: '', S3_REGION: '', S3_BUCKET: '', S3_ACCESS_KEY_ID: '', S3_SECRET_ACCESS_KEY: '', S3_SESSION_TOKEN: '', S3_PREFIX: '', S3_PATH_STYLE_ACCESS: '',
   DB_TYPE: '', DB_URL: '', DB_USERNAME: '', DB_PASSWORD: '', JWT_SECRET: '',
   INTERVIEW_VIDEO_FFMPEG_PATH: '', INTERVIEW_VIDEO_VIDEO_CODEC: '', INTERVIEW_VIDEO_AUDIO_CODEC: '',
-  INTERVIEW_STUN_URLS: '', INTERVIEW_TURN_URLS: '', INTERVIEW_TURN_USERNAME: '', INTERVIEW_TURN_CREDENTIAL: '',
+  INTERVIEW_STUN_URLS: '', INTERVIEW_TURN_URLS: '', INTERVIEW_TURN_SHARED_SECRET: '', INTERVIEW_TURN_CREDENTIAL_TTL_SECONDS: '',
   TURN_HOST: '', TURN_EXTERNAL_IP: '', TURN_PRIVATE_IP: '', TURN_REALM: '', TURN_MIN_PORT: '', TURN_MAX_PORT: '',
   RESUME_OCR_ENABLED: '', RESUME_OCR_TESSERACT_PATH: '', RESUME_OCR_LANGUAGE: '', RESUME_OCR_DPI: '', RESUME_OCR_MAX_PAGES: '',
 })
@@ -444,7 +454,7 @@ const configGroups = {
     { key: 'S3_ENABLED', label: '启用归档', options: booleanOptions }, { key: 'S3_ENDPOINT', label: '外网 S3 Endpoint', placeholder: 'https://s3.example.com' }, { key: 'S3_INTERNAL_ENDPOINT_ENABLED', label: '使用内网上传 Endpoint', options: booleanOptions }, { key: 'S3_INTERNAL_ENDPOINT', label: '内网上传 Endpoint', placeholder: 'http://s3.internal.example.com' }, { key: 'S3_REGION', label: 'Region', placeholder: 'us-east-1' }, { key: 'S3_BUCKET', label: 'Bucket' }, { key: 'S3_ACCESS_KEY_ID', label: 'Access Key ID' }, { key: 'S3_SECRET_ACCESS_KEY', label: 'Secret Access Key', secret: true, placeholder: '留空则不覆盖' }, { key: 'S3_SESSION_TOKEN', label: 'Session Token（可选）', secret: true, placeholder: '临时凭据时填写' }, { key: 'S3_PREFIX', label: '对象前缀', placeholder: 'autohr' }, { key: 'S3_PATH_STYLE_ACCESS', label: 'Path Style Access', options: booleanOptions },
   ] },
   media: { title: '面试媒体', description: '视频编码、WebRTC 网络和阿里云语音转文字使用的独立参数。', fields: [
-    { key: 'INTERVIEW_VIDEO_FFMPEG_PATH', label: 'FFmpeg 路径', placeholder: 'ffmpeg' }, { key: 'INTERVIEW_VIDEO_VIDEO_CODEC', label: '视频编码器' }, { key: 'INTERVIEW_VIDEO_AUDIO_CODEC', label: '音频编码器' }, { key: 'INTERVIEW_STUN_URLS', label: 'STUN 地址' }, { key: 'INTERVIEW_TURN_URLS', label: 'TURN 地址' }, { key: 'INTERVIEW_TURN_USERNAME', label: 'TURN 用户名' }, { key: 'INTERVIEW_TURN_CREDENTIAL', label: 'TURN 凭证', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_STT_ACCESS_KEY_ID', label: '阿里云语音 AccessKey ID' }, { key: 'ALIYUN_STT_ACCESS_KEY_SECRET', label: '阿里云语音 AccessKey Secret', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_STT_APP_KEY', label: '阿里云语音 AppKey' }, { key: 'ALIYUN_STT_ENDPOINT', label: '阿里云语音 Endpoint', placeholder: 'wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1' }, { key: 'TURN_HOST', label: 'TURN 主机' }, { key: 'TURN_EXTERNAL_IP', label: 'TURN 外部 IP' }, { key: 'TURN_PRIVATE_IP', label: 'TURN 内部 IP' }, { key: 'TURN_REALM', label: 'TURN Realm' }, { key: 'TURN_MIN_PORT', label: 'TURN 最小端口' }, { key: 'TURN_MAX_PORT', label: 'TURN 最大端口' },
+    { key: 'INTERVIEW_VIDEO_FFMPEG_PATH', label: 'FFmpeg 路径', placeholder: 'ffmpeg' }, { key: 'INTERVIEW_VIDEO_VIDEO_CODEC', label: '视频编码器' }, { key: 'INTERVIEW_VIDEO_AUDIO_CODEC', label: '音频编码器' }, { key: 'INTERVIEW_STUN_URLS', label: 'STUN 地址' }, { key: 'INTERVIEW_TURN_URLS', label: 'TURN 地址' }, { key: 'INTERVIEW_TURN_SHARED_SECRET', label: 'TURN 共享密钥', secret: true, placeholder: '留空则不覆盖' }, { key: 'INTERVIEW_TURN_CREDENTIAL_TTL_SECONDS', label: 'TURN 临时凭据有效期（秒）', placeholder: '3600' }, { key: 'ALIYUN_STT_ACCESS_KEY_ID', label: '阿里云语音 AccessKey ID' }, { key: 'ALIYUN_STT_ACCESS_KEY_SECRET', label: '阿里云语音 AccessKey Secret', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_STT_APP_KEY', label: '阿里云语音 AppKey' }, { key: 'ALIYUN_STT_ENDPOINT', label: '阿里云语音 Endpoint', placeholder: 'wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1' }, { key: 'TURN_HOST', label: 'TURN 主机' }, { key: 'TURN_EXTERNAL_IP', label: 'TURN 外部 IP' }, { key: 'TURN_PRIVATE_IP', label: 'TURN 内部 IP' }, { key: 'TURN_REALM', label: 'TURN Realm' }, { key: 'TURN_MIN_PORT', label: 'TURN 最小端口' }, { key: 'TURN_MAX_PORT', label: 'TURN 最大端口' },
   ] },
   database: { title: '数据库与安全', description: '数据库连接和 JWT 签名参数。敏感值以掩码显示。', fields: [
     { key: 'DB_TYPE', label: '数据库类型', placeholder: 'sqlite / mysql / postgresql' }, { key: 'DB_URL', label: '数据库 URL' }, { key: 'DB_USERNAME', label: '数据库用户名' }, { key: 'DB_PASSWORD', label: '数据库密码', secret: true, placeholder: '留空则不覆盖' }, { key: 'JWT_SECRET', label: 'JWT Secret', secret: true, placeholder: '至少 32 位，留空则不覆盖' },
@@ -531,6 +541,7 @@ async function loadAll() {
       if (activeTab.value === 'llm') router.replace('/interview/hr/knowledge-bases')
     }
     jobs.value = (await recruitmentApi.listAdminJobs()).data
+    departments.value = (await hrApi.listDepartments({ status: 1 })).data
     recruitmentCandidates.value = (await recruitmentApi.listCandidates()).data
     processTemplates.value = (await interviewApi.listProcessTemplates()).data
     processes.value = (await interviewApi.listProcesses()).data
@@ -551,16 +562,17 @@ function openWeight(row) { Object.assign(weightForm, row); router.push(`/intervi
 function openLlmConfig(row) { editLlmConfig(row) }
 function openProcess(row) { router.push(`/interview/hr/processes/${row.id}`) }
 async function saveKnowledgeBase() { try { await interviewApi.saveKnowledgeBase({ ...kbForm }); ElMessage.success('知识库已保存'); await loadAll() } catch (error) { fail(error) } }
-async function deleteKnowledgeBase(id) { try { await interviewApi.deleteKnowledgeBase(id); ElMessage.success('知识库已删除'); await loadAll() } catch (error) { fail(error) } }
+async function confirmDelete(message) { await ElMessageBox.confirm(message, '确认删除', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }) }
+async function deleteKnowledgeBase(id) { try { await confirmDelete('删除知识库会同时删除其中的知识点和岗位权重，且无法恢复。'); await interviewApi.deleteKnowledgeBase(id); ElMessage.success('知识库已删除'); await loadAll() } catch (error) { if (error !== 'cancel' && error !== 'close') fail(error) } }
 async function saveKnowledgeItem() { try { await interviewApi.saveKnowledgeItem({ ...itemForm }); ElMessage.success('知识点已保存'); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
 function editKnowledgeItem(row) { Object.assign(itemForm, { id: row.id, knowledgeBaseId: row.knowledgeBaseId, knowledgePoint: row.knowledgePoint, knowledgeContent: row.knowledgeContent, status: row.status ?? 1 }) }
 function resetKnowledgeItemForm() { Object.assign(itemForm, { id: null, knowledgeBaseId: itemForm.knowledgeBaseId, knowledgePoint: '', knowledgeContent: '', status: 1 }) }
 async function importKnowledgeItemsCsv(uploadFile) { try { if (!itemForm.knowledgeBaseId) { ElMessage.warning('请先选择目标知识库'); return } const response = await interviewApi.importKnowledgeItems(itemForm.knowledgeBaseId, uploadFile.raw); ElMessage.success(`已导入 ${response.data.imported} 条知识点`); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
-async function deleteKnowledgeItem(id) { try { await interviewApi.deleteKnowledgeItem(id); ElMessage.success('知识点已删除'); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { fail(error) } }
+async function deleteKnowledgeItem(id) { try { await confirmDelete('删除后无法恢复该知识点。'); await interviewApi.deleteKnowledgeItem(id); ElMessage.success('知识点已删除'); await selectKnowledgeBase({ id: itemForm.knowledgeBaseId }) } catch (error) { if (error !== 'cancel' && error !== 'close') fail(error) } }
 async function saveWeight() { try { await interviewApi.saveJobKnowledgeWeight({ ...weightForm }); ElMessage.success('权重已保存'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
-async function deleteWeight(id) { try { await interviewApi.deleteJobKnowledgeWeight(id); ElMessage.success('权重已删除'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
+async function deleteWeight(id) { try { await confirmDelete('删除后无法恢复该岗位知识库权重。'); await interviewApi.deleteJobKnowledgeWeight(id); ElMessage.success('权重已删除'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { if (error !== 'cancel' && error !== 'close') fail(error) } }
 async function saveRoleLlmConfig(form, role) { try { await interviewApi.saveLlmConfig({ ...form, modelRole: role }); ElMessage.success('LLM配置已保存'); form.apiKey = ''; await loadAll() } catch (error) { fail(error) } }
-async function deleteLlmConfig(id) { try { await interviewApi.deleteLlmConfig(id); ElMessage.success('LLM配置已删除'); await loadAll() } catch (error) { fail(error) } }
+async function deleteLlmConfig(id) { try { await confirmDelete('删除后无法恢复该模型配置。'); await interviewApi.deleteLlmConfig(id); ElMessage.success('LLM配置已删除'); await loadAll() } catch (error) { if (error !== 'cancel' && error !== 'close') fail(error) } }
 function systemConfigPayload() {
   return Object.fromEntries(Object.entries(systemConfig).filter(([key, value]) => !retainOnBlankConfigKeys.has(key) || String(value || '').trim()))
 }
@@ -574,9 +586,11 @@ function moveTemplateStage(index, offset) { const target = index + offset; if (t
 function templateStageSummary(template) { return (template?.stages || []).map((stage) => stage.stageName || (stage.stageType === 'AI' ? 'AI 面试' : '视频面试')).join(' -> ') || '暂无阶段' }
 function stageStatusLabel(status) { return ({ PENDING: '待开始', READY: '待开始', IN_PROGRESS: '进行中', UPLOADING: '上传中', WAITING_APPROVAL: '待审批', PASSED: '已通过', REJECTED: '未通过' })[status] || status || '-' }
 function stageStatusTagType(status) { return ({ PASSED: 'success', REJECTED: 'danger', WAITING_APPROVAL: 'warning', IN_PROGRESS: 'primary', UPLOADING: 'warning' })[status] || 'info' }
+function summaryStatusLabel(status) { return ({ PENDING_MERGE: '等待合并', PENDING: '等待生成', PROCESSING: '生成中', COMPLETED: '已生成', FAILED_MERGE: '合并失败', FAILED: '生成失败', MISSING_RECORDING: '录像缺失（不阻止审批）' })[status] || status || '未生成' }
+function handleTemplateRowClick(row) { if (isTemplateManager.value) void editProcessTemplate(row) }
 async function editProcessTemplate(row) { try { const template = (await interviewApi.getProcessTemplate(row.id)).data; Object.assign(templateForm, { id: template.id, templateName: template.templateName, description: template.description || '', status: template.status ?? 1, stages: (template.stages || []).map((stage) => ({ key: `${stage.id}-${Date.now()}`, stageName: stage.stageName, stageType: stage.stageType, knowledgeBaseId: stage.knowledgeBaseId || null })) }); } catch (error) { fail(error) } }
 async function saveProcessTemplate() { if (!templateForm.templateName.trim()) { ElMessage.warning('请填写模板名称'); return } if (!templateForm.stages.length) { ElMessage.warning('请至少添加一个面试阶段'); return } const invalidAiStage = templateForm.stages.find((stage) => stage.stageType === 'AI' && !stage.knowledgeBaseId); if (invalidAiStage) { ElMessage.warning(`请为“${invalidAiStage.stageName || 'AI 面试'}”选择题库`); return } const invalidName = templateForm.stages.find((stage) => !stage.stageName.trim()); if (invalidName) { ElMessage.warning('请填写每个阶段的展示名称'); return } savingTemplate.value = true; try { const saved = (await interviewApi.saveProcessTemplate({ id: templateForm.id, templateName: templateForm.templateName.trim(), description: templateForm.description.trim(), status: templateForm.status, stages: templateForm.stages.map((stage, index) => ({ stageName: stage.stageName.trim(), stageType: stage.stageType, knowledgeBaseId: stage.stageType === 'AI' ? stage.knowledgeBaseId : null, sequenceNo: index + 1 })) })).data; ElMessage.success('流程模板已保存'); await loadAll(); await editProcessTemplate(saved) } catch (error) { fail(error) } finally { savingTemplate.value = false } }
-async function deleteProcessTemplate(id) { try { await interviewApi.deleteProcessTemplate(id); ElMessage.success('流程模板已删除'); if (templateForm.id === id) resetTemplateForm(); await loadAll() } catch (error) { fail(error) } }
+async function deleteProcessTemplate(id) { try { await confirmDelete('删除后无法恢复该流程模板，已开始的面试流程不受影响。'); await interviewApi.deleteProcessTemplate(id); ElMessage.success('流程模板已删除'); if (templateForm.id === id) resetTemplateForm(); await loadAll() } catch (error) { if (error !== 'cancel' && error !== 'close') fail(error) } }
 function editLlmConfig(row) { Object.assign(llmFormByRole(row.modelRole), { ...row, apiKey: '' }) }
 function createLlmForm(role) { return { id: null, configName: role === 'SCORER' ? '评分模型' : role === 'RESUME_REVIEW' ? '简历初筛模型' : role === 'VIDEO_SUMMARY' ? '视频会议概要模型' : '面试官模型', modelRole: role, baseUrl: '', apiKey: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 } }
 function llmFormByRole(role) { return role === 'SCORER' ? scorerLlmForm : role === 'RESUME_REVIEW' ? resumeReviewLlmForm : role === 'VIDEO_SUMMARY' ? videoSummaryLlmForm : interviewerLlmForm }
@@ -598,9 +612,24 @@ async function loadProcessDetail(row) {
   aiRecords.value = (await interviewApi.listAiRecords({ processId: row.id })).data
   selectedCandidate.value = row.recruitmentCandidateId ? (await recruitmentApi.getCandidate(row.recruitmentCandidateId)).data : null
 }
-async function approveAi(process, approved) { try { await interviewApi.approveAi(process.id, { approved }); ElMessage.success(`${process.stageName || 'AI面试'}审批完成`); await loadAll() } catch (error) { fail(error) } }
-async function approveVideo(approved) { try { await interviewApi.approveVideo(selectedProcess.value.id, { approved }); ElMessage.success(`${selectedProcess.value?.stageName || '视频面试'}审批完成`); await loadAll() } catch (error) { fail(error) } }
-async function approveOnsite(approved) { try { await interviewApi.approveOnsite(selectedProcess.value.id, { approved }); ElMessage.success('线下面审批完成'); await loadAll() } catch (error) { fail(error) } }
+function isFinalApproval(process) {
+  if (!process?.templateId) return process?.currentStage === 'ONSITE'
+  const stages = [...(process.stages || [])].sort((left, right) => Number(left.sequenceNo) - Number(right.sequenceNo))
+  return stages.length > 0 && String(stages.at(-1).processStageId || stages.at(-1).id) === String(process.processStageId)
+}
+async function decisionPayload(process, approved) {
+  if (!approved) return { approved }
+  const departmentId = process.jobDepartmentId || onboardingDepartmentId.value || null
+  if (isFinalApproval(process) && !departmentId) {
+    ElMessage.warning('最终审批通过前请选择入职部门')
+    if (!isProcessDetail.value) await router.push(`/interview/hr/processes/${process.id}`)
+    return null
+  }
+  return { approved, departmentId }
+}
+async function approveAi(process, approved) { try { const payload = await decisionPayload(process, approved); if (!payload) return; await interviewApi.approveAi(process.id, payload); ElMessage.success(`${process.stageName || 'AI面试'}审批完成`); await loadAll() } catch (error) { fail(error) } }
+async function approveVideo(approved) { try { const payload = await decisionPayload(selectedProcess.value, approved); if (!payload) return; await interviewApi.approveVideo(selectedProcess.value.id, payload); ElMessage.success(`${selectedProcess.value?.stageName || '视频面试'}审批完成`); await loadAll() } catch (error) { fail(error) } }
+async function approveOnsite(approved) { try { const payload = await decisionPayload(selectedProcess.value, approved); if (!payload) return; await interviewApi.approveOnsite(selectedProcess.value.id, payload); ElMessage.success('线下面审批完成'); await loadAll() } catch (error) { fail(error) } }
 async function terminateProcess() { try { await interviewApi.terminateProcess(selectedProcess.value.id, { approved: 0 }); ElMessage.success('流程已终止'); await loadAll() } catch (error) { fail(error) } }
 async function saveProcessRemark() {
   if (!selectedProcess.value) return
@@ -707,8 +736,14 @@ async function startHrVideoCall() {
       }
     }, 1000)
     ElMessage.success('HR视频已就绪，等待面试者加入后同步开始录制')
-  } catch (error) { ElMessage.error(buildMediaErrorMessage(error)) }
+  } catch (error) {
+    disconnectHrVideo()
+    ElMessage.error(buildMediaErrorMessage(error))
+  }
 }
+
+async function openRecording() { if (!selectedProcess.value) return; try { await interviewApi.openRecording(selectedProcess.value.id, selectedProcess.value.processStageId) } catch (error) { fail(error) } }
+async function openAiRecording() { if (!selectedProcess.value) return; try { await interviewApi.openAiRecording(selectedProcess.value.id, selectedProcess.value.processStageId) } catch (error) { fail(error) } }
 
 async function stopHrRecording() {
   try {
@@ -854,6 +889,14 @@ watch(() => route.fullPath, () => {
   syncRouteState()
 })
 
+watch(() => selectedProcess.value?.id, () => {
+  onboardingDepartmentId.value = selectedProcess.value?.jobDepartmentId || null
+})
+
+watch(() => selectedProcess.value?.jobDepartmentId, (departmentId) => {
+  if (departmentId) onboardingDepartmentId.value = departmentId
+})
+
 onMounted(loadAll)
 </script>
 
@@ -900,6 +943,9 @@ onMounted(loadAll)
 .ai-interviewer-feedback { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.6; color: var(--ink-soft); }
 .process-stats { display: grid; gap: 4px; margin-bottom: 12px; }
 .process-stats p { margin: 0; color: var(--ink-soft); }
+.onboarding-department-form { max-width: 420px; margin-bottom: 12px; }
+.onboarding-department-form :deep(.el-form-item) { margin-bottom: 0; }
+.onboarding-department-form :deep(.el-select) { width: 100%; }
 .action-button-grid { min-width: 0; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
 .template-heading, .stage-list-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }.template-heading { margin-bottom: 18px; }.template-heading h3, .stage-list-head h4 { margin: 0; }.stage-list-head { margin: 18px 0 12px; }.stage-list-head span, .template-option-detail, .human-stage-note { color: var(--text-muted); font-size: 12px; }.template-stage-list { display: grid; gap: 10px; }.template-stage-row { display: grid; grid-template-columns: 32px minmax(150px, 1.2fr) minmax(180px, .9fr) minmax(180px, 1fr) auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-soft); }.stage-order { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #dceee7; color: #175c50; font-weight: 800; font-size: 13px; }.stage-type-switch { white-space: nowrap; }.human-stage-note { min-width: 160px; }.stage-row-actions { display: flex; gap: 2px; white-space: nowrap; }.template-stage-summary { color: var(--text-muted); line-height: 1.6; }.template-option-detail { display: block; margin-top: 3px; }.stage-overview-panel { grid-column: 1 / -1; }.process-stage-timeline { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }.process-stage-timeline li { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }.process-stage-timeline li:last-child { border-bottom: 0; }.process-stage-timeline li.active { color: var(--primary); }.process-stage-timeline li.complete { opacity: .72; }.timeline-index { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #e9edf0; color: #66737c; font-size: 12px; font-weight: 800; }.process-stage-timeline li.active .timeline-index { background: #dceee7; color: #175c50; }.process-stage-timeline strong, .process-stage-timeline small { display: block; }.process-stage-timeline small { margin-top: 3px; color: var(--text-muted); font-size: 12px; }
 .remark-box { display: grid; gap: 10px; }

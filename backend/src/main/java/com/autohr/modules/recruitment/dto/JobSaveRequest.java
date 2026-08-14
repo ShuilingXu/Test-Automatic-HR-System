@@ -15,7 +15,9 @@ public class JobSaveRequest {
     @NotBlank(message = "招聘岗位名称必填")
     private String jobTitle;
 
-    @NotBlank(message = "招聘部门必填")
+    @NotNull(message = "招聘部门必填")
+    private Long departmentId;
+
     private String departmentName;
 
     private String workLocation;

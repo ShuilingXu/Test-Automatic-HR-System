@@ -52,7 +52,7 @@
             <p>{{ candidate.selfIntroduction || '未填写' }}</p>
           </div>
           <div class="action-row">
-            <a v-if="candidate.resumeFileId" class="link-chip" :href="resumeUrl(candidate.resumeFileId)" target="_blank">打开简历文件</a>
+            <el-button v-if="candidate.resumeFileId" @click="openResume(candidate.resumeFileId)">打开简历文件</el-button>
             <el-button :disabled="!canReevaluateResumeLlm" :loading="reevaluating" @click="reevaluateResumeLlm">{{ resumeLlmReevaluateLabel }}</el-button>
             <el-button v-if="!candidate.interviewProcessId" :loading="startingInterview" @click="startCandidateInterview">发起面试</el-button>
             <el-button v-if="!candidate.interviewProcessId" type="danger" :loading="rejectingResume" @click="rejectCandidateResume">面试拒绝</el-button>
@@ -90,7 +90,7 @@ const resumeLlmReevaluateLabel = computed(() => canReevaluateResumeLlm.value ? '
 const enabledTemplates = computed(() => templates.value.filter((item) => item.status === 1))
 const selectedTemplate = computed(() => enabledTemplates.value.find((item) => item.id === selectedTemplateId.value) || null)
 
-function resumeUrl(id) { return recruitmentApi.getResumeUrl(id) }
+async function openResume(id) { try { await recruitmentApi.openResume(id) } catch (error) { ElMessage.error(error.message || '简历文件打开失败') } }
 function resumeLlmStatusLabel(status) { return ({ PENDING: '评分中', COMPLETED: '已完成', FAILED: '评分失败' })[status] || '-' }
 
 async function loadCandidate() {

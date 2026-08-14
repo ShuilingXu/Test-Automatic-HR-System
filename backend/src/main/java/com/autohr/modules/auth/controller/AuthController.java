@@ -13,10 +13,12 @@ import com.autohr.modules.auth.dto.SessionUserVO;
 import com.autohr.modules.auth.dto.UserAdminUpdateRequest;
 import com.autohr.modules.auth.dto.VerificationCodeRequest;
 import com.autohr.modules.auth.service.AuthService;
+import com.autohr.modules.auth.service.AuthRateLimitService;
 import com.autohr.modules.auth.service.AuditLogService;
 import com.autohr.modules.auth.service.CaptchaService;
 import com.autohr.modules.auth.service.VerificationCodeService;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -39,14 +41,17 @@ public class AuthController {
     private final AuditLogService auditLogService;
     private final VerificationCodeService verificationCodeService;
     private final CaptchaService captchaService;
+    private final AuthRateLimitService authRateLimitService;
 
     @GetMapping("/captcha")
-    public ApiResponse<CaptchaVO> captcha() {
+    public ApiResponse<CaptchaVO> captcha(HttpServletRequest request) {
+        authRateLimitService.checkCaptchaIssue(request);
         return ApiResponse.success(captchaService.createCaptcha());
     }
 
     @PostMapping("/login")
-    public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
+    public ApiResponse<LoginResponse> login(HttpServletRequest httpRequest, @Valid @RequestBody LoginRequest request) {
+        authRateLimitService.checkLogin(httpRequest, request.getUsername());
         return ApiResponse.success(authService.login(request));
     }
 
@@ -56,13 +61,15 @@ public class AuthController {
     }
 
     @PostMapping("/register/code")
-    public ApiResponse<Void> sendRegisterCode(@RequestBody VerificationCodeRequest request) {
+    public ApiResponse<Void> sendRegisterCode(HttpServletRequest httpRequest, @RequestBody VerificationCodeRequest request) {
+        authRateLimitService.checkVerificationSend(httpRequest, "register", request.getMobilePhone(), request.getEmail());
         verificationCodeService.sendRegisterCode(request.getMobilePhone(), request.getEmail(), request.getCaptchaId(), request.getCaptchaCode());
         return ApiResponse.success("验证码已发送", null);
     }
 
     @PostMapping("/password-reset/code")
-    public ApiResponse<Void> sendPasswordResetCode(@RequestBody VerificationCodeRequest request) {
+    public ApiResponse<Void> sendPasswordResetCode(HttpServletRequest httpRequest, @RequestBody VerificationCodeRequest request) {
+        authRateLimitService.checkVerificationSend(httpRequest, "password-reset", request.getMobilePhone(), request.getEmail());
         if (authService.canResetPassword(request.getMobilePhone(), request.getEmail())) {
             verificationCodeService.sendPasswordResetCode(request.getMobilePhone(), request.getEmail(), request.getCaptchaId(), request.getCaptchaCode());
         }
@@ -111,8 +118,8 @@ public class AuthController {
 
     @PostMapping("/admin/users/{id}")
     public ApiResponse<SessionUserVO> updateUser(Authentication authentication,
-                                                 @PathVariable Long id,
-                                                 @RequestBody UserAdminUpdateRequest request) {
+                                                  @PathVariable Long id,
+                                                  @Valid @RequestBody UserAdminUpdateRequest request) {
         SessionUserVO current = authService.loadUserByUsername(authentication.getName());
         SessionUserVO updated = authService.updateUserByAdmin(id, request, current.getRoleCode());
         String action = request.getNewPassword() == null || request.getNewPassword().isBlank() ? "UPDATE_USER" : "RESET_USER_PASSWORD";

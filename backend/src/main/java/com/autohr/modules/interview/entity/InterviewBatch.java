@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 @TableName("interview_batch")
 public class InterviewBatch {
 
-    @TableId(type = IdType.INPUT)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private String batchCode;

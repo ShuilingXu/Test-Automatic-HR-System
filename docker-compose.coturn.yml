@@ -16,3 +16,4 @@ services:
     command:
       - -c
       - /etc/coturn/turnserver.conf
+      - --static-auth-secret=${INTERVIEW_TURN_SHARED_SECRET:?INTERVIEW_TURN_SHARED_SECRET must be set in .env}

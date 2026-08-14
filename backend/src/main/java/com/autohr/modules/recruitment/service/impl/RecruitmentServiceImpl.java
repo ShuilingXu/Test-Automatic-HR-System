@@ -7,6 +7,8 @@ import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.auth.entity.SysUser;
 import com.autohr.modules.auth.mapper.SysUserMapper;
 import com.autohr.modules.auth.service.AuditLogService;
+import com.autohr.modules.hr.entity.Department;
+import com.autohr.modules.hr.mapper.DepartmentMapper;
 import com.autohr.modules.interview.entity.InterviewProcess;
 import com.autohr.modules.interview.entity.InterviewAiRecord;
 import com.autohr.modules.interview.entity.InterviewCandidate;
@@ -50,11 +52,13 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import javax.imageio.ImageIO;
 import java.util.Set;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
@@ -66,6 +70,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -82,6 +87,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     private final RecruitmentJobMapper jobMapper;
     private final RecruitmentCandidateMapper candidateMapper;
     private final RecruitmentResumeFileMapper resumeFileMapper;
+    private final DepartmentMapper departmentMapper;
     private final SysUserMapper sysUserMapper;
     private final AuditLogService auditLogService;
     private final InterviewProcessMapper interviewProcessMapper;
@@ -114,6 +120,12 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         RecruitmentJob job = request.getId() == null ? new RecruitmentJob() : requireJob(request.getId());
         String existingCode = job.getJobCode();
         BeanUtils.copyProperties(request, job);
+        Department department = departmentMapper.selectById(request.getDepartmentId());
+        if (department == null || !Objects.equals(department.getStatus(), 1)) {
+            throw new BusinessException("招聘部门不存在或已停用");
+        }
+        job.setDepartmentId(department.getId());
+        job.setDepartmentName(department.getDepartmentName());
         if (StrUtil.isBlank(job.getJobCode())) {
             job.setJobCode(request.getId() == null ? buildJobCode(request.getJobTitle()) : existingCode);
         }
@@ -121,7 +133,6 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         job.setStatus(Objects.requireNonNullElse(request.getStatus(), 1));
         job.setPublishDate(Objects.requireNonNullElse(request.getPublishDate(), LocalDate.now()));
         if (request.getId() == null) {
-            job.setId(nextId(jobMapper.selectList(null).stream().map(RecruitmentJob::getId).toList()));
             jobMapper.insert(job);
         } else {
             jobMapper.updateById(job);
@@ -177,7 +188,6 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         }
         RecruitmentCandidate candidate = new RecruitmentCandidate();
         BeanUtils.copyProperties(request, candidate);
-        candidate.setId(nextId(candidateMapper.selectList(null).stream().map(RecruitmentCandidate::getId).toList()));
         candidate.setApplicationStatus("SUBMITTED");
         candidate.setIntervieweeUserId(user.getId());
         candidate.setResumeLlmStatus("PENDING");
@@ -318,7 +328,6 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             List<RecruitmentResumeFile> previousResumeFiles = resumeFileMapper.selectList(new LambdaQueryWrapper<RecruitmentResumeFile>()
                     .eq(RecruitmentResumeFile::getCandidateId, candidateId));
             RecruitmentResumeFile resumeFile = new RecruitmentResumeFile();
-            resumeFile.setId(nextId(resumeFileMapper.selectList(null).stream().map(RecruitmentResumeFile::getId).toList()));
             resumeFile.setCandidateId(candidateId);
             resumeFile.setOriginalFileName(originalName);
             resumeFile.setStoredFileName(storedName);
@@ -441,12 +450,30 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         builder.redirectErrorStream(true);
         try {
             Process process = builder.start();
+            AtomicReference<String> outputRef = new AtomicReference<>("");
+            AtomicReference<IOException> outputFailure = new AtomicReference<>();
+            Thread outputReader = new Thread(() -> {
+                try {
+                    outputRef.set(readProcessOutput(process.getInputStream()));
+                } catch (IOException ex) {
+                    outputFailure.set(ex);
+                }
+            }, "tesseract-output-reader");
+            outputReader.setDaemon(true);
+            outputReader.start();
             boolean exited = process.waitFor(60, TimeUnit.SECONDS);
-            String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
             if (!exited) {
                 process.destroyForcibly();
+                process.waitFor(10, TimeUnit.SECONDS);
+                outputReader.join(TimeUnit.SECONDS.toMillis(10));
                 throw new BusinessException("OCR识别超时，请降低RESUME_OCR_MAX_PAGES或检查Tesseract性能");
             }
+            outputReader.join(TimeUnit.SECONDS.toMillis(10));
+            if (outputReader.isAlive() || outputFailure.get() != null) {
+                outputReader.interrupt();
+                throw new BusinessException("OCR output could not be read");
+            }
+            String output = outputRef.get();
             if (process.exitValue() != 0) {
                 throw new BusinessException("OCR识别失败: " + abbreviate(output, 500));
             }
@@ -457,6 +484,20 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             Thread.currentThread().interrupt();
             throw new BusinessException("OCR识别被中断");
         }
+    }
+
+    private String readProcessOutput(InputStream inputStream) throws IOException {
+        final int maxOutputBytes = 8192;
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[1024];
+        int read;
+        while ((read = inputStream.read(buffer)) != -1) {
+            int remaining = maxOutputBytes - output.size();
+            if (remaining > 0) {
+                output.write(buffer, 0, Math.min(read, remaining));
+            }
+        }
+        return output.toString(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private void deleteDirectoryQuietly(Path directory) {
@@ -641,7 +682,12 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     }
 
     private String sanitizeOriginalFileName(String originalFileName) {
-        String fileName = Paths.get(Objects.requireNonNullElse(originalFileName, "resume.pdf")).getFileName().toString().trim();
+        String fileName;
+        try {
+            fileName = Paths.get(Objects.requireNonNullElse(originalFileName, "resume.pdf")).getFileName().toString().trim();
+        } catch (InvalidPathException ex) {
+            throw new BusinessException("Invalid resume file name");
+        }
         if (fileName.length() > 120) {
             fileName = fileName.substring(fileName.length() - 120);
         }
@@ -757,7 +803,4 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         return StrUtil.blankToDefault(user.getDisplayName(), user.getUsername());
     }
 
-    private Long nextId(List<Long> ids) {
-        return ids.stream().filter(Objects::nonNull).max(Long::compareTo).map(id -> id + 1).orElse(1L);
-    }
 }

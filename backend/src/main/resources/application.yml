@@ -20,18 +20,39 @@ spring:
     multipart:
       max-file-size: 100MB
       max-request-size: 105MB
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL_ENABLED:false}
+      timeout: ${REDIS_TIMEOUT:3s}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:2s}
 
 mybatis-plus:
   mapper-locations: classpath:mapper/**/*.xml
   type-aliases-package: com.autohr.modules.**.entity
   global-config:
     db-config:
-      id-type: input
+      id-type: auto
 
 jwt:
   secret: ${JWT_SECRET}
   expiration: ${JWT_EXPIRATION:86400000}
   header: Authorization
+
+auth:
+  security:
+    redis-key-prefix: ${AUTH_REDIS_KEY_PREFIX:autohr:auth}
+    trust-forwarded-headers: ${AUTH_TRUST_FORWARDED_HEADERS:false}
+    rate-limit:
+      window-seconds: ${AUTH_RATE_LIMIT_WINDOW_SECONDS:60}
+      login-per-ip: ${AUTH_LOGIN_RATE_LIMIT_PER_IP:10}
+      login-per-username: ${AUTH_LOGIN_RATE_LIMIT_PER_USERNAME:10}
+      captcha-per-ip: ${AUTH_CAPTCHA_RATE_LIMIT_PER_IP:30}
+      verification-per-ip: ${AUTH_VERIFICATION_RATE_LIMIT_PER_IP:5}
+      verification-per-target: ${AUTH_VERIFICATION_RATE_LIMIT_PER_TARGET:3}
 
 interview:
   llm:
@@ -41,8 +62,8 @@ interview:
   webrtc:
     stun-urls: ${INTERVIEW_STUN_URLS:stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478}
     turn-urls: ${INTERVIEW_TURN_URLS:}
-    turn-username: ${INTERVIEW_TURN_USERNAME:}
-    turn-credential: ${INTERVIEW_TURN_CREDENTIAL:}
+    turn-shared-secret: ${INTERVIEW_TURN_SHARED_SECRET:}
+    turn-credential-ttl-seconds: ${INTERVIEW_TURN_CREDENTIAL_TTL_SECONDS:3600}
   video:
     ffmpeg-path: ${INTERVIEW_VIDEO_FFMPEG_PATH:${FFMPEG_PATH:ffmpeg}}
     video-codec: ${INTERVIEW_VIDEO_VIDEO_CODEC:libvpx-vp9}

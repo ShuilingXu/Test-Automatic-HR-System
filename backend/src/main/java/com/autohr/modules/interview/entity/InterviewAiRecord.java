@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 @Data
 @TableName("interview_ai_record")
 public class InterviewAiRecord {
-    @TableId(type = IdType.INPUT)
+    @TableId(type = IdType.AUTO)
     private Long id;
     private Long processId;
     private Long processStageId;

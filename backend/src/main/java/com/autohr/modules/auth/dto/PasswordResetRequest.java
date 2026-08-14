@@ -16,7 +16,8 @@ public class PasswordResetRequest {
     private String verificationCode;
 
     @NotBlank(message = "new password is required")
-    @Size(min = 6, message = "new password must contain at least 6 characters")
+    @Size(min = 8, message = "new password must contain at least 8 characters")
+    @Pattern(regexp = "^(?=.*[A-Za-z])(?=.*\\d).{8,}$", message = "new password must contain both letters and numbers")
     private String newPassword;
 
     @AssertTrue(message = "provide exactly one of mobilePhone or email")

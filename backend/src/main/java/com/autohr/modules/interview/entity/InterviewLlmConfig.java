@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 @Data
 @TableName("interview_llm_config")
 public class InterviewLlmConfig {
-    @TableId(type = IdType.INPUT)
+    @TableId(type = IdType.AUTO)
     private Long id;
     private String configName;
     private String modelRole;

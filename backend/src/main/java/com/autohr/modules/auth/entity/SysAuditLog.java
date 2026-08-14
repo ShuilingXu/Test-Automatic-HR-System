@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 @Data
 @TableName("sys_audit_log")
 public class SysAuditLog {
-    @TableId(type = IdType.INPUT)
+    @TableId(type = IdType.AUTO)
     private Long id;
     private Long operatorUserId;
     private String operatorUsername;

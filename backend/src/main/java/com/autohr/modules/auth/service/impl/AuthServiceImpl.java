@@ -15,6 +15,7 @@ import com.autohr.modules.auth.mapper.SysUserMapper;
 import com.autohr.modules.auth.service.AuthService;
 import com.autohr.modules.auth.service.CaptchaService;
 import com.autohr.modules.auth.service.JwtService;
+import com.autohr.modules.auth.service.PasswordPolicy;
 import com.autohr.modules.auth.service.VerificationCodeService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -36,6 +38,7 @@ import java.util.Set;
 public class AuthServiceImpl implements AuthService {
 
     private static final Set<String> DEFAULT_USERNAMES = Set.of("itadmin", "hradmin", "hruser");
+    private static final Set<String> ALLOWED_ROLE_CODES = Set.of("IT_ADMIN", "HR_ADMIN", "HR_USER", "INTERVIEWEE");
     private static final List<String> USER_REFERENCE_QUERIES = List.of(
             "SELECT COUNT(*) FROM recruitment_candidate WHERE interviewee_user_id = ?",
             "SELECT COUNT(*) FROM interview_process WHERE interviewee_user_id = ? OR approved_hr_user_id = ?",
@@ -73,6 +76,7 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public SessionUserVO registerCandidate(CandidateRegisterRequest request) {
         captchaService.verifyCaptcha(request.getCaptchaId(), request.getCaptchaCode());
+        PasswordPolicy.requireStrongPassword(request.getPassword());
         boolean hasPhone = StrUtil.isNotBlank(request.getMobilePhone());
         boolean hasEmail = StrUtil.isNotBlank(request.getEmail());
         if (hasPhone == hasEmail) {
@@ -81,18 +85,23 @@ public class AuthServiceImpl implements AuthService {
         verificationCodeService.verifyRegisterCode(request.getMobilePhone(), request.getEmail(), request.getVerificationCode());
         ensureUniqueUsername(request.getUsername());
         SysUser user = new SysUser();
-        user.setId(nextId(sysUserMapper.selectList(null).stream().map(SysUser::getId).toList()));
         user.setUsername(request.getUsername());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setRoleCode("INTERVIEWEE");
         user.setDisplayName(request.getDisplayName());
         user.setMobilePhone(request.getMobilePhone());
         user.setEmail(request.getEmail());
+        updateNormalizedContacts(user);
+        ensureUniqueContacts(user.getMobilePhoneNormalized(), user.getEmailNormalized(), null);
         user.setStatus(1);
         user.setProfileCompleted(0);
         user.setTokenVersion(0);
         user.setMustChangePassword(0);
-        sysUserMapper.insert(user);
+        try {
+            sysUserMapper.insert(user);
+        } catch (DataIntegrityViolationException ex) {
+            throw new BusinessException("注册请求冲突，请稍后重试");
+        }
         return toSessionUser(user);
     }
 
@@ -115,8 +124,10 @@ public class AuthServiceImpl implements AuthService {
         if (StrUtil.isBlank(user.getMobilePhone()) && StrUtil.isBlank(user.getEmail())) {
             throw new BusinessException("手机号和邮箱至少需要保留一种");
         }
+        updateNormalizedContacts(user);
+        ensureUniqueContacts(user.getMobilePhoneNormalized(), user.getEmailNormalized(), user.getId());
         user.setProfileCompleted(1);
-        sysUserMapper.updateById(user);
+        updateUserContacts(user);
         return toSessionUser(user);
     }
 
@@ -149,12 +160,18 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException("HR管理员仅可维护HR用户和面试者用户");
         }
         if (StrUtil.isNotBlank(request.getRoleCode())) {
+            if (!ALLOWED_ROLE_CODES.contains(request.getRoleCode())) {
+                throw new BusinessException("不支持的用户角色");
+            }
             if (StrUtil.equals(operatorRoleCode, "HR_ADMIN") && !(StrUtil.equals(request.getRoleCode(), "HR_USER") || StrUtil.equals(request.getRoleCode(), "INTERVIEWEE"))) {
                 throw new BusinessException("HR管理员仅可授予HR用户或面试者角色");
             }
             user.setRoleCode(request.getRoleCode());
         }
         if (request.getStatus() != null) {
+            if (!Set.of(0, 1).contains(request.getStatus())) {
+                throw new BusinessException("用户状态仅支持启用或停用");
+            }
             user.setStatus(request.getStatus());
         }
         if (request.getDisplayName() != null) {
@@ -167,14 +184,14 @@ public class AuthServiceImpl implements AuthService {
             user.setEmail(request.getEmail());
         }
         if (StrUtil.isNotBlank(request.getNewPassword())) {
-            if (request.getNewPassword().length() < 6) {
-                throw new BusinessException("新密码长度不能少于6位");
-            }
+            PasswordPolicy.requireStrongPassword(request.getNewPassword());
             user.setPassword(passwordEncoder.encode(request.getNewPassword()));
             user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
             user.setMustChangePassword(1);
         }
-        sysUserMapper.updateById(user);
+        updateNormalizedContacts(user);
+        ensureUniqueContacts(user.getMobilePhoneNormalized(), user.getEmailNormalized(), user.getId());
+        updateUserContacts(user);
         return toSessionUser(user);
     }
 
@@ -207,6 +224,7 @@ public class AuthServiceImpl implements AuthService {
         if (user == null) {
             throw new BusinessException("验证码无效或已过期");
         }
+        PasswordPolicy.requireStrongPassword(request.getNewPassword());
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         user.setMustChangePassword(0);
         user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
@@ -223,6 +241,7 @@ public class AuthServiceImpl implements AuthService {
         if (passwordEncoder.matches(request.getNewPassword(), user.getPassword())) {
             throw new BusinessException("新密码不能与当前密码相同");
         }
+        PasswordPolicy.requireStrongPassword(request.getNewPassword());
         user.setPassword(passwordEncoder.encode(request.getNewPassword()));
         user.setMustChangePassword(0);
         user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
@@ -270,10 +289,49 @@ public class AuthServiceImpl implements AuthService {
         }
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<SysUser>()
                 .eq(SysUser::getStatus, 1)
-                .eq(hasPhone, SysUser::getMobilePhone, mobilePhone == null ? null : mobilePhone.trim())
-                .apply(hasEmail, "LOWER(email) = {0}", email == null ? null : email.trim().toLowerCase(Locale.ROOT));
-        List<SysUser> matches = sysUserMapper.selectList(wrapper);
-        return matches.size() == 1 ? matches.get(0) : null;
+                .eq(hasPhone, SysUser::getMobilePhoneNormalized, normalizeMobilePhone(mobilePhone))
+                .eq(hasEmail, SysUser::getEmailNormalized, normalizeEmail(email))
+                .last("LIMIT 1");
+        return sysUserMapper.selectOne(wrapper);
+    }
+
+    private void updateNormalizedContacts(SysUser user) {
+        user.setMobilePhoneNormalized(normalizeMobilePhone(user.getMobilePhone()));
+        user.setEmailNormalized(normalizeEmail(user.getEmail()));
+    }
+
+    private String normalizeMobilePhone(String value) {
+        return StrUtil.isBlank(value) ? null : value.trim();
+    }
+
+    private String normalizeEmail(String value) {
+        return StrUtil.isBlank(value) ? null : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private void ensureUniqueContacts(String normalizedMobilePhone, String normalizedEmail, Long currentUserId) {
+        if (normalizedMobilePhone != null && hasContactConflict(SysUser::getMobilePhoneNormalized, normalizedMobilePhone, currentUserId)) {
+            throw new BusinessException("手机号已被其他账号使用");
+        }
+        if (normalizedEmail != null && hasContactConflict(SysUser::getEmailNormalized, normalizedEmail, currentUserId)) {
+            throw new BusinessException("邮箱已被其他账号使用");
+        }
+    }
+
+    private boolean hasContactConflict(com.baomidou.mybatisplus.core.toolkit.support.SFunction<SysUser, String> field,
+                                       String value, Long currentUserId) {
+        LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<SysUser>().eq(field, value);
+        if (currentUserId != null) {
+            wrapper.ne(SysUser::getId, currentUserId);
+        }
+        return sysUserMapper.selectCount(wrapper) > 0;
+    }
+
+    private void updateUserContacts(SysUser user) {
+        try {
+            sysUserMapper.updateById(user);
+        } catch (DataIntegrityViolationException ex) {
+            throw new BusinessException("手机号或邮箱已被其他账号使用，请刷新后重试");
+        }
     }
 
     private void assertAdminCanManageUser(SysUser user, String operatorRoleCode) {
@@ -309,7 +367,4 @@ public class AuthServiceImpl implements AuthService {
         return vo;
     }
 
-    private Long nextId(List<Long> ids) {
-        return ids.stream().filter(Objects::nonNull).max(Long::compareTo).map(id -> id + 1).orElse(1L);
-    }
 }

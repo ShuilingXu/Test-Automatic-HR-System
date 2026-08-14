@@ -58,9 +58,10 @@ CREATE INDEX IF NOT EXISTS idx_hr_integration_binding_module_code ON hr_integrat
 CREATE INDEX IF NOT EXISTS idx_hr_integration_binding_employee_id ON hr_integration_binding(employee_id);
 
 CREATE TABLE IF NOT EXISTS recruitment_job (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_code VARCHAR(64) NOT NULL UNIQUE,
     job_title VARCHAR(128) NOT NULL,
+    department_id INTEGER,
     department_name VARCHAR(128) NOT NULL,
     work_location VARCHAR(128),
     job_type VARCHAR(64),
@@ -72,11 +73,12 @@ CREATE TABLE IF NOT EXISTS recruitment_job (
     close_date DATE,
     status INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (department_id) REFERENCES hr_department(id)
 );
 
 CREATE TABLE IF NOT EXISTS recruitment_candidate (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id INTEGER NOT NULL,
     full_name VARCHAR(64) NOT NULL,
     mobile_phone VARCHAR(32) NOT NULL,
@@ -103,7 +105,7 @@ CREATE TABLE IF NOT EXISTS recruitment_candidate (
 );
 
 CREATE TABLE IF NOT EXISTS recruitment_resume_file (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     candidate_id INTEGER NOT NULL,
     original_file_name VARCHAR(255) NOT NULL,
     stored_file_name VARCHAR(255) NOT NULL,
@@ -116,12 +118,13 @@ CREATE TABLE IF NOT EXISTS recruitment_resume_file (
 );
 
 CREATE INDEX IF NOT EXISTS idx_recruitment_job_status ON recruitment_job(status);
+CREATE INDEX IF NOT EXISTS idx_recruitment_job_department_id ON recruitment_job(department_id);
 CREATE INDEX IF NOT EXISTS idx_recruitment_candidate_job_id ON recruitment_candidate(job_id);
 CREATE INDEX IF NOT EXISTS idx_recruitment_candidate_status ON recruitment_candidate(application_status);
 CREATE INDEX IF NOT EXISTS idx_recruitment_resume_candidate_id ON recruitment_resume_file(candidate_id);
 
 CREATE TABLE IF NOT EXISTS interview_batch (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     batch_code VARCHAR(64) NOT NULL UNIQUE,
     batch_name VARCHAR(128) NOT NULL,
     job_id INTEGER,
@@ -134,7 +137,7 @@ CREATE TABLE IF NOT EXISTS interview_batch (
 );
 
 CREATE TABLE IF NOT EXISTS interview_question (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     question_title VARCHAR(128) NOT NULL,
     question_type VARCHAR(32) NOT NULL DEFAULT 'TEXT',
     difficulty VARCHAR(32),
@@ -148,7 +151,7 @@ CREATE TABLE IF NOT EXISTS interview_question (
 );
 
 CREATE TABLE IF NOT EXISTS interview_candidate (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     batch_id INTEGER NOT NULL,
     recruitment_candidate_id INTEGER NOT NULL,
     candidate_name VARCHAR(64) NOT NULL,
@@ -162,7 +165,7 @@ CREATE TABLE IF NOT EXISTS interview_candidate (
 );
 
 CREATE TABLE IF NOT EXISTS interview_submission (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     interview_candidate_id INTEGER NOT NULL,
     question_id INTEGER NOT NULL,
     answer_content VARCHAR(5000) NOT NULL,
@@ -180,13 +183,15 @@ CREATE INDEX IF NOT EXISTS idx_interview_candidate_batch_id ON interview_candida
 CREATE INDEX IF NOT EXISTS idx_interview_submission_candidate_id ON interview_submission(interview_candidate_id);
 
 CREATE TABLE IF NOT EXISTS sys_user (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     username VARCHAR(64) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     role_code VARCHAR(32) NOT NULL,
     display_name VARCHAR(64),
     mobile_phone VARCHAR(32),
+    mobile_phone_normalized VARCHAR(32),
     email VARCHAR(128),
+    email_normalized VARCHAR(128),
     status INTEGER NOT NULL DEFAULT 1,
     profile_completed INTEGER NOT NULL DEFAULT 0,
     token_version INTEGER NOT NULL DEFAULT 0,
@@ -196,9 +201,11 @@ CREATE TABLE IF NOT EXISTS sys_user (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sys_user_username ON sys_user(username);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sys_user_mobile_phone_normalized ON sys_user(mobile_phone_normalized);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sys_user_email_normalized ON sys_user(email_normalized);
 
 CREATE TABLE IF NOT EXISTS sys_audit_log (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     operator_user_id INTEGER,
     operator_username VARCHAR(64),
     operator_role_code VARCHAR(32),
@@ -214,7 +221,7 @@ CREATE TABLE IF NOT EXISTS sys_audit_log (
 CREATE INDEX IF NOT EXISTS idx_sys_audit_log_module_code ON sys_audit_log(module_code);
 
 CREATE TABLE IF NOT EXISTS interview_knowledge_base (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     knowledge_base_name VARCHAR(128) NOT NULL,
     tech_category VARCHAR(128),
     job_category VARCHAR(128),
@@ -224,7 +231,7 @@ CREATE TABLE IF NOT EXISTS interview_knowledge_base (
 );
 
 CREATE TABLE IF NOT EXISTS interview_knowledge_item (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     knowledge_base_id INTEGER NOT NULL,
     knowledge_point VARCHAR(255) NOT NULL,
     knowledge_content VARCHAR(5000) NOT NULL,
@@ -235,7 +242,7 @@ CREATE TABLE IF NOT EXISTS interview_knowledge_item (
 );
 
 CREATE TABLE IF NOT EXISTS interview_job_knowledge_weight (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id INTEGER NOT NULL,
     knowledge_base_id INTEGER NOT NULL,
     weight INTEGER NOT NULL DEFAULT 1,
@@ -244,7 +251,7 @@ CREATE TABLE IF NOT EXISTS interview_job_knowledge_weight (
 );
 
 CREATE TABLE IF NOT EXISTS interview_llm_config (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     config_name VARCHAR(128) NOT NULL,
     model_role VARCHAR(32) NOT NULL,
     base_url VARCHAR(255) NOT NULL,
@@ -258,7 +265,7 @@ CREATE TABLE IF NOT EXISTS interview_llm_config (
 );
 
 CREATE TABLE IF NOT EXISTS interview_process (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     recruitment_candidate_id INTEGER NOT NULL,
     interviewee_user_id INTEGER,
     job_id INTEGER NOT NULL,
@@ -288,7 +295,7 @@ CREATE TABLE IF NOT EXISTS interview_process (
 );
 
 CREATE TABLE IF NOT EXISTS interview_ai_record (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     process_id INTEGER NOT NULL,
     process_stage_id INTEGER,
     knowledge_base_id INTEGER,
@@ -305,7 +312,7 @@ CREATE TABLE IF NOT EXISTS interview_ai_record (
 );
 
 CREATE TABLE IF NOT EXISTS interview_video_session (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     process_id INTEGER NOT NULL,
     process_stage_id INTEGER,
     video_serial_no VARCHAR(128) NOT NULL,
@@ -340,7 +347,7 @@ CREATE TABLE IF NOT EXISTS interview_video_session (
 );
 
 CREATE TABLE IF NOT EXISTS interview_process_template (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     template_name VARCHAR(128) NOT NULL,
     description VARCHAR(1000),
     status INTEGER NOT NULL DEFAULT 1,
@@ -349,7 +356,7 @@ CREATE TABLE IF NOT EXISTS interview_process_template (
 );
 
 CREATE TABLE IF NOT EXISTS interview_process_template_stage (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     template_id INTEGER NOT NULL,
     stage_name VARCHAR(128) NOT NULL,
     stage_type VARCHAR(32) NOT NULL,
@@ -360,7 +367,7 @@ CREATE TABLE IF NOT EXISTS interview_process_template_stage (
 );
 
 CREATE TABLE IF NOT EXISTS interview_process_stage (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     process_id INTEGER NOT NULL,
     template_stage_id INTEGER,
     stage_name VARCHAR(128) NOT NULL,

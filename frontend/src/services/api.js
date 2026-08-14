@@ -29,13 +29,26 @@ request.interceptors.response.use(
   },
 )
 
-function authenticatedFileUrl(path, params = {}) {
-  const token = window.localStorage.getItem('demo-token')
+async function openAuthorizedFile(path, params = {}) {
   const normalizedPath = path.startsWith('/api') ? path.slice(4) : path
-  const baseUrl = `${apiBaseUrl.replace(/\/$/, '')}${normalizedPath}`
-  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== null && value !== undefined && value !== '')).toString()
-  const url = query ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${query}` : baseUrl
-  return token ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : url
+  const popup = window.open('about:blank', '_blank')
+  try {
+    popup && (popup.opener = null)
+    const blob = await request.get(normalizedPath, { params, responseType: 'blob' })
+    const objectUrl = URL.createObjectURL(blob)
+    if (popup) {
+      popup.location.replace(objectUrl)
+    } else {
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.target = '_blank'
+      link.click()
+    }
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+  } catch (error) {
+    popup?.close()
+    throw error
+  }
 }
 
 export const hrApi = {
@@ -67,7 +80,7 @@ export const recruitmentApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
-  getResumeUrl(id) { return authenticatedFileUrl(`/api/recruitment/resumes/${id}`) },
+  openResume(id) { return openAuthorizedFile(`/api/recruitment/resumes/${id}`) },
 }
 
 export const authApi = {
@@ -172,8 +185,8 @@ export const interviewApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
-  getRecordingUrl(processId, processStageId) { return authenticatedFileUrl(`/api/interview/hr/video-recording/${processId}`, { processStageId }) },
-  getAiRecordingUrl(processId, processStageId) { return authenticatedFileUrl(`/api/interview/hr/ai-recording/${processId}`, { processStageId }) },
+  openRecording(processId, processStageId) { return openAuthorizedFile(`/api/interview/hr/video-recording/${processId}`, { processStageId }) },
+  openAiRecording(processId, processStageId) { return openAuthorizedFile(`/api/interview/hr/ai-recording/${processId}`, { processStageId }) },
   retryVideoSummary(processId) { return request.post(`/interview/hr/video-summary/${processId}/retry`) },
   intervieweeJoin(processId) { return request.post(`/interview/interviewee/video-join/${processId}`) },
   hrJoin(processId) { return request.post(`/interview/hr/video-join/${processId}`) },

@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 @TableName("recruitment_resume_file")
 public class RecruitmentResumeFile {
 
-    @TableId(type = IdType.INPUT)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private Long candidateId;

@@ -30,6 +30,7 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi } from '../services/api'
+import { isStrongPassword, strongPasswordMessage } from '../utils/password'
 
 const router = useRouter()
 const submitting = ref(false)
@@ -40,8 +41,8 @@ function targetByRole(roleCode) {
 }
 
 async function submit() {
-  if (form.newPassword.length < 6) {
-    ElMessage.warning('新密码长度不能少于6位')
+  if (!isStrongPassword(form.newPassword)) {
+    ElMessage.warning(strongPasswordMessage)
     return
   }
   if (form.newPassword !== form.confirmPassword) {

@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 @TableName("sys_user")
 public class SysUser {
 
-    @TableId(type = IdType.INPUT)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private String username;
@@ -21,7 +21,9 @@ public class SysUser {
     private String roleCode;
     private String displayName;
     private String mobilePhone;
+    private String mobilePhoneNormalized;
     private String email;
+    private String emailNormalized;
     private Integer status;
     private Integer profileCompleted;
     private Integer tokenVersion;

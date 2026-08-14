@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -26,6 +27,15 @@ import java.util.List;
 public class DatabaseMigrationRunner implements CommandLineRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrationRunner.class);
+    private static final List<String> PRIMARY_KEY_TABLES = List.of(
+            "hr_department", "hr_employee", "hr_integration_binding",
+            "recruitment_job", "recruitment_candidate", "recruitment_resume_file",
+            "interview_batch", "interview_question", "interview_candidate", "interview_submission",
+            "sys_user", "sys_audit_log",
+            "interview_knowledge_base", "interview_knowledge_item", "interview_job_knowledge_weight",
+            "interview_llm_config", "interview_process", "interview_ai_record", "interview_video_session",
+            "interview_process_template", "interview_process_template_stage", "interview_process_stage"
+    );
 
     private final DataSource dataSource;
     private final ActiveDatabase activeDatabase;
@@ -53,7 +63,9 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
             migrateInterviewVideoSessionColumns(connection, statement);
             migrateInterviewProcessStageColumns(connection, statement);
             migrateRecruitmentCandidateColumns(connection, statement);
+            migrateRecruitmentJobColumns(connection, statement);
             migrateSysUserColumns(connection, statement);
+            migrateDatabaseGeneratedPrimaryKeys(connection, statement);
             for (String sql : statements.stream().filter(this::isCreateIndex).toList()) {
                 execute(statement, sql);
             }
@@ -75,6 +87,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         return switch (activeDatabase.type()) {
             case SQLITE -> schema;
             case MYSQL -> schema
+                    .replace("CREATE UNIQUE INDEX IF NOT EXISTS", "CREATE UNIQUE INDEX")
                     .replace("CREATE INDEX IF NOT EXISTS", "CREATE INDEX")
                     .replace("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY AUTO_INCREMENT");
             case PGSQL -> schema
@@ -97,7 +110,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
 
     private boolean isIgnorable(String sql, SQLException ex) {
         String normalized = sql.stripLeading().toUpperCase();
-        if (normalized.startsWith("CREATE INDEX")) {
+        if (isCreateIndex(sql)) {
             String state = ex.getSQLState();
             int errorCode = ex.getErrorCode();
             return "42S11".equals(state)
@@ -110,7 +123,8 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
     }
 
     private boolean isCreateIndex(String sql) {
-        return sql.stripLeading().toUpperCase().startsWith("CREATE INDEX");
+        String normalized = sql.stripLeading().toUpperCase();
+        return normalized.startsWith("CREATE INDEX") || normalized.startsWith("CREATE UNIQUE INDEX");
     }
 
     private void migrateInterviewProcessColumns(Connection connection, Statement statement) throws SQLException {
@@ -171,6 +185,10 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "recruitment_candidate", "resume_llm_evaluated_at", dateTimeType());
     }
 
+    private void migrateRecruitmentJobColumns(Connection connection, Statement statement) throws SQLException {
+        addColumnIfMissing(connection, statement, "recruitment_job", "department_id", "INTEGER");
+    }
+
     private void addColumnIfMissing(Connection connection, Statement statement, String table, String column, String definition) throws SQLException {
         if (columnExists(connection, table, column)) {
             return;
@@ -193,11 +211,114 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
 
     private void migrateSysUserColumns(Connection connection, Statement statement) throws SQLException {
         addColumnIfMissing(connection, statement, "sys_user", "must_change_password", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, statement, "sys_user", "mobile_phone_normalized", "VARCHAR(32)");
+        addColumnIfMissing(connection, statement, "sys_user", "email_normalized", "VARCHAR(128)");
+        statement.executeUpdate("UPDATE sys_user SET mobile_phone_normalized = "
+                + "CASE WHEN mobile_phone IS NULL OR TRIM(mobile_phone) = '' THEN NULL ELSE TRIM(mobile_phone) END");
+        statement.executeUpdate("UPDATE sys_user SET email_normalized = "
+                + "CASE WHEN email IS NULL OR TRIM(email) = '' THEN NULL ELSE LOWER(TRIM(email)) END");
+        assertNoDuplicateNormalizedContacts(statement, "mobile_phone_normalized", "mobile phone");
+        assertNoDuplicateNormalizedContacts(statement, "email_normalized", "email");
+    }
+
+    private void assertNoDuplicateNormalizedContacts(Statement statement, String column, String label) throws SQLException {
+        String sql = "SELECT COUNT(*) FROM (SELECT " + column + " FROM sys_user WHERE " + column
+                + " IS NOT NULL GROUP BY " + column + " HAVING COUNT(*) > 1) duplicate_contacts";
+        try (ResultSet resultSet = statement.executeQuery(sql)) {
+            if (resultSet.next() && resultSet.getLong(1) > 0) {
+                throw new IllegalStateException("Cannot add global " + label
+                        + " uniqueness while duplicate normalized sys_user contacts exist. Resolve duplicates before deployment.");
+            }
+        }
     }
 
     private void migrateInterviewProcessStageColumns(Connection connection, Statement statement) throws SQLException {
         addColumnIfMissing(connection, statement, "interview_process_stage", "ai_recording_path", "VARCHAR(500)");
         addColumnIfMissing(connection, statement, "interview_process_stage", "ai_recording_file_name", "VARCHAR(255)");
+    }
+
+    private void migrateDatabaseGeneratedPrimaryKeys(Connection connection, Statement statement) throws SQLException {
+        switch (activeDatabase.type()) {
+            case SQLITE -> {
+                // INTEGER PRIMARY KEY is already SQLite's row-id backed generated key.
+            }
+            case MYSQL -> migrateMySqlPrimaryKeys(connection, statement);
+            case PGSQL -> migratePostgreSqlPrimaryKeys(connection, statement);
+        }
+    }
+
+    private void migrateMySqlPrimaryKeys(Connection connection, Statement statement) throws SQLException {
+        for (String table : PRIMARY_KEY_TABLES) {
+            if (!isAutoIncrement(connection, table)) {
+                statement.executeUpdate("ALTER TABLE " + table + " MODIFY COLUMN id INTEGER NOT NULL AUTO_INCREMENT");
+                log.info("Enabled AUTO_INCREMENT for {}.id", table);
+            }
+            statement.executeUpdate("ALTER TABLE " + table + " AUTO_INCREMENT = " + nextPrimaryKeyValue(connection, table));
+        }
+    }
+
+    private void migratePostgreSqlPrimaryKeys(Connection connection, Statement statement) throws SQLException {
+        for (String table : PRIMARY_KEY_TABLES) {
+            if (!hasPostgreSqlPrimaryKeyGenerator(connection, table)) {
+                statement.executeUpdate("ALTER TABLE " + table + " ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENTITY");
+                log.info("Enabled identity generation for {}.id", table);
+            }
+            alignPostgreSqlSequence(connection, table);
+        }
+    }
+
+    private boolean isAutoIncrement(Connection connection, String table) throws SQLException {
+        DatabaseMetaData metaData = connection.getMetaData();
+        try (ResultSet columns = metaData.getColumns(null, null, table, "id")) {
+            return columns.next() && "YES".equalsIgnoreCase(columns.getString("IS_AUTOINCREMENT"));
+        }
+    }
+
+    private boolean hasPostgreSqlPrimaryKeyGenerator(Connection connection, String table) throws SQLException {
+        String sql = "SELECT is_identity, column_default FROM information_schema.columns "
+                + "WHERE table_schema = current_schema() AND table_name = ? AND column_name = 'id'";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, table);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    throw new SQLException("Missing primary key column " + table + ".id");
+                }
+                String defaultValue = resultSet.getString("column_default");
+                return "YES".equalsIgnoreCase(resultSet.getString("is_identity"))
+                        || (defaultValue != null && defaultValue.toLowerCase().startsWith("nextval("));
+            }
+        }
+    }
+
+    private void alignPostgreSqlSequence(Connection connection, String table) throws SQLException {
+        String sequenceName;
+        try (PreparedStatement statement = connection.prepareStatement("SELECT pg_get_serial_sequence(?, 'id')")) {
+            statement.setString(1, table);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next() || resultSet.getString(1) == null) {
+                    throw new SQLException("Missing generated-key sequence for " + table + ".id");
+                }
+                sequenceName = resultSet.getString(1);
+            }
+        }
+        long maximumId = maximumPrimaryKeyValue(connection, table);
+        try (PreparedStatement statement = connection.prepareStatement("SELECT setval(CAST(? AS regclass), ?, ?)")) {
+            statement.setString(1, sequenceName);
+            statement.setLong(2, Math.max(maximumId, 1));
+            statement.setBoolean(3, maximumId > 0);
+            statement.execute();
+        }
+    }
+
+    private long nextPrimaryKeyValue(Connection connection, String table) throws SQLException {
+        long maximumId = maximumPrimaryKeyValue(connection, table);
+        return maximumId == Long.MAX_VALUE ? Long.MAX_VALUE : Math.max(maximumId + 1, 1);
+    }
+
+    private long maximumPrimaryKeyValue(Connection connection, String table) throws SQLException {
+        try (Statement statement = connection.createStatement(); ResultSet resultSet = statement.executeQuery("SELECT COALESCE(MAX(id), 0) FROM " + table)) {
+            return resultSet.next() ? resultSet.getLong(1) : 0;
+        }
     }
 
     private void widenColumnIfNeeded(Statement statement, String table, String column, String definition) throws SQLException {

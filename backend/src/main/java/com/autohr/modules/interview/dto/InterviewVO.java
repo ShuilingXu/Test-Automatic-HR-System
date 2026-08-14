@@ -11,6 +11,8 @@ public class InterviewVO {
     private String batchCode;
     private String batchName;
     private Long jobId;
+    private Long jobDepartmentId;
+    private String jobDepartmentName;
     private LocalDateTime startTime;
     private LocalDateTime endTime;
     private String description;

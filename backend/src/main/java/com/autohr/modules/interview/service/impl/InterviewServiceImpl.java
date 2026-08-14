@@ -5,8 +5,10 @@ import com.autohr.common.exception.BusinessException;
 import com.autohr.common.file.S3ObjectStorageService;
 import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.auth.service.AuditLogService;
+import com.autohr.modules.hr.entity.Department;
 import com.autohr.modules.hr.entity.Employee;
 import com.autohr.modules.hr.enums.EmploymentStatus;
+import com.autohr.modules.hr.mapper.DepartmentMapper;
 import com.autohr.modules.hr.mapper.EmployeeMapper;
 import com.autohr.modules.interview.dto.AiAnswerRequest;
 import com.autohr.modules.interview.dto.AntiCheatEventRequest;
@@ -55,9 +57,12 @@ import com.autohr.modules.recruitment.mapper.RecruitmentCandidateMapper;
 import com.autohr.modules.recruitment.mapper.RecruitmentJobMapper;
 import com.autohr.modules.system.service.SystemConfigService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -89,6 +94,7 @@ import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class InterviewServiceImpl implements InterviewService {
 
     private static final Pattern SDP_ICE_UFRAG_PATTERN = Pattern.compile("(?m)^a=ice-ufrag:([^\\r\\n]+)");
@@ -110,6 +116,7 @@ public class InterviewServiceImpl implements InterviewService {
     private final InterviewVideoSessionMapper videoSessionMapper;
     private final RecruitmentCandidateMapper recruitmentCandidateMapper;
     private final RecruitmentJobMapper recruitmentJobMapper;
+    private final DepartmentMapper departmentMapper;
     private final EmployeeMapper employeeMapper;
     private final AuditLogService auditLogService;
     private final VideoMergeService videoMergeService;
@@ -122,7 +129,29 @@ public class InterviewServiceImpl implements InterviewService {
 
     private static final long MAX_RECORDING_SIZE = 100 * 1024 * 1024;
     private static final int VIDEO_MERGE_MAX_ATTEMPTS = 3;
+    private static final long MISSING_RECORDING_TIMEOUT_MINUTES = 10L;
     private static final Set<String> ALLOWED_RECORDING_CONTENT_TYPES = Set.of("video/webm", "application/octet-stream");
+    private static final Set<String> ALLOWED_ANTI_CHEAT_EVENTS = Set.of(
+            "AI_RECORDING_DENIED", "AI_RECORDING_STARTED", "AI_RECORDING_UNSUPPORTED", "AI_RECORDING_UPLOADED",
+            "CLIPBOARD_BLOCKED", "FULLSCREEN_DENIED", "FULLSCREEN_EXIT", "TAB_HIDDEN", "WINDOW_BLUR"
+    );
+
+    @Scheduled(fixedDelayString = "${interview.video.missing-recording-scan-interval-ms:60000}")
+    public void releaseTimedOutVideoUploadsForApproval() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(MISSING_RECORDING_TIMEOUT_MINUTES);
+        List<Long> sessionIds = videoSessionMapper.selectList(new LambdaQueryWrapper<InterviewVideoSession>()
+                        .eq(InterviewVideoSession::getSessionStatus, "END_REQUESTED")
+                        .isNotNull(InterviewVideoSession::getEndTime)
+                        .le(InterviewVideoSession::getEndTime, cutoff))
+                .stream().map(InterviewVideoSession::getId).toList();
+        for (Long sessionId : sessionIds) {
+            try {
+                transactionTemplate.execute(status -> markMissingRecordingForApproval(sessionId, cutoff, status));
+            } catch (RuntimeException ex) {
+                log.warn("Unable to release video session {} after recording upload timeout", sessionId, ex);
+            }
+        }
+    }
 
     @Override
     @Transactional
@@ -131,7 +160,6 @@ public class InterviewServiceImpl implements InterviewService {
         BeanUtils.copyProperties(request, entity);
         entity.setStatus(Objects.requireNonNullElse(request.getStatus(), 1));
         if (request.getId() == null) {
-            entity.setId(nextId(knowledgeBaseMapper.selectList(null).stream().map(InterviewKnowledgeBase::getId).toList()));
             knowledgeBaseMapper.insert(entity);
         } else {
             knowledgeBaseMapper.updateById(entity);
@@ -165,7 +193,6 @@ public class InterviewServiceImpl implements InterviewService {
         BeanUtils.copyProperties(request, entity);
         entity.setStatus(Objects.requireNonNullElse(request.getStatus(), 1));
         if (request.getId() == null) {
-            entity.setId(nextId(knowledgeItemMapper.selectList(null).stream().map(InterviewKnowledgeItem::getId).toList()));
             knowledgeItemMapper.insert(entity);
         } else {
             knowledgeItemMapper.updateById(entity);
@@ -201,7 +228,6 @@ public class InterviewServiceImpl implements InterviewService {
                 throw new BusinessException("CSV第" + (i + 1) + "行知识点或知识内容为空");
             }
             InterviewKnowledgeItem entity = new InterviewKnowledgeItem();
-            entity.setId(nextId(knowledgeItemMapper.selectList(null).stream().map(InterviewKnowledgeItem::getId).toList()));
             entity.setKnowledgeBaseId(knowledgeBaseId);
             entity.setKnowledgePoint(point);
             entity.setKnowledgeContent(content);
@@ -310,7 +336,6 @@ public class InterviewServiceImpl implements InterviewService {
         InterviewJobKnowledgeWeight entity = request.getId() == null ? new InterviewJobKnowledgeWeight() : requireJobKnowledgeWeight(request.getId());
         BeanUtils.copyProperties(request, entity);
         if (request.getId() == null) {
-            entity.setId(nextId(jobKnowledgeWeightMapper.selectList(null).stream().map(InterviewJobKnowledgeWeight::getId).toList()));
             jobKnowledgeWeightMapper.insert(entity);
         } else {
             jobKnowledgeWeightMapper.updateById(entity);
@@ -343,7 +368,6 @@ public class InterviewServiceImpl implements InterviewService {
         }
         entity.setStatus(Objects.requireNonNullElse(request.getStatus(), 1));
         if (request.getId() == null) {
-            entity.setId(nextId(llmConfigMapper.selectList(null).stream().map(InterviewLlmConfig::getId).toList()));
             llmConfigMapper.insert(entity);
         } else {
             llmConfigMapper.updateById(entity);
@@ -376,7 +400,6 @@ public class InterviewServiceImpl implements InterviewService {
         template.setDescription(abbreviate(StrUtil.blankToDefault(request.getDescription(), ""), 1000));
         template.setStatus(Objects.requireNonNullElse(request.getStatus(), 1));
         if (template.getId() == null) {
-            template.setId(nextId(processTemplateMapper.selectList(null).stream().map(InterviewProcessTemplate::getId).toList()));
             processTemplateMapper.insert(template);
         } else {
             processTemplateMapper.updateById(template);
@@ -386,7 +409,6 @@ public class InterviewServiceImpl implements InterviewService {
         for (int index = 0; index < request.getStages().size(); index++) {
             InterviewProcessTemplateStageRequest item = request.getStages().get(index);
             InterviewProcessTemplateStage stage = new InterviewProcessTemplateStage();
-            stage.setId(nextId(processTemplateStageMapper.selectList(null).stream().map(InterviewProcessTemplateStage::getId).toList()));
             stage.setTemplateId(template.getId());
             stage.setStageName(abbreviate(item.getStageName().trim(), 128));
             stage.setStageType(normalizeTemplateStageType(item.getStageType()));
@@ -443,7 +465,6 @@ public class InterviewServiceImpl implements InterviewService {
             throw new BusinessException("该候选人已存在面试流程");
         }
         InterviewProcess process = new InterviewProcess();
-        process.setId(nextId(processMapper.selectList(null).stream().map(InterviewProcess::getId).toList()));
         process.setRecruitmentCandidateId(candidate.getId());
         process.setIntervieweeUserId(request.getIntervieweeUserId());
         process.setJobId(request.getJobId());
@@ -455,7 +476,7 @@ public class InterviewServiceImpl implements InterviewService {
         process.setCurrentStage(firstTemplateStage == null ? "AI" : firstTemplateStage.getStageType());
         process.setStageStatus(firstTemplateStage != null && "VIDEO".equals(firstTemplateStage.getStageType()) ? "READY" : "IN_PROGRESS");
         process.setOverallStatus("IN_PROGRESS");
-        process.setAiThresholdScore(Objects.requireNonNullElse(request.getAiThresholdScore(), 70));
+        process.setAiThresholdScore(normalizeScore(Objects.requireNonNullElse(request.getAiThresholdScore(), 70)));
         process.setAiFollowUpThreshold(Math.max(0, Math.min(Objects.requireNonNullElse(request.getAiFollowUpThreshold(), 70), 100)));
         int minQuestionRounds = Math.max(Objects.requireNonNullElse(request.getAiMinQuestionRounds(), 5), 1);
         int maxQuestionRounds = Math.max(Objects.requireNonNullElse(request.getAiMaxQuestionRounds(), 10), minQuestionRounds);
@@ -511,7 +532,7 @@ public class InterviewServiceImpl implements InterviewService {
 
     @Override
     public InterviewVO getIntervieweeProcess(Long processId, Long intervieweeUserId) {
-        return toProcessVO(requireIntervieweeProcess(processId, intervieweeUserId));
+        return toIntervieweeProcessVO(requireIntervieweeProcess(processId, intervieweeUserId));
     }
 
     @Override
@@ -616,7 +637,7 @@ public class InterviewServiceImpl implements InterviewService {
             }
         }
         processMapper.updateById(process);
-        updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+        updateCandidateStage(process);
         return toAiRecordVO(record, process);
     }
 
@@ -764,7 +785,7 @@ public class InterviewServiceImpl implements InterviewService {
             generateNextQuestion(process);
         }
         processMapper.updateById(process);
-        updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+        updateCandidateStage(process);
         return toAiRecordVO(record, process);
     }
 
@@ -790,7 +811,7 @@ public class InterviewServiceImpl implements InterviewService {
         requireIntervieweeProcess(processId, intervieweeUserId);
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
         if (session.getIntervieweeJoinTime() != null) {
-            return toVideoSessionVO(session);
+            return toIntervieweeVideoSessionVO(session);
         }
         session.setIntervieweeJoinTime(LocalDateTime.now());
         if (session.getStartTime() == null) {
@@ -799,7 +820,7 @@ public class InterviewServiceImpl implements InterviewService {
         session.setSessionStatus("INTERVIEWEE_JOINED");
         videoSessionMapper.updateById(session);
         auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "INTERVIEWEE_JOIN_VIDEO", "VIDEO_SESSION", String.valueOf(session.getId()), String.valueOf(processId));
-        return toVideoSessionVO(session);
+        return toIntervieweeVideoSessionVO(session);
     }
 
     @Override
@@ -846,7 +867,7 @@ public class InterviewServiceImpl implements InterviewService {
                 process.setStageStatus("UPLOADING");
                 process.setProcessStatusView("视频录制上传中");
                 processMapper.updateById(process);
-                updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+                updateCandidateStage(process);
             }
         }
         return toVideoSessionVO(session);
@@ -856,7 +877,8 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO requestIntervieweeVideoEnd(Long processId, Long intervieweeUserId) {
         requireIntervieweeProcess(processId, intervieweeUserId);
-        return completeVideoSession(processId, null);
+        completeVideoSession(processId, null);
+        return toIntervieweeVideoSessionVO(requireVideoSessionByProcess(processId));
     }
 
     private InterviewVO createTemplateVideoSession(InterviewProcess process, Long approverUserId, String approverName) {
@@ -892,7 +914,7 @@ public class InterviewServiceImpl implements InterviewService {
         } else {
             setTemplateStageStatus(process, stage, "UPLOADING");
             processMapper.updateById(process);
-            updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+            updateCandidateStage(process);
         }
         return toVideoSessionVO(session);
     }
@@ -925,7 +947,7 @@ public class InterviewServiceImpl implements InterviewService {
             rejectTemplateProcess(process, stage, "HR审批不通过");
         }
         processMapper.updateById(process);
-        updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+        updateCandidateStage(process);
         auditLogService.log(request.getApproverUserId(), displayName(request.getApproverName(), "HR"), "HR_ADMIN", "INTERVIEW", "AI".equals(expectedType) ? "APPROVE_AI" : "APPROVE_VIDEO", "INTERVIEW_PROCESS", String.valueOf(process.getId()), process.getProcessStatusView());
         return toProcessVO(process);
     }
@@ -956,7 +978,7 @@ public class InterviewServiceImpl implements InterviewService {
         if (request.getApproved() == 1) {
             ensureVideoSession(processId, request.getApproverUserId(), request.getApproverName());
         }
-        updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+        updateCandidateStage(process);
         auditLogService.log(request.getApproverUserId(), displayName(request.getApproverName(), "HR"), "HR_ADMIN", "INTERVIEW", "APPROVE_AI", "INTERVIEW_PROCESS", String.valueOf(processId), process.getProcessStatusView());
         return toProcessVO(process);
     }
@@ -989,7 +1011,7 @@ public class InterviewServiceImpl implements InterviewService {
             process.setProcessStatusView("已拒绝");
         }
         processMapper.updateById(process);
-        updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+        updateCandidateStage(process);
         auditLogService.log(request.getApproverUserId(), displayName(request.getApproverName(), "HR"), "HR_ADMIN", "INTERVIEW", "APPROVE_VIDEO", "INTERVIEW_PROCESS", String.valueOf(processId), process.getProcessStatusView());
         return toProcessVO(process);
     }
@@ -1009,14 +1031,14 @@ public class InterviewServiceImpl implements InterviewService {
             process.setOverallStatus("PASSED");
             process.setStageStatus("PASSED");
             process.setProcessStatusView("已通过");
-            syncToPendingOnboarding(process);
+            syncToPendingOnboarding(process, request.getDepartmentId());
         } else {
             process.setOverallStatus("REJECTED");
             process.setStageStatus("REJECTED");
             process.setProcessStatusView("已拒绝");
         }
         processMapper.updateById(process);
-        updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+        updateCandidateStage(process);
         auditLogService.log(request.getApproverUserId(), displayName(request.getApproverName(), "HR"), "HR_ADMIN", "INTERVIEW", "APPROVE_ONSITE", "INTERVIEW_PROCESS", String.valueOf(processId), process.getProcessStatusView());
         return toProcessVO(process);
     }
@@ -1032,7 +1054,7 @@ public class InterviewServiceImpl implements InterviewService {
         process.setApprovedHrUserId(request.getApproverUserId());
         process.setApprovedHrName(request.getApproverName());
         processMapper.updateById(process);
-        updateCandidateStage(process.getRecruitmentCandidateId(), "已终止");
+        updateCandidateStage(process);
         auditLogService.log(request.getApproverUserId(), displayName(request.getApproverName(), "HR"), "HR_ADMIN", "INTERVIEW", "TERMINATE_PROCESS", "INTERVIEW_PROCESS", String.valueOf(processId), "终止面试流程");
         return toProcessVO(process);
     }
@@ -1081,7 +1103,7 @@ public class InterviewServiceImpl implements InterviewService {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
         if (StrUtil.equals(session.getIntervieweeAnswerSdp(), request.getAnswerSdp())
                 && StrUtil.equals(session.getSessionStatus(), "ANSWER_SUBMITTED")) {
-            return toVideoSignalVO(session);
+            return toIntervieweeVideoSignalVO(session);
         }
         session.setIntervieweeAnswerSdp(request.getAnswerSdp());
         if (session.getIntervieweeJoinTime() == null) {
@@ -1091,7 +1113,7 @@ public class InterviewServiceImpl implements InterviewService {
         session.setSessionStatus(canStartSynchronizedRecording(session) ? "RECORDING" : "ANSWER_SUBMITTED");
         videoSessionMapper.updateById(session);
         auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "SUBMIT_VIDEO_ANSWER", "VIDEO_SESSION", String.valueOf(session.getId()), session.getVideoSerialNo());
-        return toVideoSignalVO(session);
+        return toIntervieweeVideoSignalVO(session);
     }
 
     @Override
@@ -1115,19 +1137,25 @@ public class InterviewServiceImpl implements InterviewService {
         requireIntervieweeProcess(processId, intervieweeUserId);
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
         if (!isCurrentIceCandidate(session.getIntervieweeAnswerSdp(), request.getIceCandidate())) {
-            return toVideoSignalVO(session);
+            return toIntervieweeVideoSignalVO(session);
         }
         if (containsSignal(session.getIntervieweeIceCandidates(), request.getIceCandidate())) {
-            return toVideoSignalVO(session);
+            return toIntervieweeVideoSignalVO(session);
         }
         session.setIntervieweeIceCandidates(appendSignal(session.getIntervieweeIceCandidates(), request.getIceCandidate()));
         videoSessionMapper.updateById(session);
-        return toVideoSignalVO(session);
+        return toIntervieweeVideoSignalVO(session);
     }
 
     @Override
     public VideoSignalVO getVideoSignalState(Long processId) {
         return toVideoSignalVO(requireVideoSessionByProcess(processId));
+    }
+
+    @Override
+    public VideoSignalVO getIntervieweeVideoSignalState(Long processId, Long intervieweeUserId) {
+        requireIntervieweeProcess(processId, intervieweeUserId);
+        return toIntervieweeVideoSignalVO(requireVideoSessionByProcess(processId));
     }
 
     @Override
@@ -1208,7 +1236,7 @@ public class InterviewServiceImpl implements InterviewService {
             session.setRecordingFileName(storedName);
             if (videoMergeService.canMerge(session)) {
                 prepareVideoMerge(session);
-            } else if (!StrUtil.equals(session.getSessionStatus(), "END_REQUESTED")) {
+            } else if (!StrUtil.equalsAny(session.getSessionStatus(), "END_REQUESTED", "WAITING_APPROVAL")) {
                 session.setSessionStatus("END_REQUESTED");
             }
             videoSessionMapper.updateById(session);
@@ -1244,7 +1272,7 @@ public class InterviewServiceImpl implements InterviewService {
         InterviewVideoSession session = requireVideoSessionByProcess(processId);
         VideoSignalVO vo = storeRecording(session, originalFileName, contentType, file, "interviewee");
         auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "UPLOAD_RECORDING", "VIDEO_SESSION", String.valueOf(vo.getSessionId()), vo.getRecordingFileName());
-        return vo;
+        return toIntervieweeVideoSignalVO(session);
     }
 
     @Override
@@ -1275,7 +1303,7 @@ public class InterviewServiceImpl implements InterviewService {
                 processMapper.updateById(process);
             }
             auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "UPLOAD_AI_EXAM_RECORDING", "INTERVIEW_PROCESS", String.valueOf(processId), storedName);
-            return getProcess(processId);
+            return toIntervieweeProcessVO(process);
         } catch (IOException ex) {
             throw new BusinessException("AI面试录制文件上传失败: " + ex.getMessage());
         }
@@ -1285,7 +1313,11 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVO reportAntiCheatEvent(AntiCheatEventRequest request, Long intervieweeUserId, String intervieweeName) {
         InterviewProcess process = requireIntervieweeProcess(request.getProcessId(), intervieweeUserId);
-        boolean switchEvent = isSwitchEvent(request.getEventType());
+        String eventType = StrUtil.trim(request.getEventType());
+        if (!ALLOWED_ANTI_CHEAT_EVENTS.contains(eventType)) {
+            throw new BusinessException("不支持的反作弊事件类型");
+        }
+        boolean switchEvent = isSwitchEvent(eventType);
         if (switchEvent && isActiveAiStage(process)) {
             int count = Objects.requireNonNullElse(process.getAntiCheatSwitchCount(), 0) + 1;
             int limit = Math.max(Objects.requireNonNullElse(process.getAntiCheatSwitchLimit(), 5), 1);
@@ -1297,14 +1329,14 @@ public class InterviewServiceImpl implements InterviewService {
                     process.setStageStatus("WAITING_APPROVAL");
                     process.setProcessStatusView("切屏超限待人工审批");
                 }
-                updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+                updateCandidateStage(process);
                 auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "ANTI_CHEAT_MANUAL_REVIEW", "INTERVIEW_PROCESS", String.valueOf(request.getProcessId()), "切屏" + count + "次达到阈值" + limit + "，转HR人工审批");
             }
             processMapper.updateById(process);
         }
-        String detail = StrUtil.blankToDefault(request.getDetail(), "") + " eventType=" + request.getEventType();
-        auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "ANTI_CHEAT_" + request.getEventType(), "INTERVIEW_PROCESS", String.valueOf(request.getProcessId()), abbreviate(detail));
-        return toProcessVO(process);
+        String detail = StrUtil.blankToDefault(request.getDetail(), "") + " eventType=" + eventType;
+        auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "ANTI_CHEAT_" + eventType, "INTERVIEW_PROCESS", String.valueOf(request.getProcessId()), abbreviate(detail));
+        return toIntervieweeProcessVO(process);
     }
 
     private boolean isSwitchEvent(String eventType) {
@@ -1322,15 +1354,22 @@ public class InterviewServiceImpl implements InterviewService {
         return "AI".equals(stage.getStageType()) && "IN_PROGRESS".equals(stage.getStageStatus());
     }
 
-    private void syncToPendingOnboarding(InterviewProcess process) {
+    private void syncToPendingOnboarding(InterviewProcess process, Long selectedDepartmentId) {
         RecruitmentCandidate candidate = requireRecruitmentCandidate(process.getRecruitmentCandidateId());
         RecruitmentJob job = requireRecruitmentJob(process.getJobId());
+        Long departmentId = job.getDepartmentId() == null ? selectedDepartmentId : job.getDepartmentId();
+        if (departmentId == null) {
+            throw new BusinessException("岗位尚未关联部门，请选择入职部门后再通过最终审批");
+        }
+        Department department = departmentMapper.selectById(departmentId);
+        if (department == null || !Objects.equals(department.getStatus(), 1)) {
+            throw new BusinessException("入职部门不存在或已停用，请重新选择");
+        }
         Employee existing = employeeMapper.selectOne(new LambdaQueryWrapper<Employee>()
                 .eq(Employee::getSourceCandidateId, candidate.getId())
                 .last("LIMIT 1"));
         Employee employee = existing == null ? new Employee() : existing;
         if (existing == null) {
-            employee.setId(nextId(employeeMapper.selectList(null).stream().map(Employee::getId).toList()));
             employee.setEmployeeCode("PENDING-" + candidate.getId());
         }
         employee.setFullName(candidate.getFullName());
@@ -1339,7 +1378,7 @@ public class InterviewServiceImpl implements InterviewService {
         employee.setEmail(candidate.getEmail());
         employee.setRecruitmentMajor(candidate.getMajor());
         employee.setPositionName(job.getJobTitle());
-        employee.setDepartmentId(1L);
+        employee.setDepartmentId(department.getId());
         employee.setBankAccountNo(StrUtil.blankToDefault(employee.getBankAccountNo(), "PENDING" + candidate.getId()));
         employee.setBankName(StrUtil.blankToDefault(employee.getBankName(), "待补充"));
         employee.setHireDate(LocalDate.now());
@@ -1347,7 +1386,7 @@ public class InterviewServiceImpl implements InterviewService {
         employee.setSourceCandidateId(candidate.getId());
         employee.setInterviewStageStatus("线下面");
         employee.setSourceChannel("RECRUITMENT_INTERVIEW");
-        employee.setNotes("面试三轮通过，待入职同步生成");
+        employee.setNotes("面试流程通过，待入职同步生成");
         if (existing == null) {
             employeeMapper.insert(employee);
         } else {
@@ -1355,9 +1394,14 @@ public class InterviewServiceImpl implements InterviewService {
         }
     }
 
-    private void updateCandidateStage(Long recruitmentCandidateId, String stage) {
-        RecruitmentCandidate candidate = requireRecruitmentCandidate(recruitmentCandidateId);
-        candidate.setInterviewStageStatus(StrUtil.blankToDefault(stage, "简历待查"));
+    private void updateCandidateStage(InterviewProcess process) {
+        RecruitmentCandidate candidate = requireRecruitmentCandidate(process.getRecruitmentCandidateId());
+        candidate.setInterviewStageStatus(StrUtil.blankToDefault(process.getProcessStatusView(), "简历待查"));
+        if (StrUtil.equals(process.getOverallStatus(), "REJECTED")) {
+            candidate.setApplicationStatus("REJECTED");
+        } else if (StrUtil.equals(process.getOverallStatus(), "TERMINATED")) {
+            candidate.setApplicationStatus("TERMINATED");
+        }
         recruitmentCandidateMapper.updateById(candidate);
     }
 
@@ -1464,7 +1508,6 @@ public class InterviewServiceImpl implements InterviewService {
         for (int index = 0; index < templateStages.size(); index++) {
             InterviewProcessTemplateStage source = templateStages.get(index);
             InterviewProcessStage stage = new InterviewProcessStage();
-            stage.setId(nextId(processStageMapper.selectList(null).stream().map(InterviewProcessStage::getId).toList()));
             stage.setProcessId(process.getId());
             stage.setTemplateStageId(source.getId());
             stage.setStageName(source.getStageName());
@@ -1535,7 +1578,6 @@ public class InterviewServiceImpl implements InterviewService {
             return existing;
         }
         InterviewVideoSession session = new InterviewVideoSession();
-        session.setId(nextId(videoSessionMapper.selectList(null).stream().map(InterviewVideoSession::getId).toList()));
         session.setProcessId(processId);
         session.setVideoSerialNo("VID-" + UUID.randomUUID());
         session.setVideoJoinLink("/interview/interviewee?processId=" + processId + "&serial=" + session.getVideoSerialNo());
@@ -1560,7 +1602,6 @@ public class InterviewServiceImpl implements InterviewService {
             return existing;
         }
         InterviewVideoSession session = new InterviewVideoSession();
-        session.setId(nextId(videoSessionMapper.selectList(null).stream().map(InterviewVideoSession::getId).toList()));
         session.setProcessId(processId);
         session.setProcessStageId(processStageId);
         session.setVideoSerialNo("VID-" + UUID.randomUUID());
@@ -1666,7 +1707,7 @@ public class InterviewServiceImpl implements InterviewService {
             process.setOverallStatus("PASSED");
             process.setStageStatus("PASSED");
             process.setProcessStatusView("已通过");
-            syncToPendingOnboarding(process);
+            syncToPendingOnboarding(process, request.getDepartmentId());
             return;
         }
         String nextStatus = "AI".equals(nextStage.getStageType()) ? "IN_PROGRESS" : "READY";
@@ -1728,7 +1769,6 @@ public class InterviewServiceImpl implements InterviewService {
         InterviewProcess process = requireProcess(processId);
         InterviewProcessStage stage = isTemplateProcess(process) ? requireActiveProcessStage(process) : null;
         InterviewAiRecord record = new InterviewAiRecord();
-        record.setId(nextId(aiRecordMapper.selectList(null).stream().map(InterviewAiRecord::getId).toList()));
         record.setProcessId(processId);
         record.setProcessStageId(stage == null ? null : stage.getId());
         record.setKnowledgePoint("题目生成异常");
@@ -1742,7 +1782,6 @@ public class InterviewServiceImpl implements InterviewService {
         Long knowledgeBaseId = stage == null ? null : stage.getKnowledgeBaseId();
         InterviewJobKnowledgeWeight weight = knowledgeBaseId == null ? pickKnowledgeWeight(process) : null;
         InterviewAiRecord record = new InterviewAiRecord();
-        record.setId(nextId(aiRecordMapper.selectList(null).stream().map(InterviewAiRecord::getId).toList()));
         record.setProcessId(process.getId());
         record.setProcessStageId(stage == null ? null : stage.getId());
         record.setKnowledgeBaseId(knowledgeBaseId == null ? (weight == null ? null : weight.getKnowledgeBaseId()) : knowledgeBaseId);
@@ -1800,7 +1839,6 @@ public class InterviewServiceImpl implements InterviewService {
                 ? callLlmFollowUpQuestion(previousRecord, previousAnswer, loadKnowledgeMaterials(previousRecord.getKnowledgeBaseId()), loadJobRequirements(process))
                 : nextQuestion;
         InterviewAiRecord record = new InterviewAiRecord();
-        record.setId(nextId(aiRecordMapper.selectList(null).stream().map(InterviewAiRecord::getId).toList()));
         record.setProcessId(process.getId());
         record.setProcessStageId(previousRecord.getProcessStageId());
         record.setKnowledgeBaseId(previousRecord.getKnowledgeBaseId());
@@ -1863,7 +1901,19 @@ public class InterviewServiceImpl implements InterviewService {
         if (!matcher.find()) {
             throw new BusinessException("LLM未返回有效分数");
         }
-        return Integer.parseInt(matcher.group());
+        try {
+            long score = Long.parseLong(matcher.group());
+            if (score < 0 || score > 100) {
+                throw new BusinessException("LLM返回的分数超出有效范围");
+            }
+            return (int) score;
+        } catch (NumberFormatException ex) {
+            throw new BusinessException("LLM返回的分数超出有效范围");
+        }
+    }
+
+    private int normalizeScore(long score) {
+        return (int) Math.max(0, Math.min(100, score));
     }
 
     private LlmEvaluation parseEvaluation(String response) {
@@ -2060,29 +2110,12 @@ public class InterviewServiceImpl implements InterviewService {
 
     private SpeechTranscriptionConfig resolveSpeechTranscriptionConfig() {
         Map<String, String> settings = systemConfigService.loadConfig(STT_CONFIG_KEYS);
-        InterviewLlmConfig legacy = findActiveLlmConfig("VIDEO_TRANSCRIBER");
-        String accessKeyId = firstNonBlank(settings.get("ALIYUN_STT_ACCESS_KEY_ID"), legacy == null ? null : legacy.getPromptTemplate());
-        String accessKeySecret = firstNonBlank(settings.get("ALIYUN_STT_ACCESS_KEY_SECRET"), legacy == null ? null : legacy.getApiKey());
-        String appKey = firstNonBlank(settings.get("ALIYUN_STT_APP_KEY"), legacy == null ? null : legacy.getModelName());
-        String endpoint = firstNonBlank(settings.get("ALIYUN_STT_ENDPOINT"), legacy == null ? null : legacy.getBaseUrl(),
-                "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1");
+        String accessKeyId = StrUtil.blankToDefault(settings.get("ALIYUN_STT_ACCESS_KEY_ID"), "").trim();
+        String accessKeySecret = StrUtil.blankToDefault(settings.get("ALIYUN_STT_ACCESS_KEY_SECRET"), "").trim();
+        String appKey = StrUtil.blankToDefault(settings.get("ALIYUN_STT_APP_KEY"), "").trim();
+        String endpoint = StrUtil.blankToDefault(settings.get("ALIYUN_STT_ENDPOINT"),
+                "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1").trim();
         return new SpeechTranscriptionConfig(accessKeyId, accessKeySecret, appKey, endpoint);
-    }
-
-    private InterviewLlmConfig findActiveLlmConfig(String role) {
-        return llmConfigMapper.selectOne(new LambdaQueryWrapper<InterviewLlmConfig>()
-                .eq(InterviewLlmConfig::getModelRole, role)
-                .eq(InterviewLlmConfig::getStatus, 1)
-                .last("LIMIT 1"));
-    }
-
-    private String firstNonBlank(String... values) {
-        for (String value : values) {
-            if (StrUtil.isNotBlank(value)) {
-                return value.trim();
-            }
-        }
-        return "";
     }
 
     private record SpeechTranscriptionConfig(String accessKeyId, String accessKeySecret, String appKey, String endpoint) {
@@ -2385,6 +2418,8 @@ public class InterviewServiceImpl implements InterviewService {
         RecruitmentJob job = recruitmentJobMapper.selectById(entity.getJobId());
         if (job != null) {
             vo.setQuestionTitle(job.getJobTitle());
+            vo.setJobDepartmentId(job.getDepartmentId());
+            vo.setJobDepartmentName(job.getDepartmentName());
         }
         vo.setCurrentStage(entity.getCurrentStage());
         vo.setStageStatus(entity.getStageStatus());
@@ -2430,6 +2465,32 @@ public class InterviewServiceImpl implements InterviewService {
         }
         vo.setCreatedAt(entity.getCreatedAt());
         vo.setUpdatedAt(entity.getUpdatedAt());
+        return vo;
+    }
+
+    private InterviewVO toIntervieweeProcessVO(InterviewProcess entity) {
+        InterviewVO vo = new InterviewVO();
+        vo.setId(entity.getId());
+        vo.setProcessId(entity.getId());
+        vo.setCurrentStage(entity.getCurrentStage());
+        vo.setStageStatus(entity.getStageStatus());
+        vo.setOverallStatus(entity.getOverallStatus());
+        vo.setAiAverageScore(entity.getAiAverageScore());
+        vo.setAiMaxQuestionRounds(entity.getAiMaxQuestionRounds());
+        vo.setAntiCheatSwitchLimit(entity.getAntiCheatSwitchLimit());
+        vo.setAntiCheatSwitchCount(entity.getAntiCheatSwitchCount());
+        vo.setAiOutputMode(entity.getAiOutputMode());
+        vo.setProcessStatusView(entity.getProcessStatusView());
+        if (isTemplateProcess(entity)) {
+            InterviewProcessStage active = listProcessStages(entity.getId()).stream()
+                    .filter(stage -> List.of("IN_PROGRESS", "READY", "UPLOADING", "WAITING_APPROVAL").contains(stage.getStageStatus()))
+                    .findFirst().orElse(null);
+            if (active != null) {
+                vo.setProcessStageId(active.getId());
+                vo.setStageName(active.getStageName());
+                vo.setStageType(active.getStageType());
+            }
+        }
         return vo;
     }
 
@@ -2488,6 +2549,16 @@ public class InterviewServiceImpl implements InterviewService {
         return vo;
     }
 
+    private InterviewVO toIntervieweeVideoSessionVO(InterviewVideoSession entity) {
+        InterviewVO vo = new InterviewVO();
+        vo.setId(entity.getId());
+        vo.setProcessId(entity.getProcessId());
+        vo.setProcessStageId(entity.getProcessStageId());
+        vo.setSessionStatus(entity.getSessionStatus());
+        vo.setRecordingEndRequestedAt(entity.getRecordingEndRequestedAt());
+        return vo;
+    }
+
     private void fillVideoSessionSummary(InterviewVO vo, Long processId, Long processStageId) {
         InterviewVideoSession session = videoSessionMapper.selectOne(new LambdaQueryWrapper<InterviewVideoSession>()
                 .eq(InterviewVideoSession::getProcessId, processId)
@@ -2529,6 +2600,16 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setTranscriptText(entity.getTranscriptText());
         vo.setSummaryText(entity.getSummaryText());
         vo.setSummaryStatus(entity.getSummaryStatus());
+        return vo;
+    }
+
+    private VideoSignalVO toIntervieweeVideoSignalVO(InterviewVideoSession entity) {
+        VideoSignalVO vo = new VideoSignalVO();
+        vo.setProcessId(entity.getProcessId());
+        vo.setOfferSdp(entity.getHrOfferSdp());
+        vo.setHrIceCandidates(currentIceCandidates(entity.getHrOfferSdp(), entity.getHrIceCandidates()));
+        vo.setSessionStatus(entity.getSessionStatus());
+        vo.setRecordingEndRequestedAt(entity.getRecordingEndRequestedAt());
         return vo;
     }
 
@@ -2610,6 +2691,83 @@ public class InterviewServiceImpl implements InterviewService {
                 || StrUtil.isNotBlank(session.getMergedRecordingPath());
     }
 
+    private Boolean markMissingRecordingForApproval(Long sessionId,
+                                                    LocalDateTime cutoff,
+                                                    org.springframework.transaction.TransactionStatus transactionStatus) {
+        InterviewVideoSession session = videoSessionMapper.selectById(sessionId);
+        if (session == null
+                || !StrUtil.equals(session.getSessionStatus(), "END_REQUESTED")
+                || session.getEndTime() == null
+                || session.getEndTime().isAfter(cutoff)
+                || videoMergeService.canMerge(session)) {
+            return false;
+        }
+        InterviewProcess process = processMapper.selectById(session.getProcessId());
+        if (process == null
+                || !StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")
+                || !StrUtil.equals(process.getCurrentStage(), "VIDEO")
+                || !StrUtil.equals(process.getStageStatus(), "UPLOADING")) {
+            return false;
+        }
+
+        InterviewProcessStage stage = null;
+        String processStatusView = "视频待审批（录像缺失）";
+        if (isTemplateProcess(process)) {
+            stage = processStageMapper.selectById(session.getProcessStageId());
+            if (stage == null
+                    || !Objects.equals(stage.getProcessId(), process.getId())
+                    || !StrUtil.equals(stage.getStageType(), "VIDEO")
+                    || !StrUtil.equals(stage.getStageStatus(), "UPLOADING")) {
+                return false;
+            }
+            processStatusView = StrUtil.blankToDefault(stage.getStageName(), "视频面试") + "待审批（录像缺失）";
+        }
+
+        int sessionUpdated = videoSessionMapper.update(null, new LambdaUpdateWrapper<InterviewVideoSession>()
+                .eq(InterviewVideoSession::getId, sessionId)
+                .eq(InterviewVideoSession::getSessionStatus, "END_REQUESTED")
+                .isNotNull(InterviewVideoSession::getEndTime)
+                .le(InterviewVideoSession::getEndTime, cutoff)
+                .set(InterviewVideoSession::getSessionStatus, "WAITING_APPROVAL")
+                .set(InterviewVideoSession::getSummaryStatus, "MISSING_RECORDING")
+                .set(InterviewVideoSession::getSummaryText, "录像结束后 10 分钟内未完整收到双方录像，已标记缺失；审批流程不受阻，迟到录像上传后仍会自动合并。"));
+        if (sessionUpdated != 1) {
+            return false;
+        }
+
+        if (stage != null) {
+            int stageUpdated = processStageMapper.update(null, new LambdaUpdateWrapper<InterviewProcessStage>()
+                    .eq(InterviewProcessStage::getId, stage.getId())
+                    .eq(InterviewProcessStage::getProcessId, process.getId())
+                    .eq(InterviewProcessStage::getStageType, "VIDEO")
+                    .eq(InterviewProcessStage::getStageStatus, "UPLOADING")
+                    .set(InterviewProcessStage::getStageStatus, "WAITING_APPROVAL"));
+            if (stageUpdated != 1) {
+                transactionStatus.setRollbackOnly();
+                return false;
+            }
+        }
+
+        int processUpdated = processMapper.update(null, new LambdaUpdateWrapper<InterviewProcess>()
+                .eq(InterviewProcess::getId, process.getId())
+                .eq(InterviewProcess::getOverallStatus, "IN_PROGRESS")
+                .eq(InterviewProcess::getCurrentStage, "VIDEO")
+                .eq(InterviewProcess::getStageStatus, "UPLOADING")
+                .set(InterviewProcess::getStageStatus, "WAITING_APPROVAL")
+                .set(InterviewProcess::getProcessStatusView, processStatusView));
+        if (processUpdated != 1) {
+            transactionStatus.setRollbackOnly();
+            return false;
+        }
+
+        process.setStageStatus("WAITING_APPROVAL");
+        process.setProcessStatusView(processStatusView);
+        updateCandidateStage(process);
+        auditLogService.log(null, "SYSTEM", "SYSTEM", "INTERVIEW", "VIDEO_RECORDING_TIMEOUT_WARNING",
+                "VIDEO_SESSION", String.valueOf(sessionId), processStatusView);
+        return true;
+    }
+
     private void markVideoWaitingApproval(Long processId) {
         InterviewProcess process = requireProcess(processId);
         if (isTemplateProcess(process)) {
@@ -2617,7 +2775,7 @@ public class InterviewServiceImpl implements InterviewService {
             if ("VIDEO".equals(stage.getStageType()) && StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
                 setTemplateStageStatus(process, stage, "WAITING_APPROVAL");
                 processMapper.updateById(process);
-                updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+                updateCandidateStage(process);
             }
             return;
         }
@@ -2625,7 +2783,7 @@ public class InterviewServiceImpl implements InterviewService {
             process.setStageStatus("WAITING_APPROVAL");
             process.setProcessStatusView("视频待审批");
             processMapper.updateById(process);
-            updateCandidateStage(process.getRecruitmentCandidateId(), process.getProcessStatusView());
+            updateCandidateStage(process);
         }
     }
 
@@ -2643,7 +2801,4 @@ public class InterviewServiceImpl implements InterviewService {
         return apiKey.substring(0, 4) + "****" + apiKey.substring(apiKey.length() - 4);
     }
 
-    private Long nextId(List<Long> ids) {
-        return ids.stream().filter(Objects::nonNull).max(Long::compareTo).map(id -> id + 1).orElse(1L);
-    }
 }

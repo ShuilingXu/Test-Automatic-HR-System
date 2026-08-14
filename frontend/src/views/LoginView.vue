@@ -20,8 +20,8 @@
             </div>
           </el-form-item>
             <div class="link-row"><el-button type="primary" @click="login">登录</el-button></div>
+            <el-button class="reset-password-trigger" text type="primary" @click="openPasswordReset">忘记密码？</el-button>
           </el-form>
-          <el-button class="reset-password-trigger" text type="primary" @click="openPasswordReset">忘记密码？</el-button>
           <el-form :model="registerForm" label-position="top" class="login-form register-form">
             <h3>面试者注册</h3>
           <el-form-item label="用户名"><el-input v-model="registerForm.username" /></el-form-item>
@@ -72,7 +72,7 @@
         <el-form-item label="图形验证码">
           <div class="captcha-row"><el-input v-model="passwordResetForm.captchaCode" placeholder="输入图片字符" /><button type="button" class="captcha-image" @click="loadPasswordResetCaptcha"><img :src="passwordResetCaptcha.imageBase64" alt="重置密码图形验证码" /></button></div>
         </el-form-item>
-        <el-form-item label="新密码"><el-input v-model="passwordResetForm.newPassword" type="password" show-password autocomplete="new-password" placeholder="至少6位" /></el-form-item>
+        <el-form-item label="新密码"><el-input v-model="passwordResetForm.newPassword" type="password" show-password autocomplete="new-password" placeholder="至少8位，含字母和数字" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="passwordResetVisible = false">取消</el-button><el-button type="primary" @click="resetPassword">确认重置</el-button></template>
     </el-dialog>
@@ -84,6 +84,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi } from '../services/api'
+import { isStrongPassword, strongPasswordMessage } from '../utils/password'
 
 const router = useRouter()
 const loginForm = reactive({ username: '', password: '', captchaId: '', captchaCode: '' })
@@ -114,6 +115,10 @@ async function login() {
 }
 
 async function register() {
+  if (!isStrongPassword(registerForm.password)) {
+    ElMessage.warning(strongPasswordMessage)
+    return
+  }
   try {
     const { contactType, ...payload } = registerForm
     await authApi.register(payload)
@@ -163,8 +168,8 @@ async function sendPasswordResetCode() {
 
 async function resetPassword() {
   const contact = passwordResetForm.contactType === 'phone' ? passwordResetForm.mobilePhone : passwordResetForm.email
-  if (!contact.trim() || !passwordResetForm.verificationCode || passwordResetForm.newPassword.length < 6) {
-    ElMessage.warning('请完整填写联系方式、验证码和至少6位的新密码')
+  if (!contact.trim() || !passwordResetForm.verificationCode || !isStrongPassword(passwordResetForm.newPassword)) {
+    ElMessage.warning(`请完整填写联系方式、验证码和${strongPasswordMessage}`)
     return
   }
   try {

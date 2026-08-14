@@ -85,7 +85,7 @@
           <el-form-item label="状态"><el-select v-model="userForm.status"><el-option label="启用" :value="1" /><el-option label="停用" :value="0" /></el-select></el-form-item>
           <el-form-item label="手机号"><el-input v-model="userForm.mobilePhone" /></el-form-item>
           <el-form-item label="邮箱"><el-input v-model="userForm.email" /></el-form-item>
-          <el-form-item label="新密码"><el-input v-model="userForm.newPassword" type="password" show-password placeholder="至少6位，仅重置时填写" /></el-form-item>
+          <el-form-item label="新密码"><el-input v-model="userForm.newPassword" type="password" show-password placeholder="至少8位，含字母和数字" /></el-form-item>
         </el-form>
         <div class="action-row"><el-button type="primary" @click="saveUser">保存用户</el-button><el-button type="warning" @click="resetUserPassword">重置密码</el-button></div>
       </section>
@@ -183,7 +183,7 @@
         <div class="topline"><div><p class="page-eyebrow">Recruitment</p><h2>招聘后台</h2></div><el-button @click="loadRecruitment">刷新</el-button></div>
         <div class="sub-tabs"><button :class="{ active: recruitmentMode === 'jobCreate' }" @click="showCreateJob">新增岗位</button><button :class="{ active: recruitmentMode === 'jobQuery' }" @click="recruitmentMode = 'jobQuery'">查询岗位</button><button :class="{ active: recruitmentMode === 'jobEdit' }" @click="recruitmentMode = 'jobEdit'">修改岗位</button><button :class="{ active: recruitmentMode === 'candidates' }" @click="recruitmentMode = 'candidates'">候选人信息</button></div>
         <template v-if="recruitmentMode === 'jobCreate' || recruitmentMode === 'jobEdit'">
-          <el-form :model="jobForm" label-position="top" class="form-grid"><el-form-item label="岗位名称"><el-input v-model="jobForm.jobTitle" /></el-form-item><el-form-item label="岗位编码"><el-input v-model="jobForm.jobCode" /></el-form-item><el-form-item label="招聘部门"><el-select v-model="jobForm.departmentName" filterable placeholder="从数据库部门中选择"><el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.departmentName" /></el-select></el-form-item><el-form-item label="工作地点"><el-input v-model="jobForm.workLocation" /></el-form-item><el-form-item label="岗位类型"><el-input v-model="jobForm.jobType" /></el-form-item><el-form-item label="招聘人数"><el-input-number v-model="jobForm.headcount" :min="1" /></el-form-item><el-form-item label="薪资范围"><el-input v-model="jobForm.salaryRange" /></el-form-item><el-form-item label="状态"><el-select v-model="jobForm.status"><el-option label="开放" :value="1" /><el-option label="关闭" :value="0" /></el-select></el-form-item><el-form-item label="岗位职责" class="wide"><el-input v-model="jobForm.responsibilities" type="textarea" :rows="3" /></el-form-item><el-form-item label="任职要求" class="wide"><el-input v-model="jobForm.requirements" type="textarea" :rows="3" /></el-form-item></el-form>
+          <el-form :model="jobForm" label-position="top" class="form-grid"><el-form-item label="岗位名称"><el-input v-model="jobForm.jobTitle" /></el-form-item><el-form-item label="岗位编码"><el-input v-model="jobForm.jobCode" /></el-form-item><el-form-item label="招聘部门"><el-select v-model="jobForm.departmentId" filterable placeholder="从数据库部门中选择" @change="syncJobDepartmentName"><el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" /></el-select></el-form-item><el-form-item label="工作地点"><el-input v-model="jobForm.workLocation" /></el-form-item><el-form-item label="岗位类型"><el-input v-model="jobForm.jobType" /></el-form-item><el-form-item label="招聘人数"><el-input-number v-model="jobForm.headcount" :min="1" /></el-form-item><el-form-item label="薪资范围"><el-input v-model="jobForm.salaryRange" /></el-form-item><el-form-item label="状态"><el-select v-model="jobForm.status"><el-option label="开放" :value="1" /><el-option label="关闭" :value="0" /></el-select></el-form-item><el-form-item label="岗位职责" class="wide"><el-input v-model="jobForm.responsibilities" type="textarea" :rows="3" /></el-form-item><el-form-item label="任职要求" class="wide"><el-input v-model="jobForm.requirements" type="textarea" :rows="3" /></el-form-item></el-form>
           <div class="action-row"><el-button type="primary" @click="saveJob">{{ recruitmentMode === 'jobCreate' ? '新增岗位' : '保存修改' }}</el-button><el-button @click="resetJobForm">清空</el-button></div>
         </template>
         <template v-if="recruitmentMode === 'jobQuery'">
@@ -204,7 +204,7 @@
             <el-form-item label="关键词"><el-input v-model="candidateFilter.keyword" placeholder="姓名 / 手机 / 专业 / 学校" /></el-form-item>
             <el-form-item label="操作"><div class="filter-actions"><el-button type="primary" @click="loadCandidates">查询</el-button><el-button @click="resetCandidateFilter">重置</el-button></div></el-form-item>
           </el-form>
-          <el-table :data="candidates" stripe class="data-table" @row-click="openCandidate"><el-table-column prop="id" label="候选人ID" min-width="100" /><el-table-column prop="fullName" label="报名者姓名" min-width="120" /><el-table-column prop="mobilePhone" label="联系电话" min-width="130" /><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="interviewStageStatus" label="面试状态" min-width="120" /><el-table-column label="LLM简历评分" min-width="120"><template #default="scope"><span>{{ scope.row.resumeLlmScore ?? resumeLlmStatusLabel(scope.row.resumeLlmStatus) }}</span></template></el-table-column><el-table-column prop="interviewProcessId" label="流程流水号" min-width="120" /><el-table-column label="简历" min-width="150"><template #default="scope"><a v-if="scope.row.resumeFileId" class="resume-link" :href="resumeUrl(scope.row.resumeFileId)" target="_blank" @click.stop>{{ scope.row.resumeFileName || '查看简历' }}</a><span v-else>未上传</span></template></el-table-column><el-table-column label="操作" width="460"><template #default="scope"><el-button text @click.stop="openCandidate(scope.row)">查看详情</el-button><el-button text :disabled="!canReevaluateResumeLlm(scope.row)" @click.stop="reevaluateResumeLlm(scope.row.id)">{{ resumeLlmReevaluateLabel(scope.row) }}</el-button><el-button text @click.stop="startCandidateInterview(scope.row)">发起面试</el-button><el-button text type="danger" @click.stop="rejectCandidateResume(scope.row.id)">简历拒绝</el-button><el-button text type="danger" @click.stop="deleteCandidate(scope.row.id)">删除候选人</el-button></template></el-table-column><el-table-column prop="applicationStatus" label="状态" width="110" /></el-table>
+          <el-table :data="candidates" stripe class="data-table" @row-click="openCandidate"><el-table-column prop="id" label="候选人ID" min-width="100" /><el-table-column prop="fullName" label="报名者姓名" min-width="120" /><el-table-column prop="mobilePhone" label="联系电话" min-width="130" /><el-table-column prop="jobTitle" label="岗位" min-width="140" /><el-table-column prop="interviewStageStatus" label="面试状态" min-width="120" /><el-table-column label="LLM简历评分" min-width="120"><template #default="scope"><span>{{ scope.row.resumeLlmScore ?? resumeLlmStatusLabel(scope.row.resumeLlmStatus) }}</span></template></el-table-column><el-table-column prop="interviewProcessId" label="流程流水号" min-width="120" /><el-table-column label="简历" min-width="150"><template #default="scope"><el-button v-if="scope.row.resumeFileId" text class="resume-link" @click.stop="openResume(scope.row.resumeFileId)">{{ scope.row.resumeFileName || '查看简历' }}</el-button><span v-else>未上传</span></template></el-table-column><el-table-column label="操作" width="460"><template #default="scope"><el-button text @click.stop="openCandidate(scope.row)">查看详情</el-button><el-button text :disabled="!canReevaluateResumeLlm(scope.row)" @click.stop="reevaluateResumeLlm(scope.row.id)">{{ resumeLlmReevaluateLabel(scope.row) }}</el-button><el-button text @click.stop="startCandidateInterview(scope.row)">发起面试</el-button><el-button text type="danger" @click.stop="rejectCandidateResume(scope.row.id)">简历拒绝</el-button><el-button text type="danger" @click.stop="deleteCandidate(scope.row.id)">删除候选人</el-button></template></el-table-column><el-table-column prop="applicationStatus" label="状态" width="110" /></el-table>
         </template>
       </section>
     </main>
@@ -223,6 +223,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { authApi, hrApi, interviewApi, recruitmentApi, siteContentApi } from '../services/api'
 import { readSessionUser } from '../utils/session'
+import { isStrongPassword, strongPasswordMessage } from '../utils/password'
 
 const router = useRouter()
 const route = useRoute()
@@ -266,7 +267,7 @@ const consoleReady = ref(false)
 const userForm = reactive({ id: null, username: '', displayName: '', roleCode: 'HR_USER', status: 1, mobilePhone: '', email: '', newPassword: '' })
 const departmentForm = reactive({ id: null, departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '', sortOrder: 0, status: 1 })
 const employeeForm = reactive({ id: null, employeeCode: '', fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' })
-const jobForm = reactive({ id: null, jobTitle: '', jobCode: '', departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 })
+const jobForm = reactive({ id: null, jobTitle: '', jobCode: '', departmentId: null, departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 })
 const auditFilter = reactive({ moduleCode: '', actionCode: '', keyword: '' })
 const departmentFilter = reactive({ parentDepartmentId: null, status: null, keyword: '' })
 const employeeFilter = reactive({ departmentId: null, employmentStatus: null, keyword: '' })
@@ -310,6 +311,7 @@ const actionLabels = {
   ADD_HR_ICE: '添加HR网络候选',
   ADD_INTERVIEWEE_ICE: '添加面试者网络候选',
   UPLOAD_RECORDING: '上传面试录制',
+  VIDEO_RECORDING_TIMEOUT_WARNING: '录像缺失超时警告',
 }
 const targetLabels = {
   SYS_USER: '系统用户',
@@ -401,10 +403,11 @@ function resetContentForm() { Object.assign(contentForm, { id: null, type: 'anno
 function editContent(row) { Object.assign(contentForm, row) }
 async function deleteDepartment(id) { try { await hrApi.deleteDepartment(id); ElMessage.success('部门已删除'); if (departmentForm.id === id) resetDepartmentForm(); await loadAll() } catch (error) { fail(error) } }
 async function deleteEmployee(id) { try { await hrApi.deleteEmployee(id); ElMessage.success('员工已删除'); if (employeeForm.id === id) resetEmployeeForm(); await loadAll() } catch (error) { fail(error) } }
-function resetJobForm() { Object.assign(jobForm, { id: null, jobTitle: '', jobCode: '', departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 }) }
+function resetJobForm() { Object.assign(jobForm, { id: null, jobTitle: '', jobCode: '', departmentId: null, departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 }) }
 function showCreateJob() { resetJobForm(); recruitmentMode.value = 'jobCreate' }
-function editJob(row) { Object.assign(jobForm, row); recruitmentMode.value = 'jobEdit' }
-async function saveJob() { try { await recruitmentApi.saveJob({ ...jobForm }); ElMessage.success('招聘岗位已保存'); resetJobForm(); await loadRecruitment() } catch (error) { fail(error) } }
+function syncJobDepartmentName(departmentId) { jobForm.departmentName = departments.value.find((item) => item.id === departmentId)?.departmentName || '' }
+function editJob(row) { Object.assign(jobForm, row); if (!jobForm.departmentId) { jobForm.departmentId = departments.value.find((item) => item.departmentName === row.departmentName)?.id || null } syncJobDepartmentName(jobForm.departmentId); recruitmentMode.value = 'jobEdit' }
+async function saveJob() { try { syncJobDepartmentName(jobForm.departmentId); await recruitmentApi.saveJob({ ...jobForm }); ElMessage.success('招聘岗位已保存'); resetJobForm(); await loadRecruitment() } catch (error) { fail(error) } }
 async function deleteJob(id) { try { await recruitmentApi.deleteJob(id); ElMessage.success('岗位已删除'); resetJobForm(); await loadRecruitment() } catch (error) { fail(error) } }
 function resetAuditFilter() { Object.assign(auditFilter, { moduleCode: '', actionCode: '', keyword: '' }); loadAuditLogs() }
 function resetDepartmentFilter() { Object.assign(departmentFilter, { parentDepartmentId: null, status: null, keyword: '' }); loadDepartments() }
@@ -422,7 +425,7 @@ function openDepartment(row) { router.push(`/admin/departments/${row.id}`) }
 function openEmployee(row) { router.push(`/admin/employees/${row.id}`) }
 function openJob(row) { router.push(`/admin/recruitment/jobs/${row.id}`) }
 function openCandidate(row) { router.push(`/admin/recruitment/candidates/${row.id}`) }
-function resumeUrl(id) { return recruitmentApi.getResumeUrl(id) }
+async function openResume(id) { try { await recruitmentApi.openResume(id) } catch (error) { fail(error) } }
 function resumeLlmStatusLabel(status) { return ({ PENDING: '评分中', COMPLETED: '已完成', FAILED: '评分失败' })[status] || '-' }
 function canReevaluateResumeLlm(candidate) { return candidate?.resumeLlmStatus !== 'PENDING' }
 function resumeLlmReevaluateLabel(candidate) { return canReevaluateResumeLlm(candidate) ? 'AI简历重评' : '评分中不可重评' }
@@ -475,7 +478,7 @@ async function deleteCandidate(id) {
 }
 function editUser(row) { Object.assign(userForm, row, { newPassword: '' }) }
 async function saveUser() { try { await authApi.updateUser(userForm.id, { roleCode: userForm.roleCode, status: userForm.status, displayName: userForm.displayName, mobilePhone: userForm.mobilePhone, email: userForm.email }); ElMessage.success('用户已保存'); await loadUsers() } catch (error) { fail(error) } }
-async function resetUserPassword() { try { if (!userForm.id) { ElMessage.warning('请先选择用户'); return } if (!userForm.newPassword || userForm.newPassword.length < 6) { ElMessage.warning('新密码长度不能少于6位'); return } await authApi.updateUser(userForm.id, { newPassword: userForm.newPassword }); userForm.newPassword = ''; ElMessage.success('密码已重置'); await loadUsers() } catch (error) { fail(error) } }
+async function resetUserPassword() { try { if (!userForm.id) { ElMessage.warning('请先选择用户'); return } if (!isStrongPassword(userForm.newPassword)) { ElMessage.warning(strongPasswordMessage); return } await authApi.updateUser(userForm.id, { newPassword: userForm.newPassword }); userForm.newPassword = ''; ElMessage.success('密码已重置'); await loadUsers() } catch (error) { fail(error) } }
 async function deleteUser(row) {
   try {
     await ElMessageBox.confirm(`删除用户“${row.username}”后无法恢复。`, '确认删除', { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' })
@@ -565,9 +568,9 @@ function syncRouteState() {
 .compact-table { margin-top: 12px; }
 .content-editor-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(240px, .75fr); gap: 22px; margin-top: 24px; }
 .content-page,
-.content-page *,
-.content-page *::before,
-.content-page *::after { animation: none !important; transition: none !important; }
+.content-page :deep(*),
+.content-page :deep(*::before),
+.content-page :deep(*::after) { animation: none !important; transition: none !important; }
 .content-form { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .content-preview { min-width: 0; min-height: 280px; padding: 22px; border: 1px solid #cbd7d1; border-radius: var(--radius-md); background: #f5f8f5; }

@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 @Data
 @TableName("interview_knowledge_base")
 public class InterviewKnowledgeBase {
-    @TableId(type = IdType.INPUT)
+    @TableId(type = IdType.AUTO)
     private Long id;
     private String knowledgeBaseName;
     private String techCategory;
