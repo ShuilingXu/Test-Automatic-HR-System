@@ -2,6 +2,7 @@ package com.autohr.modules.recruitment.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.autohr.common.exception.BusinessException;
+import com.autohr.common.file.S3ObjectStorageService;
 import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.auth.entity.SysUser;
 import com.autohr.modules.auth.mapper.SysUserMapper;
@@ -80,6 +81,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
     private final InterviewAiRecordMapper interviewAiRecordMapper;
     private final InterviewVideoSessionMapper interviewVideoSessionMapper;
     private final InterviewLlmConfigMapper llmConfigMapper;
+    private final S3ObjectStorageService s3ObjectStorageService;
 
     @Value("${resume.ocr.enabled:true}")
     private boolean resumeOcrEnabled;
@@ -269,6 +271,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
             try (InputStream inputStream = file.getInputStream()) {
                 Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
             }
+            s3ObjectStorageService.archiveIfEnabled(target, "resumes/" + storedName, file.getContentType());
             RecruitmentResumeFile resumeFile = new RecruitmentResumeFile();
             resumeFile.setId(nextId(resumeFileMapper.selectList(null).stream().map(RecruitmentResumeFile::getId).toList()));
             resumeFile.setCandidateId(candidateId);

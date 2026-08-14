@@ -492,3 +492,14 @@ npm run format
 - 公网视频面试建议配置 TURN，否则部分网络环境可能无法建立连接。
 - 文件上传目录位于后端运行目录下的 `uploads`，迁移部署时需要一并备份。
 - 前端 API 基础路径固定为 `/api`，开发环境通过 Vite 代理到后端。
+
+## S3 兼容对象存储
+
+可选归档功能支持 AWS S3、MinIO 以及提供 S3 兼容接口的 OSS Endpoint。文件始终会
+保留在本地，以供视频处理、转写和受权限保护的下载使用；归档连接或鉴权失败只会记录
+告警，不会删除本地上传文件，也不会中断面试流程。
+
+在系统配置的“对象存储”页签或 `.env` 中配置 `S3_ENABLED`、`S3_ENDPOINT`、
+`S3_REGION`、`S3_BUCKET`、`S3_ACCESS_KEY_ID`、`S3_SECRET_ACCESS_KEY`、
+`S3_SESSION_TOKEN`、`S3_PREFIX` 和 `S3_PATH_STYLE_ACCESS`。该身份需要对指定
+Bucket 与前缀拥有 `s3:PutObject` 权限。短信、语音转写和 S3 均使用独立凭据。

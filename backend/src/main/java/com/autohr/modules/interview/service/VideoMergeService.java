@@ -1,8 +1,10 @@
 package com.autohr.modules.interview.service;
 
 import com.autohr.common.exception.BusinessException;
+import com.autohr.common.file.S3ObjectStorageService;
 import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.interview.entity.InterviewVideoSession;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -13,7 +15,10 @@ import java.time.Duration;
 import java.util.List;
 
 @Service
+@RequiredArgsConstructor
 public class VideoMergeService {
+
+    private final S3ObjectStorageService s3ObjectStorageService;
 
     @Value("${interview.video.ffmpeg-path:ffmpeg}")
     private String ffmpegPath;
@@ -39,6 +44,7 @@ public class VideoMergeService {
                 throw new BusinessException("拼接视频路径非法");
             }
             mergeSideBySide(session, output);
+            s3ObjectStorageService.archiveIfEnabled(output, "interview-recordings/" + output.getFileName(), "video/webm");
             session.setMergedRecordingPath(output.toString());
             session.setMergedRecordingFileName(output.getFileName().toString());
             session.setRecordingPath(output.toString());
@@ -87,6 +93,7 @@ public class VideoMergeService {
                         output.toString()
                 ), "分离音频失败");
             }
+            s3ObjectStorageService.archiveIfEnabled(output, "interview-recordings/" + output.getFileName(), "audio/L16");
             session.setAudioPath(output.toString());
             session.setAudioFileName(output.getFileName().toString());
         } catch (IOException ex) {
@@ -117,6 +124,7 @@ public class VideoMergeService {
                     "-c:a", "pcm_s16le",
                     output.toString()
             ), "分离" + speaker + "音频失败");
+            s3ObjectStorageService.archiveIfEnabled(output, "interview-recordings/" + output.getFileName(), "audio/L16");
             return output.toString();
         } catch (IOException ex) {
             throw new BusinessException("分离" + speaker + "音频失败: " + ex.getMessage());

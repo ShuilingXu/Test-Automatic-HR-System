@@ -85,7 +85,10 @@
           <div class="config-panel-head"><div><h3>{{ currentConfigGroup.title }}</h3><p>{{ currentConfigGroup.description }}</p></div></div>
           <el-form label-position="top" class="config-form-grid">
             <el-form-item v-for="field in currentConfigGroup.fields" :key="field.key" :label="field.label">
-              <el-input v-model="systemConfig[field.key]" :type="field.secret ? 'password' : 'text'" :show-password="field.secret" :placeholder="field.placeholder || ''" />
+              <el-select v-if="field.options" v-model="systemConfig[field.key]" :placeholder="field.placeholder || '请选择'">
+                <el-option v-for="option in field.options" :key="option.value" :label="option.label" :value="option.value" />
+              </el-select>
+              <el-input v-else v-model="systemConfig[field.key]" :type="field.secret ? 'password' : 'text'" :show-password="field.secret" :placeholder="field.placeholder || ''" />
             </el-form-item>
           </el-form>
           <div class="action-row"><el-button type="primary" :loading="savingSystemConfig" @click="saveSystemConfig">保存当前参数</el-button></div>
@@ -97,11 +100,10 @@
             <div class="config-panel-head"><div><h3>{{ currentModel.label }}</h3><p>{{ currentModel.description }}</p></div><span class="key-state">密钥：{{ currentModel.keyLabel() }}</span></div>
             <el-form :model="currentModel.form" label-position="top" class="config-form-grid">
               <el-form-item label="配置名称"><el-input v-model="currentModel.form.configName" /></el-form-item>
-              <el-form-item :label="currentModel.role === 'VIDEO_TRANSCRIBER' ? 'NLS 网关地址' : '接口地址'"><el-input v-model="currentModel.form.baseUrl" /></el-form-item>
-              <el-form-item :label="currentModel.role === 'VIDEO_TRANSCRIBER' ? 'AccessKey Secret' : 'API Key'"><el-input v-model="currentModel.form.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
-              <el-form-item :label="currentModel.role === 'VIDEO_TRANSCRIBER' ? 'AppKey' : '模型名称'"><el-input v-model="currentModel.form.modelName" /></el-form-item>
-              <el-form-item v-if="currentModel.role === 'VIDEO_TRANSCRIBER'" label="AccessKey ID" class="wide"><el-input v-model="currentModel.form.promptTemplate" /></el-form-item>
-              <el-form-item v-else :label="currentModel.promptLabel" class="wide"><el-input v-model="currentModel.form[currentModel.promptField]" type="textarea" :rows="6" /></el-form-item>
+              <el-form-item label="接口地址"><el-input v-model="currentModel.form.baseUrl" /></el-form-item>
+              <el-form-item label="API Key"><el-input v-model="currentModel.form.apiKey" type="password" show-password placeholder="编辑留空则保留原密钥" /></el-form-item>
+              <el-form-item label="模型名称"><el-input v-model="currentModel.form.modelName" /></el-form-item>
+              <el-form-item :label="currentModel.promptLabel" class="wide"><el-input v-model="currentModel.form[currentModel.promptField]" type="textarea" :rows="6" /></el-form-item>
             </el-form>
             <div class="action-row"><el-button type="primary" @click="saveRoleLlmConfig(currentModel.form, currentModel.role)">保存模型配置</el-button></div>
           </div>
@@ -386,7 +388,6 @@ const weightForm = reactive({ id: null, jobId: null, knowledgeBaseId: null, weig
 const interviewerLlmForm = reactive(createLlmForm('INTERVIEWER'))
 const scorerLlmForm = reactive(createLlmForm('SCORER'))
 const resumeReviewLlmForm = reactive(createLlmForm('RESUME_REVIEW'))
-const videoTranscriberLlmForm = reactive(createLlmForm('VIDEO_TRANSCRIBER'))
 const videoSummaryLlmForm = reactive(createLlmForm('VIDEO_SUMMARY'))
 const processForm = reactive({ recruitmentCandidateId: null, intervieweeUserId: '', jobId: null, templateId: null, aiThresholdScore: 70, aiFollowUpThreshold: 70, aiMinQuestionRounds: 5, aiMaxQuestionRounds: 10, antiCheatSwitchLimit: 5, aiOutputMode: 'NORMAL' })
 const processSearch = reactive({ keyword: '' })
@@ -394,8 +395,9 @@ const templateForm = reactive(createTemplateForm())
 const savingTemplate = ref(false)
 const retryingVideoSummary = ref(false)
 const systemConfig = reactive({
-  ALIYUN_ACCESS_KEY_ID: '',
-  ALIYUN_ACCESS_KEY_SECRET: '',
+  ALIYUN_SMS_ACCESS_KEY_ID: '',
+  ALIYUN_SMS_ACCESS_KEY_SECRET: '',
+  ALIYUN_SMS_ENDPOINT: '',
   ALIYUN_SMS_SIGN_NAME: '',
   ALIYUN_SMS_TEMPLATE_CODE: '',
   SMTP_HOST: '',
@@ -405,7 +407,8 @@ const systemConfig = reactive({
   SMTP_FROM: '',
   SMTP_SSL_ENABLED: '',
   SMTP_STARTTLS_ENABLED: '',
-  ALIYUN_STT_APP_KEY: '', ALIYUN_STT_ENDPOINT: '', ALIYUN_OSS_BUCKET_NAME: '', ALIYUN_OSS_ENDPOINT: '',
+  ALIYUN_STT_ACCESS_KEY_ID: '', ALIYUN_STT_ACCESS_KEY_SECRET: '', ALIYUN_STT_APP_KEY: '', ALIYUN_STT_ENDPOINT: '',
+  S3_ENABLED: '', S3_ENDPOINT: '', S3_REGION: '', S3_BUCKET: '', S3_ACCESS_KEY_ID: '', S3_SECRET_ACCESS_KEY: '', S3_SESSION_TOKEN: '', S3_PREFIX: '', S3_PATH_STYLE_ACCESS: '',
   DB_TYPE: '', DB_URL: '', DB_USERNAME: '', DB_PASSWORD: '', JWT_SECRET: '',
   INTERVIEW_VIDEO_FFMPEG_PATH: '', INTERVIEW_VIDEO_VIDEO_CODEC: '', INTERVIEW_VIDEO_AUDIO_CODEC: '',
   INTERVIEW_STUN_URLS: '', INTERVIEW_TURN_URLS: '', INTERVIEW_TURN_USERNAME: '', INTERVIEW_TURN_CREDENTIAL: '',
@@ -415,17 +418,25 @@ const systemConfig = reactive({
 
 const configTabs = [
   { key: 'notifications', label: '通知服务' },
+  { key: 'storage', label: '对象存储' },
   { key: 'media', label: '面试媒体' },
   { key: 'database', label: '数据库与安全' },
   { key: 'resume', label: '简历识别' },
   { key: 'models', label: 'AI 模型' },
 ]
+const booleanOptions = [
+  { label: '启用', value: 'true' },
+  { label: '关闭', value: 'false' },
+]
 const configGroups = {
-  notifications: { title: '通知服务', description: '短信验证码与注册邮件使用的接口参数。', fields: [
-    { key: 'ALIYUN_ACCESS_KEY_ID', label: '阿里云 AccessKey ID' }, { key: 'ALIYUN_ACCESS_KEY_SECRET', label: '阿里云 AccessKey Secret', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_SMS_SIGN_NAME', label: '短信签名' }, { key: 'ALIYUN_SMS_TEMPLATE_CODE', label: '短信模板 Code' }, { key: 'SMTP_HOST', label: 'SMTP 服务器', placeholder: 'smtp.example.com' }, { key: 'SMTP_PORT', label: 'SMTP 端口', placeholder: '587' }, { key: 'SMTP_USERNAME', label: 'SMTP 用户名' }, { key: 'SMTP_PASSWORD', label: 'SMTP 密码', secret: true, placeholder: '留空则不覆盖' }, { key: 'SMTP_FROM', label: '发件人' }, { key: 'SMTP_SSL_ENABLED', label: 'SSL 启用', placeholder: 'true / false' }, { key: 'SMTP_STARTTLS_ENABLED', label: 'STARTTLS 启用', placeholder: 'true / false' },
+  notifications: { title: '通知服务', description: '短信验证码和注册邮件使用的独立服务凭据。', fields: [
+    { key: 'ALIYUN_SMS_ACCESS_KEY_ID', label: '阿里云短信 AccessKey ID' }, { key: 'ALIYUN_SMS_ACCESS_KEY_SECRET', label: '阿里云短信 AccessKey Secret', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_SMS_ENDPOINT', label: '阿里云短信 Endpoint', placeholder: 'dysmsapi.aliyuncs.com' }, { key: 'ALIYUN_SMS_SIGN_NAME', label: '短信签名' }, { key: 'ALIYUN_SMS_TEMPLATE_CODE', label: '短信模板 Code' }, { key: 'SMTP_HOST', label: 'SMTP 服务器', placeholder: 'smtp.example.com' }, { key: 'SMTP_PORT', label: 'SMTP 端口', placeholder: '587' }, { key: 'SMTP_USERNAME', label: 'SMTP 用户名' }, { key: 'SMTP_PASSWORD', label: 'SMTP 密码', secret: true, placeholder: '留空则不覆盖' }, { key: 'SMTP_FROM', label: '发件人' }, { key: 'SMTP_SSL_ENABLED', label: 'SSL 启用', options: booleanOptions }, { key: 'SMTP_STARTTLS_ENABLED', label: 'STARTTLS 启用', options: booleanOptions },
   ] },
-  media: { title: '面试媒体', description: '视频编码、WebRTC 网络和语音转文字服务参数。', fields: [
-    { key: 'INTERVIEW_VIDEO_FFMPEG_PATH', label: 'FFmpeg 路径', placeholder: 'ffmpeg' }, { key: 'INTERVIEW_VIDEO_VIDEO_CODEC', label: '视频编码器' }, { key: 'INTERVIEW_VIDEO_AUDIO_CODEC', label: '音频编码器' }, { key: 'INTERVIEW_STUN_URLS', label: 'STUN 地址' }, { key: 'INTERVIEW_TURN_URLS', label: 'TURN 地址' }, { key: 'INTERVIEW_TURN_USERNAME', label: 'TURN 用户名' }, { key: 'INTERVIEW_TURN_CREDENTIAL', label: 'TURN 凭证', secret: true }, { key: 'ALIYUN_STT_APP_KEY', label: '阿里云 STT AppKey' }, { key: 'ALIYUN_STT_ENDPOINT', label: '阿里云 STT Endpoint' }, { key: 'ALIYUN_OSS_BUCKET_NAME', label: 'OSS Bucket' }, { key: 'ALIYUN_OSS_ENDPOINT', label: 'OSS Endpoint' }, { key: 'TURN_HOST', label: 'TURN 主机' }, { key: 'TURN_EXTERNAL_IP', label: 'TURN 外部 IP' }, { key: 'TURN_PRIVATE_IP', label: 'TURN 内部 IP' }, { key: 'TURN_REALM', label: 'TURN Realm' }, { key: 'TURN_MIN_PORT', label: 'TURN 最小端口' }, { key: 'TURN_MAX_PORT', label: 'TURN 最大端口' },
+  storage: { title: 'S3 兼容对象存储', description: '简历和面试媒体先保存到本地，再同步归档到 S3、MinIO 或 OSS 的 S3 兼容端点；归档失败时本地文件继续可用。', fields: [
+    { key: 'S3_ENABLED', label: '启用归档', options: booleanOptions }, { key: 'S3_ENDPOINT', label: 'S3 Endpoint', placeholder: 'https://s3.example.com' }, { key: 'S3_REGION', label: 'Region', placeholder: 'us-east-1' }, { key: 'S3_BUCKET', label: 'Bucket' }, { key: 'S3_ACCESS_KEY_ID', label: 'Access Key ID' }, { key: 'S3_SECRET_ACCESS_KEY', label: 'Secret Access Key', secret: true, placeholder: '留空则不覆盖' }, { key: 'S3_SESSION_TOKEN', label: 'Session Token（可选）', secret: true, placeholder: '临时凭据时填写' }, { key: 'S3_PREFIX', label: '对象前缀', placeholder: 'autohr' }, { key: 'S3_PATH_STYLE_ACCESS', label: 'Path Style Access', options: booleanOptions },
+  ] },
+  media: { title: '面试媒体', description: '视频编码、WebRTC 网络和阿里云语音转文字使用的独立参数。', fields: [
+    { key: 'INTERVIEW_VIDEO_FFMPEG_PATH', label: 'FFmpeg 路径', placeholder: 'ffmpeg' }, { key: 'INTERVIEW_VIDEO_VIDEO_CODEC', label: '视频编码器' }, { key: 'INTERVIEW_VIDEO_AUDIO_CODEC', label: '音频编码器' }, { key: 'INTERVIEW_STUN_URLS', label: 'STUN 地址' }, { key: 'INTERVIEW_TURN_URLS', label: 'TURN 地址' }, { key: 'INTERVIEW_TURN_USERNAME', label: 'TURN 用户名' }, { key: 'INTERVIEW_TURN_CREDENTIAL', label: 'TURN 凭证', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_STT_ACCESS_KEY_ID', label: '阿里云语音 AccessKey ID' }, { key: 'ALIYUN_STT_ACCESS_KEY_SECRET', label: '阿里云语音 AccessKey Secret', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_STT_APP_KEY', label: '阿里云语音 AppKey' }, { key: 'ALIYUN_STT_ENDPOINT', label: '阿里云语音 Endpoint', placeholder: 'wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1' }, { key: 'TURN_HOST', label: 'TURN 主机' }, { key: 'TURN_EXTERNAL_IP', label: 'TURN 外部 IP' }, { key: 'TURN_PRIVATE_IP', label: 'TURN 内部 IP' }, { key: 'TURN_REALM', label: 'TURN Realm' }, { key: 'TURN_MIN_PORT', label: 'TURN 最小端口' }, { key: 'TURN_MAX_PORT', label: 'TURN 最大端口' },
   ] },
   database: { title: '数据库与安全', description: '数据库连接和 JWT 签名参数。敏感值以掩码显示。', fields: [
     { key: 'DB_TYPE', label: '数据库类型', placeholder: 'sqlite / mysql / postgresql' }, { key: 'DB_URL', label: '数据库 URL' }, { key: 'DB_USERNAME', label: '数据库用户名' }, { key: 'DB_PASSWORD', label: '数据库密码', secret: true, placeholder: '留空则不覆盖' }, { key: 'JWT_SECRET', label: 'JWT Secret', secret: true, placeholder: '至少 32 位，留空则不覆盖' },
@@ -438,13 +449,11 @@ const currentConfigGroup = computed(() => configGroups[configTab.value] || confi
 const interviewerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')?.apiKeyMasked || '未配置')
 const scorerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'SCORER')?.apiKeyMasked || '未配置')
 const resumeReviewKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'RESUME_REVIEW')?.apiKeyMasked || '未配置，默认回退评分模型')
-const videoTranscriberKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'VIDEO_TRANSCRIBER')?.apiKeyMasked || '未配置')
 const videoSummaryKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'VIDEO_SUMMARY')?.apiKeyMasked || '未配置')
 const modelTabs = [
   { role: 'INTERVIEWER', label: '面试官', description: '生成面试问题和追问。', keyLabel: () => interviewerKeyLabel.value, form: interviewerLlmForm, promptField: 'promptTemplate', promptLabel: '提问提示词模板' },
   { role: 'SCORER', label: '评分器', description: '根据回答和岗位要求生成评分。', keyLabel: () => scorerKeyLabel.value, form: scorerLlmForm, promptField: 'scoringRulePrompt', promptLabel: '评分提示词' },
   { role: 'RESUME_REVIEW', label: '简历初筛', description: '对候选人简历进行初步匹配。', keyLabel: () => resumeReviewKeyLabel.value, form: resumeReviewLlmForm, promptField: 'scoringRulePrompt', promptLabel: '筛选提示词' },
-  { role: 'VIDEO_TRANSCRIBER', label: '视频转写', description: '将视频面试转换为文本。', keyLabel: () => videoTranscriberKeyLabel.value, form: videoTranscriberLlmForm, promptField: 'promptTemplate', promptLabel: '提示词' },
   { role: 'VIDEO_SUMMARY', label: '会议概要', description: '总结视频面试表现和建议。', keyLabel: () => videoSummaryKeyLabel.value, form: videoSummaryLlmForm, promptField: 'scoringRulePrompt', promptLabel: '概要提示词' },
 ]
 const currentModel = computed(() => modelTabs.find((item) => item.role === modelTab.value) || modelTabs[0])
@@ -558,18 +567,16 @@ async function editProcessTemplate(row) { try { const template = (await intervie
 async function saveProcessTemplate() { if (!templateForm.templateName.trim()) { ElMessage.warning('请填写模板名称'); return } if (!templateForm.stages.length) { ElMessage.warning('请至少添加一个面试阶段'); return } const invalidAiStage = templateForm.stages.find((stage) => stage.stageType === 'AI' && !stage.knowledgeBaseId); if (invalidAiStage) { ElMessage.warning(`请为“${invalidAiStage.stageName || 'AI 面试'}”选择题库`); return } const invalidName = templateForm.stages.find((stage) => !stage.stageName.trim()); if (invalidName) { ElMessage.warning('请填写每个阶段的展示名称'); return } savingTemplate.value = true; try { const saved = (await interviewApi.saveProcessTemplate({ id: templateForm.id, templateName: templateForm.templateName.trim(), description: templateForm.description.trim(), status: templateForm.status, stages: templateForm.stages.map((stage, index) => ({ stageName: stage.stageName.trim(), stageType: stage.stageType, knowledgeBaseId: stage.stageType === 'AI' ? stage.knowledgeBaseId : null, sequenceNo: index + 1 })) })).data; ElMessage.success('流程模板已保存'); await loadAll(); await editProcessTemplate(saved) } catch (error) { fail(error) } finally { savingTemplate.value = false } }
 async function deleteProcessTemplate(id) { try { await interviewApi.deleteProcessTemplate(id); ElMessage.success('流程模板已删除'); if (templateForm.id === id) resetTemplateForm(); await loadAll() } catch (error) { fail(error) } }
 function editLlmConfig(row) { Object.assign(llmFormByRole(row.modelRole), { ...row, apiKey: '' }) }
-function createLlmForm(role) { return { id: null, configName: role === 'SCORER' ? '评分模型' : role === 'RESUME_REVIEW' ? '简历初筛模型' : role === 'VIDEO_TRANSCRIBER' ? '阿里云视频语音转文字' : role === 'VIDEO_SUMMARY' ? '视频会议概要模型' : '面试官模型', modelRole: role, baseUrl: role === 'VIDEO_TRANSCRIBER' ? 'wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1' : '', apiKey: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 } }
-function llmFormByRole(role) { return role === 'SCORER' ? scorerLlmForm : role === 'RESUME_REVIEW' ? resumeReviewLlmForm : role === 'VIDEO_TRANSCRIBER' ? videoTranscriberLlmForm : role === 'VIDEO_SUMMARY' ? videoSummaryLlmForm : interviewerLlmForm }
+function createLlmForm(role) { return { id: null, configName: role === 'SCORER' ? '评分模型' : role === 'RESUME_REVIEW' ? '简历初筛模型' : role === 'VIDEO_SUMMARY' ? '视频会议概要模型' : '面试官模型', modelRole: role, baseUrl: '', apiKey: '', modelName: '', promptTemplate: '', scoringRulePrompt: '', status: 1 } }
+function llmFormByRole(role) { return role === 'SCORER' ? scorerLlmForm : role === 'RESUME_REVIEW' ? resumeReviewLlmForm : role === 'VIDEO_SUMMARY' ? videoSummaryLlmForm : interviewerLlmForm }
 function syncLlmForms() {
   const interviewer = llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')
   const scorer = llmConfigs.value.find((item) => item.modelRole === 'SCORER')
   const resumeReview = llmConfigs.value.find((item) => item.modelRole === 'RESUME_REVIEW')
-  const videoTranscriber = llmConfigs.value.find((item) => item.modelRole === 'VIDEO_TRANSCRIBER')
   const videoSummary = llmConfigs.value.find((item) => item.modelRole === 'VIDEO_SUMMARY')
   Object.assign(interviewerLlmForm, interviewer ? { ...interviewer, apiKey: '' } : createLlmForm('INTERVIEWER'))
   Object.assign(scorerLlmForm, scorer ? { ...scorer, apiKey: '' } : createLlmForm('SCORER'))
   Object.assign(resumeReviewLlmForm, resumeReview ? { ...resumeReview, apiKey: '' } : createLlmForm('RESUME_REVIEW'))
-  Object.assign(videoTranscriberLlmForm, videoTranscriber ? { ...videoTranscriber, apiKey: '' } : createLlmForm('VIDEO_TRANSCRIBER'))
   Object.assign(videoSummaryLlmForm, videoSummary ? { ...videoSummary, apiKey: '' } : createLlmForm('VIDEO_SUMMARY'))
 }
 async function syncIntervieweeByCandidate(candidateId) { const candidate = recruitmentCandidates.value.find((item) => item.id === candidateId); processForm.intervieweeUserId = candidate?.intervieweeUserId ? String(candidate.intervieweeUserId) : ''; processForm.jobId = candidate?.jobId || null }

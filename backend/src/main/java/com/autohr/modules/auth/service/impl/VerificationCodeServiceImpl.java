@@ -25,7 +25,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class VerificationCodeServiceImpl implements VerificationCodeService {
 
     private static final String[] CONFIG_KEYS = {
-            "ALIYUN_ACCESS_KEY_ID", "ALIYUN_ACCESS_KEY_SECRET", "ALIYUN_SMS_SIGN_NAME", "ALIYUN_SMS_TEMPLATE_CODE",
+            "ALIYUN_SMS_ACCESS_KEY_ID", "ALIYUN_SMS_ACCESS_KEY_SECRET", "ALIYUN_SMS_ENDPOINT", "ALIYUN_SMS_SIGN_NAME", "ALIYUN_SMS_TEMPLATE_CODE",
+            "ALIYUN_ACCESS_KEY_ID", "ALIYUN_ACCESS_KEY_SECRET",
             "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_SSL_ENABLED", "SMTP_STARTTLS_ENABLED"
     };
     private static final int EXPIRE_MINUTES = 5;
@@ -77,6 +78,9 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
 
     private void sendSms(String mobilePhone, String code) {
         Map<String, String> config = systemConfigService.loadConfig(CONFIG_KEYS);
+        // Deprecated generic credentials remain a read-only fallback for existing deployments.
+        config.put("ALIYUN_ACCESS_KEY_ID", firstNonBlank(config.get("ALIYUN_SMS_ACCESS_KEY_ID"), config.get("ALIYUN_ACCESS_KEY_ID")));
+        config.put("ALIYUN_ACCESS_KEY_SECRET", firstNonBlank(config.get("ALIYUN_SMS_ACCESS_KEY_SECRET"), config.get("ALIYUN_ACCESS_KEY_SECRET")));
         requireConfig(config, "ALIYUN_ACCESS_KEY_ID", "阿里云AccessKey ID未配置");
         requireConfig(config, "ALIYUN_ACCESS_KEY_SECRET", "阿里云AccessKey Secret未配置");
         requireConfig(config, "ALIYUN_SMS_SIGN_NAME", "短信签名未配置");
@@ -85,7 +89,7 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
             Config aliyunConfig = new Config()
                     .setAccessKeyId(config.get("ALIYUN_ACCESS_KEY_ID"))
                     .setAccessKeySecret(config.get("ALIYUN_ACCESS_KEY_SECRET"));
-            aliyunConfig.endpoint = "dysmsapi.aliyuncs.com";
+            aliyunConfig.endpoint = StrUtil.blankToDefault(config.get("ALIYUN_SMS_ENDPOINT"), "dysmsapi.aliyuncs.com");
             Client client = new Client(aliyunConfig);
             SendSmsRequest request = new SendSmsRequest()
                     .setPhoneNumbers(mobilePhone)
@@ -138,6 +142,10 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
         if (StrUtil.isBlank(config.get(key))) {
             throw new BusinessException(message);
         }
+    }
+
+    private String firstNonBlank(String preferred, String fallback) {
+        return StrUtil.isNotBlank(preferred) ? preferred : StrUtil.blankToDefault(fallback, "");
     }
 
     private record CodeRecord(String code, LocalDateTime sentAt, LocalDateTime expiresAt) {}

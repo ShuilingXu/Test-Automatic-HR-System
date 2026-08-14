@@ -2,6 +2,7 @@ package com.autohr.modules.interview.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.autohr.common.exception.BusinessException;
+import com.autohr.common.file.S3ObjectStorageService;
 import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.auth.service.AuditLogService;
 import com.autohr.modules.hr.entity.Employee;
@@ -52,6 +53,7 @@ import com.autohr.modules.recruitment.entity.RecruitmentCandidate;
 import com.autohr.modules.recruitment.entity.RecruitmentJob;
 import com.autohr.modules.recruitment.mapper.RecruitmentCandidateMapper;
 import com.autohr.modules.recruitment.mapper.RecruitmentJobMapper;
+import com.autohr.modules.system.service.SystemConfigService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
@@ -91,6 +93,9 @@ public class InterviewServiceImpl implements InterviewService {
     private static final Pattern SDP_ICE_UFRAG_PATTERN = Pattern.compile("(?m)^a=ice-ufrag:([^\\r\\n]+)");
     private static final Pattern CANDIDATE_JSON_UFRAG_PATTERN = Pattern.compile("\\\"usernameFragment\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
     private static final Pattern CANDIDATE_SDP_UFRAG_PATTERN = Pattern.compile("(?:^|\\s)ufrag\\s+([^\\s]+)");
+    private static final String[] STT_CONFIG_KEYS = {
+            "ALIYUN_STT_ACCESS_KEY_ID", "ALIYUN_STT_ACCESS_KEY_SECRET", "ALIYUN_STT_APP_KEY", "ALIYUN_STT_ENDPOINT"
+    };
 
     private final InterviewKnowledgeBaseMapper knowledgeBaseMapper;
     private final InterviewKnowledgeItemMapper knowledgeItemMapper;
@@ -107,6 +112,8 @@ public class InterviewServiceImpl implements InterviewService {
     private final EmployeeMapper employeeMapper;
     private final AuditLogService auditLogService;
     private final VideoMergeService videoMergeService;
+    private final S3ObjectStorageService s3ObjectStorageService;
+    private final SystemConfigService systemConfigService;
 
     @Value("${interview.llm.debug:false}")
     private boolean llmDebug;
@@ -1183,6 +1190,7 @@ public class InterviewServiceImpl implements InterviewService {
                 throw new BusinessException("录制文件路径非法");
             }
             file.transferTo(storedFile.toFile());
+            s3ObjectStorageService.archiveIfEnabled(storedFile, "interview-recordings/" + storedName, "video/webm");
             if (StrUtil.equals(role, "hr")) {
                 session.setHrRecordingPath(storedFile.toString());
                 session.setHrRecordingFileName(storedName);
@@ -1255,6 +1263,7 @@ public class InterviewServiceImpl implements InterviewService {
                 throw new BusinessException("AI面试录制文件路径非法");
             }
             file.transferTo(storedFile.toFile());
+            s3ObjectStorageService.archiveIfEnabled(storedFile, "interview-recordings/" + storedName, "video/webm");
             if (isTemplateProcess(process)) {
                 InterviewProcessStage stage = requireActiveProcessStage(process);
                 if (!"AI".equals(stage.getStageType())) {
@@ -1924,13 +1933,16 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     private String callAudioTranscription(String audioPath) {
-        InterviewLlmConfig config = requireActiveLlmConfig("VIDEO_TRANSCRIBER");
-        String accessKeyId = StrUtil.trim(config.getPromptTemplate());
-        String accessKeySecret = StrUtil.trim(config.getApiKey());
-        String appKey = StrUtil.trim(config.getModelName());
-        String endpoint = StrUtil.blankToDefault(config.getBaseUrl(), "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1");
+        SpeechTranscriptionConfig config = resolveSpeechTranscriptionConfig();
+        String accessKeyId = config.accessKeyId();
+        String accessKeySecret = config.accessKeySecret();
+        String appKey = config.appKey();
+        String endpoint = config.endpoint();
         if (StrUtil.isBlank(accessKeyId)) {
             throw new BusinessException("阿里云语音转文字未配置AccessKey ID");
+        }
+        if (StrUtil.isBlank(accessKeySecret) || StrUtil.isBlank(appKey)) {
+            throw new BusinessException("Aliyun speech transcription requires an AccessKey Secret and AppKey");
         }
         AccessToken accessToken = new AccessToken(accessKeyId, accessKeySecret);
         try {
@@ -1991,6 +2003,36 @@ public class InterviewServiceImpl implements InterviewService {
             systemPrompt = "你是HR视频面试会议纪要助手，请根据面试转写内容输出中文会议概要，包含候选人表现、关键回答、风险点和后续建议。";
         }
         return callOpenAiChat(config, systemPrompt, "视频面试转写：\n" + abbreviate(transcript, 20000));
+    }
+
+    private SpeechTranscriptionConfig resolveSpeechTranscriptionConfig() {
+        Map<String, String> settings = systemConfigService.loadConfig(STT_CONFIG_KEYS);
+        InterviewLlmConfig legacy = findActiveLlmConfig("VIDEO_TRANSCRIBER");
+        String accessKeyId = firstNonBlank(settings.get("ALIYUN_STT_ACCESS_KEY_ID"), legacy == null ? null : legacy.getPromptTemplate());
+        String accessKeySecret = firstNonBlank(settings.get("ALIYUN_STT_ACCESS_KEY_SECRET"), legacy == null ? null : legacy.getApiKey());
+        String appKey = firstNonBlank(settings.get("ALIYUN_STT_APP_KEY"), legacy == null ? null : legacy.getModelName());
+        String endpoint = firstNonBlank(settings.get("ALIYUN_STT_ENDPOINT"), legacy == null ? null : legacy.getBaseUrl(),
+                "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1");
+        return new SpeechTranscriptionConfig(accessKeyId, accessKeySecret, appKey, endpoint);
+    }
+
+    private InterviewLlmConfig findActiveLlmConfig(String role) {
+        return llmConfigMapper.selectOne(new LambdaQueryWrapper<InterviewLlmConfig>()
+                .eq(InterviewLlmConfig::getModelRole, role)
+                .eq(InterviewLlmConfig::getStatus, 1)
+                .last("LIMIT 1"));
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (StrUtil.isNotBlank(value)) {
+                return value.trim();
+            }
+        }
+        return "";
+    }
+
+    private record SpeechTranscriptionConfig(String accessKeyId, String accessKeySecret, String appKey, String endpoint) {
     }
 
     private record LlmEvaluation(int score, String comment, String nextQuestion) {
