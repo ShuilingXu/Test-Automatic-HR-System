@@ -368,7 +368,7 @@ spring:
 | `DB_PASSWORD` | 空 | 数据库密码 |
 | `SQLITE_FALLBACK_URL` | `jdbc:sqlite:autohr-dev.db` | SQLite 默认或回退连接 |
 | `MIGRATION_ENABLED` | `true` | 是否执行表结构迁移 |
-| `JWT_SECRET` | 本地默认值 | JWT 签名密钥，生产环境必须修改 |
+| `JWT_SECRET` | 无（必填） | JWT 签名密钥，必须使用长度不少于 32 个字符的随机值 |
 | `JWT_EXPIRATION` | `86400000` | Token 有效期，单位毫秒 |
 
 ### SQLite 开发配置示例
@@ -376,7 +376,7 @@ spring:
 ```properties
 DB_TYPE=sqlite
 SQLITE_FALLBACK_URL=jdbc:sqlite:autohr-dev.db
-JWT_SECRET=replace-with-a-secure-secret-at-least-32-chars
+JWT_SECRET=generate-a-unique-secret-with-at-least-32-characters
 ```
 
 ### MySQL 配置示例
@@ -399,7 +399,7 @@ DB_PASSWORD=your_password
 JWT_SECRET=replace-with-a-secure-secret-at-least-32-chars
 ```
 
-如果 MySQL 或 PostgreSQL 连接失败，系统会尝试回退到 SQLite。
+开发环境可在 MySQL 或 PostgreSQL 连接失败时回退到 SQLite；生产环境必须显式配置 `DB_TYPE`，且非 SQLite 数据库必须提供 `DB_URL`。
 
 ### 生产 PostgreSQL 与邮件
 
@@ -411,6 +411,7 @@ DB_URL=jdbc:postgresql://127.0.0.1:5432/hrsystem
 DB_USERNAME=hrsystem
 DB_PASSWORD=change-this-password
 DB_FALLBACK_ENABLED=false
+JWT_SECRET=generate-a-unique-secret-with-at-least-32-characters
 
 SMTP_HOST=smtp.office365.com
 SMTP_PORT=587
@@ -423,9 +424,25 @@ SMTP_STARTTLS_ENABLED=true
 
 候选人注册页可选择使用手机号或邮箱接收验证码，两个联系方式互斥；短信验证码需要另行配置阿里云短信变量。
 
+### SQLite 迁移到 PostgreSQL
+
+在已经由应用创建好 PostgreSQL 表结构后，先用只读检查确认源数据和目标表：
+
+```bash
+python3 scripts/migrate-sqlite-to-postgres.py autohr.db --dsn "$POSTGRES_DSN" --dry-run
+```
+
+迁移器默认拒绝覆盖含有数据的 PostgreSQL 目标。确认需要以 SQLite 数据替换目标后，显式执行：
+
+```bash
+python3 scripts/migrate-sqlite-to-postgres.py autohr.db --dsn "$POSTGRES_DSN" --force-overwrite
+```
+
+迁移在单个数据库事务中执行，包含流程模板、模板阶段和已创建的流程阶段；失败时 PostgreSQL 会回滚，源 SQLite 文件不会被改写。
+
 ### 一键发行包与 systemd
 
-GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。推送 `v*` 标签还会创建 GitHub Release。若在仓库 Secrets 配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_WEB_ROOT` 和可选的 `DEPLOY_PORT`，`main` 推送会自动发布到服务器；`DEPLOY_WEB_ROOT` 应为 OpenResty/Nginx 的站点静态目录，例如 1Panel OpenResty 的 `/opt/1panel/www/sites/hr.zroevn.cn/index`。未配置这些 Secrets 时，构建仍会成功并安全跳过部署。
+GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。推送 `v*` 标签还会创建 GitHub Release。若在仓库 Secrets 配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_WEB_ROOT` 和可选的 `DEPLOY_PORT`，`main` 推送会自动发布到服务器；`DEPLOY_WEB_ROOT` 应为 OpenResty/Nginx 的站点静态目录，例如 1Panel OpenResty 的 `/opt/1panel/www/sites/hr.zroevn.cn/index`。首次部署还必须配置 `DEPLOY_INITIAL_ENV`，其内容为完整的 `.env` 文件，至少包含 `JWT_SECRET`、`DB_TYPE`、`DB_URL`、`DB_USERNAME`、`DB_PASSWORD`；已有服务器上的 `.env` 不会被覆盖。未配置部署 Secrets 时，构建仍会成功并安全跳过部署。
 
 本地也可生成同一发行包：
 

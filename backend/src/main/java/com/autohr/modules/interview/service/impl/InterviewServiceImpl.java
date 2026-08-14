@@ -62,6 +62,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -114,6 +115,7 @@ public class InterviewServiceImpl implements InterviewService {
     private final VideoMergeService videoMergeService;
     private final S3ObjectStorageService s3ObjectStorageService;
     private final SystemConfigService systemConfigService;
+    private final TransactionTemplate transactionTemplate;
 
     @Value("${interview.llm.debug:false}")
     private boolean llmDebug;
@@ -630,7 +632,7 @@ public class InterviewServiceImpl implements InterviewService {
         SseEmitter emitter = new SseEmitter(180000L);
         CompletableFuture.runAsync(() -> {
             try {
-                InterviewVO result = submitAiAnswer(request, chunk -> {
+                InterviewVO result = submitAiAnswerInTransaction(request, chunk -> {
                     try {
                         sendSse(emitter, "token", chunk);
                     } catch (IOException ex) {
@@ -652,6 +654,14 @@ public class InterviewServiceImpl implements InterviewService {
 
     private void sendSse(SseEmitter emitter, String event, Object data) throws IOException {
         emitter.send(SseEmitter.event().name(event).data(data));
+    }
+
+    private InterviewVO submitAiAnswerInTransaction(AiAnswerRequest request, Consumer<String> interviewerChunkConsumer) {
+        InterviewVO result = transactionTemplate.execute(status -> submitAiAnswer(request, interviewerChunkConsumer));
+        if (result == null) {
+            throw new BusinessException("AI answer submission did not return a result");
+        }
+        return result;
     }
 
     @Override
@@ -940,7 +950,7 @@ public class InterviewServiceImpl implements InterviewService {
             return decideTemplateStage(process, "AI", request);
         }
         ensureInProgress(process);
-        if (!StrUtil.equals(process.getCurrentStage(), "AI")) {
+        if (!StrUtil.equals(process.getCurrentStage(), "AI") || !StrUtil.equals(process.getStageStatus(), "WAITING_APPROVAL")) {
             throw new BusinessException("当前流程不在AI审批阶段");
         }
         if (request.getApproved() == 1) {

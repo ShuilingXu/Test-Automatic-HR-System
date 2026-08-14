@@ -2,9 +2,13 @@ package com.autohr.common.file;
 
 import com.autohr.modules.system.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.task.TaskRejectedException;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -30,12 +34,34 @@ public class S3ObjectStorageService {
     };
 
     private final SystemConfigService systemConfigService;
+    private final ThreadPoolTaskExecutor s3ArchiveExecutor;
 
     /**
      * Archives a local file to an S3-compatible object store. Local storage remains
      * the source of truth so a storage outage never interrupts interview processing.
      */
     public void archiveIfEnabled(Path localFile, String objectName, String contentType) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    submitArchive(localFile, objectName, contentType);
+                }
+            });
+            return;
+        }
+        submitArchive(localFile, objectName, contentType);
+    }
+
+    private void submitArchive(Path localFile, String objectName, String contentType) {
+        try {
+            s3ArchiveExecutor.execute(() -> archive(localFile, objectName, contentType));
+        } catch (TaskRejectedException ex) {
+            log.warn("S3 archive queue is full for {}. Keeping the local file.", localFile.getFileName());
+        }
+    }
+
+    private void archive(Path localFile, String objectName, String contentType) {
         Map<String, String> config = systemConfigService.loadConfig(CONFIG_KEYS);
         if (!Boolean.parseBoolean(config.get("S3_ENABLED"))) {
             return;

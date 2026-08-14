@@ -8,11 +8,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 @RequiredArgsConstructor
@@ -143,7 +146,6 @@ public class VideoMergeService {
                 "-c:v", videoCodec,
                 "-b:v", "1600k",
                 "-c:a", audioCodec,
-                "-shortest",
                 output.toString()
         ), "横向拼接视频失败");
     }
@@ -153,14 +155,34 @@ public class VideoMergeService {
         builder.redirectErrorStream(true);
         try {
             Process process = builder.start();
-            String output = new String(process.getInputStream().readAllBytes());
-            boolean exited = process.waitFor(Duration.ofMinutes(5).toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+            AtomicReference<String> output = new AtomicReference<>("");
+            AtomicReference<IOException> outputFailure = new AtomicReference<>();
+            Thread outputReader = new Thread(() -> {
+                try {
+                    output.set(readProcessOutput(process.getInputStream()));
+                } catch (IOException ex) {
+                    outputFailure.set(ex);
+                }
+            }, "ffmpeg-output-reader");
+            outputReader.setDaemon(true);
+            outputReader.start();
+            boolean exited = process.waitFor(5, TimeUnit.MINUTES);
             if (!exited) {
                 process.destroyForcibly();
+                process.waitFor(10, TimeUnit.SECONDS);
+                outputReader.interrupt();
                 throw new BusinessException(errorMessage + ": ffmpeg执行超时");
             }
+            outputReader.join(TimeUnit.SECONDS.toMillis(10));
+            if (outputReader.isAlive()) {
+                outputReader.interrupt();
+                throw new BusinessException(errorMessage + ": unable to read ffmpeg output");
+            }
+            if (outputFailure.get() != null) {
+                throw new BusinessException(errorMessage + ": unable to read ffmpeg output");
+            }
             if (process.exitValue() != 0) {
-                throw new BusinessException(errorMessage + ": " + abbreviate(output));
+                throw new BusinessException(errorMessage + ": " + abbreviate(output.get()));
             }
         } catch (IOException ex) {
             throw new BusinessException(errorMessage + ": 未找到ffmpeg，请安装ffmpeg或配置INTERVIEW_VIDEO_FFMPEG_PATH/FFMPEG_PATH");
@@ -168,6 +190,20 @@ public class VideoMergeService {
             Thread.currentThread().interrupt();
             throw new BusinessException(errorMessage + ": ffmpeg执行被中断");
         }
+    }
+
+    private String readProcessOutput(InputStream inputStream) throws IOException {
+        final int maxOutputBytes = 8192;
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[1024];
+        int read;
+        while ((read = inputStream.read(buffer)) != -1) {
+            int remaining = maxOutputBytes - output.size();
+            if (remaining > 0) {
+                output.write(buffer, 0, Math.min(read, remaining));
+            }
+        }
+        return output.toString(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     private boolean isReadableRecording(String path) {
