@@ -56,6 +56,7 @@ ensure_dependencies() {
   install_package coturn
   install_package curl
   install_package ffmpeg
+  install_package openssl
   install_package postgresql-client
   install_package python3-venv
   install_package redis-tools
@@ -172,7 +173,17 @@ list_ffmpeg_encoders() {
 }
 
 random_secret() {
-  openssl rand -hex 18 2>/dev/null || date +%s%N
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo "openssl is required to generate cryptographically random secrets." >&2
+    return 1
+  fi
+  local secret
+  secret="$(openssl rand -hex 32 2>/dev/null || true)"
+  if [ -z "$secret" ]; then
+    echo "openssl could not generate a random secret; refusing to use a predictable fallback." >&2
+    return 1
+  fi
+  printf '%s\n' "$secret"
 }
 
 validate_local_bind_address() {
@@ -297,7 +308,7 @@ prepare_env() {
   local jwt_secret
   jwt_secret="$(get_env_value JWT_SECRET)"
   if [ -z "${jwt_secret//[[:space:]]/}" ]; then
-    set_env_value JWT_SECRET "$(openssl rand -hex 32 2>/dev/null || date +%s%N)"
+    set_env_value JWT_SECRET "$(random_secret)"
     jwt_secret="$(get_env_value JWT_SECRET)"
   fi
   if [ -z "${jwt_secret//[[:space:]]/}" ]; then

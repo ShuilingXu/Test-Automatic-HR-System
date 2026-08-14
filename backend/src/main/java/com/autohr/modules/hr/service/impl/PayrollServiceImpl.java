@@ -2,6 +2,8 @@ package com.autohr.modules.hr.service.impl;
 
 import com.autohr.common.exception.BusinessException;
 import com.autohr.common.security.SensitiveDataMasker;
+import com.autohr.config.database.ActiveDatabase;
+import com.autohr.config.database.DatabaseType;
 import com.autohr.modules.hr.dto.*;
 import com.autohr.modules.hr.service.PayrollService;
 import com.autohr.modules.hr.service.PayrollCalculations;
@@ -10,11 +12,13 @@ import com.autohr.modules.hr.service.PayrollExportTemplate;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFCell;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -34,48 +38,57 @@ public class PayrollServiceImpl implements PayrollService {
     private static final BigDecimal MONTHLY_DEDUCTION = new BigDecimal("5000.00");
     private final JdbcTemplate jdbc;
     private final Validator validator;
+    private ActiveDatabase activeDatabase;
+
+    @Autowired
+    void configureDatabase(ActiveDatabase activeDatabase) {
+        this.activeDatabase = activeDatabase;
+    }
 
     @Override @Transactional
     public void savePerformance(MonthlyPerformanceRequest request, Long operatorUserId) {
-        assertWritable(request.getEmployeeId(), request.getSalaryMonth());
+        assertInputWritable(request.getEmployeeId(), request.getSalaryMonth());
         ensureEmployee(request.getEmployeeId());
-        int changed = jdbc.update("UPDATE hr_performance_month SET amount=?, note=?, operator_user_id=?, updated_at=CURRENT_TIMESTAMP WHERE employee_id=? AND salary_month=?",
-                money(request.getAmount()), request.getNote(), operatorUserId, request.getEmployeeId(), request.getSalaryMonth());
-        if (changed == 0) jdbc.update("INSERT INTO hr_performance_month (employee_id,salary_month,amount,note,operator_user_id) VALUES (?,?,?,?,?)",
+        upsertMonthlyInput("hr_performance_month",
+                "employee_id,salary_month,amount,note,operator_user_id",
+                "amount,note,operator_user_id",
                 request.getEmployeeId(), request.getSalaryMonth(), money(request.getAmount()), request.getNote(), operatorUserId);
     }
 
     @Override @Transactional
     public void saveOvertime(MonthlyOvertimeRequest request, Long operatorUserId) {
-        assertWritable(request.getEmployeeId(), request.getSalaryMonth());
+        assertInputWritable(request.getEmployeeId(), request.getSalaryMonth());
         Map<String, Object> employee = ensureEmployee(request.getEmployeeId());
         BigDecimal rate = value(employee.get("overtime_rate"));
         if (employee.get("overtime_rate") == null) rate = value(employee.get("default_overtime_rate"));
         rate = PayrollCalculations.resolveOvertimeRate(employee.get("overtime_rate") == null ? null : value(employee.get("overtime_rate")), rate);
         BigDecimal hours = money(request.getOvertimeHours());
         BigDecimal pay = PayrollCalculations.overtimePay(hours, rate);
-        int changed = jdbc.update("UPDATE hr_overtime_month SET overtime_hours=?, unit_rate=?, overtime_pay=?, note=?, operator_user_id=?, updated_at=CURRENT_TIMESTAMP WHERE employee_id=? AND salary_month=?",
-                hours, rate, pay, request.getNote(), operatorUserId, request.getEmployeeId(), request.getSalaryMonth());
-        if (changed == 0) jdbc.update("INSERT INTO hr_overtime_month (employee_id,salary_month,overtime_hours,unit_rate,overtime_pay,note,operator_user_id) VALUES (?,?,?,?,?,?,?)",
+        upsertMonthlyInput("hr_overtime_month",
+                "employee_id,salary_month,overtime_hours,unit_rate,overtime_pay,note,operator_user_id",
+                "overtime_hours,unit_rate,overtime_pay,note,operator_user_id",
                 request.getEmployeeId(), request.getSalaryMonth(), hours, rate, pay, request.getNote(), operatorUserId);
     }
 
     @Override @Transactional
     public void saveSocialInsurance(MonthlySocialInsuranceRequest request) {
-        assertWritable(request.getEmployeeId(), request.getSalaryMonth()); ensureEmployee(request.getEmployeeId());
-        Object[] values = {money(request.getPension()), money(request.getMedical()), money(request.getUnemployment()), money(request.getHousingFund()), request.getEmployeeId(), request.getSalaryMonth()};
-        int changed = jdbc.update("UPDATE hr_social_insurance_month SET pension=?,medical=?,unemployment=?,housing_fund=?,updated_at=CURRENT_TIMESTAMP WHERE employee_id=? AND salary_month=?", values);
-        if (changed == 0) jdbc.update("INSERT INTO hr_social_insurance_month (employee_id,salary_month,pension,medical,unemployment,housing_fund) VALUES (?,?,?,?,?,?)",
-                request.getEmployeeId(), request.getSalaryMonth(), values[0], values[1], values[2], values[3]);
+        assertInputWritable(request.getEmployeeId(), request.getSalaryMonth()); ensureEmployee(request.getEmployeeId());
+        upsertMonthlyInput("hr_social_insurance_month",
+                "employee_id,salary_month,pension,medical,unemployment,housing_fund",
+                "pension,medical,unemployment,housing_fund",
+                request.getEmployeeId(), request.getSalaryMonth(), money(request.getPension()), money(request.getMedical()),
+                money(request.getUnemployment()), money(request.getHousingFund()));
     }
 
     @Override @Transactional
     public void saveSpecialDeduction(MonthlySpecialDeductionRequest request) {
-        assertWritable(request.getEmployeeId(), request.getSalaryMonth()); ensureEmployee(request.getEmployeeId());
-        Object[] v = {money(request.getChildrenEducation()), money(request.getContinuingEducation()), money(request.getHousingLoanInterest()), money(request.getHousingRent()), money(request.getElderlySupport()), money(request.getInfantCare()), money(request.getOtherDeduction()), request.getEmployeeId(), request.getSalaryMonth()};
-        int changed = jdbc.update("UPDATE hr_special_deduction_month SET children_education=?,continuing_education=?,housing_loan_interest=?,housing_rent=?,elderly_support=?,infant_care=?,other_deduction=?,updated_at=CURRENT_TIMESTAMP WHERE employee_id=? AND salary_month=?", v);
-        if (changed == 0) jdbc.update("INSERT INTO hr_special_deduction_month (employee_id,salary_month,children_education,continuing_education,housing_loan_interest,housing_rent,elderly_support,infant_care,other_deduction) VALUES (?,?,?,?,?,?,?,?,?)",
-                request.getEmployeeId(), request.getSalaryMonth(), v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
+        assertInputWritable(request.getEmployeeId(), request.getSalaryMonth()); ensureEmployee(request.getEmployeeId());
+        upsertMonthlyInput("hr_special_deduction_month",
+                "employee_id,salary_month,children_education,continuing_education,housing_loan_interest,housing_rent,elderly_support,infant_care,other_deduction",
+                "children_education,continuing_education,housing_loan_interest,housing_rent,elderly_support,infant_care,other_deduction",
+                request.getEmployeeId(), request.getSalaryMonth(), money(request.getChildrenEducation()), money(request.getContinuingEducation()),
+                money(request.getHousingLoanInterest()), money(request.getHousingRent()), money(request.getElderlySupport()),
+                money(request.getInfantCare()), money(request.getOtherDeduction()));
     }
 
     @Override @Transactional
@@ -94,8 +107,7 @@ public class PayrollServiceImpl implements PayrollService {
             boolean supportedStatus = employmentStatus == 1 || employmentStatus == 3;
             boolean beforeDismissal = dismissalDate == null || !target.isAfter(YearMonth.from(dismissalDate));
             boolean eligible = supportedStatus && beforeDismissal
-                    && (hireDate == null || !YearMonth.from(hireDate).isAfter(target))
-                    && salaryEffective(employeeId, target);
+                    && (hireDate == null || !YearMonth.from(hireDate).isAfter(target));
             if (!eligible) {
                 if (request.getEmployeeId() != null) {
                     throw new BusinessException("Employee is not eligible for payroll in the selected month");
@@ -192,17 +204,88 @@ public class PayrollServiceImpl implements PayrollService {
     }
 
     private void upsertPayroll(PayrollVO p) {
-        int updated = jdbc.update("UPDATE hr_payroll_month SET base_salary=?,performance=?,overtime_hours=?,overtime_pay=?,gross_income=?,social_insurance_total=?,special_deduction_total=?,taxable_income_month=?,cumulative_income=?,cumulative_deduction_base=?,cumulative_social_insurance=?,cumulative_special_deduction=?,cumulative_taxable_income=?,cumulative_tax_withheld=?,current_tax_withheld=?,net_pay=?,calculated_at=CURRENT_TIMESTAMP WHERE employee_id=? AND salary_month=?",
-                p.getBaseSalary(),p.getPerformance(),p.getOvertimeHours(),p.getOvertimePay(),p.getGrossIncome(),p.getSocialInsuranceTotal(),p.getSpecialDeductionTotal(),p.getTaxableIncomeMonth(),p.getCumulativeIncome(),p.getCumulativeDeductionBase(),p.getCumulativeSocialInsurance(),p.getCumulativeSpecialDeduction(),p.getCumulativeTaxableIncome(),p.getCumulativeTaxWithheld(),p.getCurrentTaxWithheld(),p.getNetPay(),p.getEmployeeId(),p.getSalaryMonth());
-        if (updated == 0) jdbc.update("INSERT INTO hr_payroll_month (employee_id,salary_month,base_salary,performance,overtime_hours,overtime_pay,gross_income,social_insurance_total,special_deduction_total,taxable_income_month,cumulative_income,cumulative_deduction_base,cumulative_social_insurance,cumulative_special_deduction,cumulative_taxable_income,cumulative_tax_withheld,current_tax_withheld,net_pay,locked) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)",
-                p.getEmployeeId(),p.getSalaryMonth(),p.getBaseSalary(),p.getPerformance(),p.getOvertimeHours(),p.getOvertimePay(),p.getGrossIncome(),p.getSocialInsuranceTotal(),p.getSpecialDeductionTotal(),p.getTaxableIncomeMonth(),p.getCumulativeIncome(),p.getCumulativeDeductionBase(),p.getCumulativeSocialInsurance(),p.getCumulativeSpecialDeduction(),p.getCumulativeTaxableIncome(),p.getCumulativeTaxWithheld(),p.getCurrentTaxWithheld(),p.getNetPay());
+        Object[] args = {p.getEmployeeId(),p.getSalaryMonth(),p.getBaseSalary(),p.getPerformance(),p.getOvertimeHours(),
+                p.getOvertimePay(),p.getGrossIncome(),p.getSocialInsuranceTotal(),p.getSpecialDeductionTotal(),
+                p.getTaxableIncomeMonth(),p.getCumulativeIncome(),p.getCumulativeDeductionBase(),
+                p.getCumulativeSocialInsurance(),p.getCumulativeSpecialDeduction(),p.getCumulativeTaxableIncome(),
+                p.getCumulativeTaxWithheld(),p.getCurrentTaxWithheld(),p.getNetPay()};
+        String update = "base_salary=EXCLUDED.base_salary,performance=EXCLUDED.performance,overtime_hours=EXCLUDED.overtime_hours,"
+                + "overtime_pay=EXCLUDED.overtime_pay,gross_income=EXCLUDED.gross_income,social_insurance_total=EXCLUDED.social_insurance_total,"
+                + "special_deduction_total=EXCLUDED.special_deduction_total,taxable_income_month=EXCLUDED.taxable_income_month,"
+                + "cumulative_income=EXCLUDED.cumulative_income,cumulative_deduction_base=EXCLUDED.cumulative_deduction_base,"
+                + "cumulative_social_insurance=EXCLUDED.cumulative_social_insurance,cumulative_special_deduction=EXCLUDED.cumulative_special_deduction,"
+                + "cumulative_taxable_income=EXCLUDED.cumulative_taxable_income,cumulative_tax_withheld=EXCLUDED.cumulative_tax_withheld,"
+                + "current_tax_withheld=EXCLUDED.current_tax_withheld,net_pay=EXCLUDED.net_pay,calculated_at=CURRENT_TIMESTAMP";
+        String sql;
+        com.autohr.config.database.DatabaseType databaseType = activeDatabase == null
+                ? com.autohr.config.database.DatabaseType.SQLITE : activeDatabase.type();
+        if (databaseType == com.autohr.config.database.DatabaseType.MYSQL) {
+            String mysqlUpdate = "base_salary=VALUES(base_salary),performance=VALUES(performance),overtime_hours=VALUES(overtime_hours),"
+                    + "overtime_pay=VALUES(overtime_pay),gross_income=VALUES(gross_income),social_insurance_total=VALUES(social_insurance_total),"
+                    + "special_deduction_total=VALUES(special_deduction_total),taxable_income_month=VALUES(taxable_income_month),"
+                    + "cumulative_income=VALUES(cumulative_income),cumulative_deduction_base=VALUES(cumulative_deduction_base),"
+                    + "cumulative_social_insurance=VALUES(cumulative_social_insurance),cumulative_special_deduction=VALUES(cumulative_special_deduction),"
+                    + "cumulative_taxable_income=VALUES(cumulative_taxable_income),cumulative_tax_withheld=VALUES(cumulative_tax_withheld),"
+                    + "current_tax_withheld=VALUES(current_tax_withheld),net_pay=VALUES(net_pay),calculated_at=CURRENT_TIMESTAMP";
+            sql = "INSERT INTO hr_payroll_month (employee_id,salary_month,base_salary,performance,overtime_hours,overtime_pay,gross_income,social_insurance_total,special_deduction_total,taxable_income_month,cumulative_income,cumulative_deduction_base,cumulative_social_insurance,cumulative_special_deduction,cumulative_taxable_income,cumulative_tax_withheld,current_tax_withheld,net_pay,locked) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0) ON DUPLICATE KEY UPDATE " + mysqlUpdate;
+        } else {
+            sql = "INSERT INTO hr_payroll_month (employee_id,salary_month,base_salary,performance,overtime_hours,overtime_pay,gross_income,social_insurance_total,special_deduction_total,taxable_income_month,cumulative_income,cumulative_deduction_base,cumulative_social_insurance,cumulative_special_deduction,cumulative_taxable_income,cumulative_tax_withheld,current_tax_withheld,net_pay,locked) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0) ON CONFLICT (employee_id,salary_month) DO UPDATE SET " + update + " WHERE hr_payroll_month.locked=0";
+        }
+        int affected = jdbc.update(sql, args);
+        if (affected == 0 && isLocked(p.getEmployeeId(), p.getSalaryMonth())) {
+            throw new BusinessException("Payroll is locked for this month");
+        }
     }
 
     private void assertWritable(Long employeeId, String month) { PayrollMutationGuard.requireWritable(isLocked(employeeId, month)); }
+    private void assertInputWritable(Long employeeId, String month) {
+        assertWritable(employeeId, month);
+        if (jdbc.queryForObject("SELECT COUNT(*) FROM hr_payroll_month WHERE employee_id=? AND salary_month=?",
+                Long.class, employeeId, month) > 0) {
+            throw new BusinessException("Payroll has already been generated for this month; delete or regenerate it before changing inputs");
+        }
+    }
     private boolean isLocked(Long employeeId, String month) { return jdbc.queryForObject("SELECT COUNT(*) FROM hr_payroll_month WHERE employee_id=? AND salary_month=? AND locked=1", Long.class, employeeId, month) > 0; }
     private Map<String,Object> ensureEmployee(Long id) { List<Map<String,Object>> rows = jdbc.queryForList("SELECT e.*,j.default_overtime_rate FROM hr_employee e LEFT JOIN recruitment_job j ON e.job_id=j.id WHERE e.id=?", id); if (rows.isEmpty()) throw new BusinessException("Employee does not exist: " + id); return rows.get(0); }
-    private BigDecimal baseForMonth(Long employeeId, String month, BigDecimal fallback) { List<Map<String,Object>> rows = jdbc.queryForList("SELECT effective_month,base_salary_after FROM hr_salary_history WHERE employee_id=? ORDER BY effective_month DESC,id DESC", employeeId);for(Map<String,Object> row:rows){if(text(row.get("effective_month")).compareTo(month)<=0)return value(row.get("base_salary_after"));}return rows.isEmpty()?money(fallback):ZERO; }
-    private boolean salaryEffective(Long employeeId, YearMonth month) { List<Map<String,Object>> rows=jdbc.queryForList("SELECT effective_month FROM hr_salary_history WHERE employee_id=?",employeeId);return rows.isEmpty()||rows.stream().anyMatch(row->text(row.get("effective_month")).compareTo(month.toString())<=0); }
+    private void upsertMonthlyInput(String table, String insertColumns, String updateColumns, Object... values) {
+        String[] columns = insertColumns.split(",");
+        String[] updates = updateColumns.split(",");
+        String placeholders = String.join(",", Collections.nCopies(columns.length, "?"));
+        DatabaseType databaseType = activeDatabase == null ? DatabaseType.SQLITE : activeDatabase.type();
+        String sql;
+        if (databaseType == DatabaseType.MYSQL) {
+            String duplicateAssignments = Arrays.stream(updates)
+                    .map(column -> column + "=VALUES(" + column + ")")
+                    .collect(java.util.stream.Collectors.joining(","));
+            sql = "INSERT INTO " + table + " (" + insertColumns + ") VALUES (" + placeholders
+                    + ") ON DUPLICATE KEY UPDATE " + duplicateAssignments + ",updated_at=CURRENT_TIMESTAMP";
+        } else {
+            String excludedAssignments = Arrays.stream(updates)
+                    .map(column -> column + "=excluded." + column)
+                    .collect(java.util.stream.Collectors.joining(","));
+            sql = "INSERT INTO " + table + " (" + insertColumns + ") VALUES (" + placeholders
+                    + ") ON CONFLICT (employee_id,salary_month) DO UPDATE SET " + excludedAssignments
+                    + ",updated_at=CURRENT_TIMESTAMP";
+        }
+        jdbc.update(sql, values);
+    }
+
+    private BigDecimal baseForMonth(Long employeeId, String month, BigDecimal fallback) {
+        List<Map<String,Object>> rows = jdbc.queryForList(
+                "SELECT effective_month,base_salary_before,base_salary_after FROM hr_salary_history "
+                        + "WHERE employee_id=? ORDER BY effective_month DESC,id DESC", employeeId);
+        for (Map<String, Object> row : rows) {
+            if (text(row.get("effective_month")).compareTo(month) <= 0) {
+                return value(row.get("base_salary_after"));
+            }
+        }
+        if (!rows.isEmpty()) {
+            // Backdated payroll before the first adjustment uses the prior salary.
+            Object beforeValue = rows.get(rows.size() - 1).get("base_salary_before");
+            if (beforeValue != null) return value(beforeValue);
+        }
+        return money(fallback);
+    }
     private BigDecimal scalar(String sql, Object... args) { List<Map<String,Object>> rows = jdbc.queryForList(sql, args); return rows.isEmpty() ? ZERO : value(rows.get(0).values().iterator().next()); }
     private BigDecimal sum(Map<String,Object> map, String... keys) { BigDecimal total=ZERO; for(String key:keys) total=total.add(value(map.get(key))); return money(total); }
     private PayrollVO toPayroll(Map<String,Object> r, boolean maskSensitiveData) { PayrollVO p=new PayrollVO(); p.setEmployeeId(number(r.get("employee_id")));p.setEmployeeCode(text(r.get("employee_code")));p.setEmployeeName(text(r.get("full_name")));String idCardNo=text(r.get("id_card_no"));p.setIdCardNo(maskSensitiveData ? SensitiveDataMasker.maskIdentityOrAccount(idCardNo) : idCardNo);p.setSalaryMonth(text(r.get("salary_month")));p.setBaseSalary(value(r.get("base_salary")));p.setPerformance(value(r.get("performance")));p.setOvertimeHours(value(r.get("overtime_hours")));p.setOvertimePay(value(r.get("overtime_pay")));p.setGrossIncome(value(r.get("gross_income")));p.setSocialInsuranceTotal(value(r.get("social_insurance_total")));p.setSpecialDeductionTotal(value(r.get("special_deduction_total")));p.setTaxableIncomeMonth(value(r.get("taxable_income_month")));p.setCumulativeIncome(value(r.get("cumulative_income")));p.setCumulativeDeductionBase(value(r.get("cumulative_deduction_base")));p.setCumulativeSocialInsurance(value(r.get("cumulative_social_insurance")));p.setCumulativeSpecialDeduction(value(r.get("cumulative_special_deduction")));p.setCumulativeTaxableIncome(value(r.get("cumulative_taxable_income")));p.setCumulativeTaxWithheld(value(r.get("cumulative_tax_withheld")));p.setCurrentTaxWithheld(value(r.get("current_tax_withheld")));p.setNetPay(value(r.get("net_pay")));p.setLocked(integer(r.get("locked"))); Object at=r.get("calculated_at"); if(at instanceof Timestamp t)p.setCalculatedAt(t.toLocalDateTime()); else if(at instanceof LocalDateTime dt)p.setCalculatedAt(dt); return p; }
@@ -216,11 +299,30 @@ public class PayrollServiceImpl implements PayrollService {
     private YearMonth parseMonth(String month) { try{return YearMonth.parse(month);}catch(Exception e){throw new BusinessException("Month must be yyyy-MM");} }
     private record MonthAmounts(BigDecimal base, BigDecimal performance, BigDecimal hours, BigDecimal overtimePay, BigDecimal gross, BigDecimal social, BigDecimal special) {}
 
-    @Override public List<Map<String,Object>> listInputs(String kind,String salaryMonth,Long employeeId){parseMonth(salaryMonth);String table=inputTable(kind);String sql="SELECT m.*,e.employee_code,e.full_name AS employee_name FROM "+table+" m JOIN hr_employee e ON e.id=m.employee_id WHERE m.salary_month=?";List<Object> args=new ArrayList<>(List.of(salaryMonth));if(employeeId!=null){sql+=" AND m.employee_id=?";args.add(employeeId);}sql+=" ORDER BY e.employee_code";return jdbc.queryForList(sql,args.toArray());}
-    @Override @Transactional public void deleteInput(String kind,Long employeeId,String salaryMonth){parseMonth(salaryMonth);assertWritable(employeeId,salaryMonth);jdbc.update("DELETE FROM "+inputTable(kind)+" WHERE employee_id=? AND salary_month=?",employeeId,salaryMonth);}
+    @Override
+    public List<Map<String,Object>> listInputs(String kind, String salaryMonth, Long employeeId) {
+        parseMonth(salaryMonth);
+        String table = inputTable(kind);
+        String sql = "SELECT " + inputColumns(kind) + ",e.employee_code,e.full_name AS employee_name FROM " + table
+                + " m JOIN hr_employee e ON e.id=m.employee_id WHERE m.salary_month=?";
+        List<Object> args = new ArrayList<>(List.of(salaryMonth));
+        if (employeeId != null) { sql += " AND m.employee_id=?"; args.add(employeeId); }
+        sql += " ORDER BY e.employee_code";
+        return jdbc.queryForList(sql, args.toArray());
+    }
+    private String inputColumns(String kind) {
+        return switch (kind) {
+            case "performance" -> "m.id,m.employee_id,m.salary_month,m.amount,m.note,m.created_at,m.updated_at";
+            case "overtime" -> "m.id,m.employee_id,m.salary_month,m.overtime_hours,m.unit_rate,m.overtime_pay,m.note,m.created_at,m.updated_at";
+            case "social-insurance" -> "m.id,m.employee_id,m.salary_month,m.pension,m.medical,m.unemployment,m.housing_fund,m.created_at,m.updated_at";
+            case "special-deductions" -> "m.id,m.employee_id,m.salary_month,m.children_education,m.continuing_education,m.housing_loan_interest,m.housing_rent,m.elderly_support,m.infant_care,m.other_deduction,m.created_at,m.updated_at";
+            default -> throw new BusinessException("Unknown monthly input type");
+        };
+    }
+    @Override @Transactional public void deleteInput(String kind,Long employeeId,String salaryMonth){parseMonth(salaryMonth);assertInputWritable(employeeId,salaryMonth);jdbc.update("DELETE FROM "+inputTable(kind)+" WHERE employee_id=? AND salary_month=?",employeeId,salaryMonth);}
     private String inputTable(String kind){return switch(kind){case "performance"->"hr_performance_month";case "overtime"->"hr_overtime_month";case "social-insurance"->"hr_social_insurance_month";case "special-deductions"->"hr_special_deduction_month";default->throw new BusinessException("Unknown monthly input type");};}
 
-    @Override
+    @Override @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ImportResultVO importPerformance(MultipartFile file, Long operatorUserId) {
         return importFile(file, row -> {
             MonthlyPerformanceRequest request = new MonthlyPerformanceRequest();
@@ -232,7 +334,7 @@ public class PayrollServiceImpl implements PayrollService {
         }, 4);
     }
 
-    @Override
+    @Override @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ImportResultVO importOvertime(MultipartFile file, Long operatorUserId) {
         return importFile(file, row -> {
             MonthlyOvertimeRequest request = new MonthlyOvertimeRequest();
@@ -244,7 +346,7 @@ public class PayrollServiceImpl implements PayrollService {
         }, 4);
     }
 
-    @Override
+    @Override @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ImportResultVO importSocialInsurance(MultipartFile file) {
         return importFile(file, row -> {
             MonthlySocialInsuranceRequest request = new MonthlySocialInsuranceRequest();
@@ -259,7 +361,7 @@ public class PayrollServiceImpl implements PayrollService {
         }, 7);
     }
 
-    @Override
+    @Override @Transactional(propagation = Propagation.REQUIRES_NEW)
     public ImportResultVO importSpecialDeduction(MultipartFile file) {
         return importFile(file, row -> {
             MonthlySpecialDeductionRequest request = new MonthlySpecialDeductionRequest();
@@ -324,5 +426,58 @@ public class PayrollServiceImpl implements PayrollService {
     private record ImportTarget(Long employeeId, String salaryMonth) {}
     @FunctionalInterface private interface RowConsumer { ImportTarget accept(Row row); }
 
-    @Override public byte[] exportPayroll(String salaryMonth, Long employeeId) { try(Workbook book=new XSSFWorkbook(); ByteArrayOutputStream out=new ByteArrayOutputStream()){ Sheet sheet=book.createSheet("正常工资薪金所得"); String[] headers=PayrollExportTemplate.HEADERS; Row header=sheet.createRow(0);for(int i=0;i<headers.length;i++)header.createCell(i).setCellValue(headers[i]); List<PayrollVO> payrolls=queryPayroll(salaryMonth,employeeId,false);for(int r=0;r<payrolls.size();r++){PayrollVO p=payrolls.get(r);Row row=sheet.createRow(r+1);row.createCell(0).setCellValue(p.getEmployeeCode());row.createCell(1).setCellValue(p.getEmployeeName());row.createCell(2).setCellValue("居民身份证");row.createCell(3).setCellValue(p.getIdCardNo());row.createCell(4).setCellValue(p.getGrossIncome().doubleValue());row.createCell(5).setCellValue(0D); List<Map<String,Object>> social=jdbc.queryForList("SELECT * FROM hr_social_insurance_month WHERE employee_id=? AND salary_month=?",p.getEmployeeId(),salaryMonth);List<Map<String,Object>> special=jdbc.queryForList("SELECT * FROM hr_special_deduction_month WHERE employee_id=? AND salary_month=?",p.getEmployeeId(),salaryMonth); Map<String,Object>s=social.isEmpty()?Map.of():social.get(0),d=special.isEmpty()?Map.of():special.get(0);String[] sk={"pension","medical","unemployment","housing_fund"},dk={"children_education","continuing_education","housing_loan_interest","housing_rent","elderly_support","infant_care","other_deduction"};for(int i=0;i<sk.length;i++)row.createCell(i+6).setCellValue(value(s.get(sk[i])).doubleValue());for(int i=0;i<dk.length;i++)row.createCell(i+10).setCellValue(value(d.get(dk[i])).doubleValue());row.createCell(17).setCellValue(p.getCurrentTaxWithheld().doubleValue());} for(int i=0;i<headers.length;i++)sheet.autoSizeColumn(i);book.write(out);return out.toByteArray(); }catch(Exception e){throw new BusinessException("Unable to create payroll export: "+e.getMessage());} }
+    @Override
+    public byte[] exportPayroll(String salaryMonth, Long employeeId) {
+        try (Workbook book = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Sheet sheet = book.createSheet("Payroll");
+            String[] headers = PayrollExportTemplate.HEADERS;
+            Row header = sheet.createRow(0);
+            for (int i = 0; i < headers.length; i++) header.createCell(i).setCellValue(headers[i]);
+
+            List<PayrollVO> payrolls = queryPayroll(salaryMonth, employeeId, false);
+            List<Long> ids = payrolls.stream().map(PayrollVO::getEmployeeId).toList();
+            Map<Long, Map<String, Object>> socialByEmployee = monthlyRows("hr_social_insurance_month", salaryMonth, ids);
+            Map<Long, Map<String, Object>> specialByEmployee = monthlyRows("hr_special_deduction_month", salaryMonth, ids);
+            CellStyle moneyStyle = book.createCellStyle();
+            moneyStyle.setDataFormat(book.createDataFormat().getFormat("0.00"));
+            String[] socialKeys = {"pension", "medical", "unemployment", "housing_fund"};
+            String[] deductionKeys = {"children_education", "continuing_education", "housing_loan_interest", "housing_rent", "elderly_support", "infant_care", "other_deduction"};
+            for (int r = 0; r < payrolls.size(); r++) {
+                PayrollVO p = payrolls.get(r);
+                Row row = sheet.createRow(r + 1);
+                row.createCell(0).setCellValue(p.getEmployeeCode());
+                row.createCell(1).setCellValue(p.getEmployeeName());
+                row.createCell(2).setCellValue("居民身份证");
+                row.createCell(3).setCellValue(p.getIdCardNo());
+                setMoney(row.createCell(4), p.getGrossIncome(), moneyStyle);
+                setMoney(row.createCell(5), ZERO, moneyStyle);
+                Map<String, Object> social = socialByEmployee.getOrDefault(p.getEmployeeId(), Map.of());
+                Map<String, Object> special = specialByEmployee.getOrDefault(p.getEmployeeId(), Map.of());
+                for (int i = 0; i < socialKeys.length; i++) setMoney(row.createCell(i + 6), value(social.get(socialKeys[i])), moneyStyle);
+                for (int i = 0; i < deductionKeys.length; i++) setMoney(row.createCell(i + 10), value(special.get(deductionKeys[i])), moneyStyle);
+                setMoney(row.createCell(17), p.getCurrentTaxWithheld(), moneyStyle);
+            }
+            for (int i = 0; i < headers.length; i++) sheet.autoSizeColumn(i);
+            book.write(out);
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new BusinessException("Unable to create payroll export: " + e.getMessage());
+        }
+    }
+
+    private Map<Long, Map<String, Object>> monthlyRows(String table, String month, List<Long> employeeIds) {
+        if (employeeIds.isEmpty()) return Map.of();
+        String placeholders = String.join(",", Collections.nCopies(employeeIds.size(), "?"));
+        List<Object> args = new ArrayList<>(employeeIds);
+        args.add(month);
+        return jdbc.queryForList("SELECT * FROM " + table + " WHERE employee_id IN (" + placeholders + ") AND salary_month=?", args.toArray())
+                .stream().collect(java.util.stream.Collectors.toMap(row -> number(row.get("employee_id")), row -> row, (first, ignored) -> first));
+    }
+
+    private void setMoney(Cell cell, BigDecimal value, CellStyle style) {
+        BigDecimal normalized = money(value);
+        if (normalized.precision() <= 15) cell.setCellValue(normalized.doubleValue());
+        else cell.setCellValue(normalized.toPlainString());
+        cell.setCellStyle(style);
+    }
 }

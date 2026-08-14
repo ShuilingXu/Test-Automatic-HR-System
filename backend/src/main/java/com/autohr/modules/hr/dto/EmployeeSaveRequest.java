@@ -13,6 +13,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonAlias;
 
 @Data
 public class EmployeeSaveRequest {
@@ -71,6 +72,11 @@ public class EmployeeSaveRequest {
     private LocalDate dismissalDate;
     @Size(max = 500, message = "Salary change reason cannot exceed 500 characters")
     private String salaryChangeReason;
+
+    /** Optional month in which the salary change becomes effective (yyyy-MM). */
+    @Pattern(regexp = "\\d{4}-(0[1-9]|1[0-2])", message = "Effective month must be yyyy-MM")
+    @JsonAlias("effective_month")
+    private String effectiveMonth;
 
     @JsonIgnore
     @AssertTrue(message = "New employee base salary must be positive")

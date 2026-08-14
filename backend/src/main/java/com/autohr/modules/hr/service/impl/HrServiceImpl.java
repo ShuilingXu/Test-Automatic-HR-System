@@ -144,7 +144,8 @@ public class HrServiceImpl implements HrService {
             employeeMapper.updateById(employee);
         }
         if (resolvedId == null || previousSalary.compareTo(employee.getBaseSalary()) != 0) {
-            saveSalaryHistory(employee.getId(), previousSalary, employee.getBaseSalary(), request.getSalaryChangeReason(), operatorUserId);
+            saveSalaryHistory(employee.getId(), previousSalary, employee.getBaseSalary(), request.getSalaryChangeReason(),
+                    request.getEffectiveMonth(), operatorUserId);
         }
         return toEmployeeVO(requireEmployee(employee.getId()), loadDepartmentMap(), loadEmployeeMap(), false);
     }
@@ -352,8 +353,15 @@ public class HrServiceImpl implements HrService {
         return job;
     }
 
-    private void saveSalaryHistory(Long employeeId, BigDecimal before, BigDecimal after, String reason, Long operatorUserId) {
-        String month = YearMonth.now(BUSINESS_ZONE).toString();
+    private void saveSalaryHistory(Long employeeId, BigDecimal before, BigDecimal after, String reason,
+                                   String effectiveMonth, Long operatorUserId) {
+        String month = StrUtil.isBlank(effectiveMonth)
+                ? YearMonth.now(BUSINESS_ZONE).toString() : effectiveMonth;
+        try {
+            YearMonth.parse(month);
+        } catch (RuntimeException ex) {
+            throw new BusinessException("Effective month must be yyyy-MM");
+        }
         SalaryHistory history = salaryHistoryMapper.selectOne(new LambdaQueryWrapper<SalaryHistory>()
                 .eq(SalaryHistory::getEmployeeId, employeeId)
                 .eq(SalaryHistory::getEffectiveMonth, month)

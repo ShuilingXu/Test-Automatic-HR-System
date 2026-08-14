@@ -74,10 +74,13 @@ public class DatabaseConfig {
             // simultaneous HR/candidate recording uploads from failing with SQLITE_BUSY.
             dataSource.setMaximumPoolSize(1);
             dataSource.setMinimumIdle(1);
-            // Use driver properties instead of a multi-statement initialization SQL,
-            // which is not consistently supported by SQLite JDBC implementations.
+            // Keep the driver properties for busy timeout and compatibility, and use
+            // a single initialization statement to enforce foreign keys per connection.
             dataSource.addDataSourceProperty("busy_timeout", "10000");
             dataSource.addDataSourceProperty("foreign_keys", "true");
+            // Enforce foreign keys for every pooled connection, including drivers that
+            // ignore the equivalent connection property.
+            dataSource.setConnectionInitSql("PRAGMA foreign_keys=ON");
         }
         return dataSource;
     }

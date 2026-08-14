@@ -290,6 +290,7 @@ async function loadProcessRecords(options = {}) {
   } catch (error) {
     refreshState.retryCount += 1
     refreshState.lastError = error.message || '刷新失败'
+    if (componentDisposed) return
     if (!options.silent) {
       fail(error)
     }
@@ -308,6 +309,7 @@ function syncAiAutoRefresh() {
 }
 
 function scheduleAiRefresh(delay) {
+  if (componentDisposed) return
   clearAiRefresh()
   aiRefreshTimer = setTimeout(() => loadProcessRecords({ silent: true }), delay)
 }
@@ -387,6 +389,7 @@ async function submitAiAnswer() {
 }
 
 function schedulePendingAiRefresh() {
+  if (componentDisposed) return
   clearAiRefresh()
   aiRefreshTimer = setTimeout(refreshPendingAiState, Math.min(3000 + aiPendingRefresh.attempts * 1000, 10000))
 }
@@ -419,6 +422,7 @@ async function refreshPendingAiState() {
     aiAnswer.answerContent = ''
     ElMessage.success('AI处理已完成，状态已更新')
   } catch {
+    if (componentDisposed) return
     schedulePendingAiRefresh()
   }
 }

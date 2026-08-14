@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -154,6 +155,18 @@ class PayrollPersistenceIntegrationTest {
     }
 
     @Test
+    void backdatedPayrollUsesSalaryBeforeTheFirstEffectiveAdjustment() throws Exception {
+        JdbcTemplate jdbc = migratedDatabase("backdated-payroll.db");
+        insertDepartmentAndJob(jdbc);
+        insertEmployee(jdbc, 1, "E001", "2026-01-01", 1, null, "20000.00");
+        jdbc.update("INSERT INTO hr_salary_history (employee_id,effective_month,base_salary_before,base_salary_after) VALUES (1,'2026-06',10000,20000)");
+
+        PayrollVO payroll = service(jdbc).generate(request(1L, "2026-05")).get(0);
+
+        assertEquals(new BigDecimal("10000.00"), payroll.getBaseSalary());
+    }
+
+    @Test
     void monthlyInputListsExposeTheEmployeeNameExpectedByTheFrontend() throws Exception {
         JdbcTemplate jdbc = migratedDatabase("input-list.db");
         insertDepartmentAndJob(jdbc);
@@ -163,6 +176,7 @@ class PayrollPersistenceIntegrationTest {
         List<java.util.Map<String, Object>> rows = service(jdbc).listInputs("performance", "2026-08", null);
 
         assertEquals(1, rows.size());
+        assertFalse(rows.get(0).containsKey("operator_user_id"));
         assertEquals("员工1", rows.get(0).get("employee_name"));
     }
 

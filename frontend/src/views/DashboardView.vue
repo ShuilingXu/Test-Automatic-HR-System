@@ -28,7 +28,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import AdminNav from '../components/AdminNav.vue'
@@ -49,6 +49,8 @@ const defaultConfig = {
   charts: { salary: 'bar', recruitment: 'pie', dismissal: 'pie', department: 'bar' },
 }
 const config = reactive(JSON.parse(JSON.stringify(defaultConfig)))
+let configSnapshot = null
+let savingConfig = false
 const cards = computed(() => [
   { id: 'employeeCount', label: '员工总数', value: dashboard.value.employeeCount || 0 },
   { id: 'activeEmployeeCount', label: '在册员工', value: dashboard.value.activeEmployeeCount || 0 },
@@ -107,6 +109,17 @@ function applyStoredConfig(stored) {
     ['bar', 'pie', 'table'].includes(stored?.charts?.[key]) ? stored.charts[key] : fallback,
   ]))
 }
+watch(configVisible, (visible) => {
+  if (visible) {
+    configSnapshot = JSON.parse(JSON.stringify(config))
+  } else if (configSnapshot && !savingConfig) {
+    applyStoredConfig(configSnapshot)
+  }
+  if (!visible) {
+    savingConfig = false
+    configSnapshot = null
+  }
+})
 async function load() {
   const [dashboardResponse, statisticsResponse, configResponse] = await Promise.all([
     hrApi.getDashboard(), hrApi.statistics(currentMonth()), hrApi.getDashboardConfig(),
@@ -116,7 +129,18 @@ async function load() {
   try { applyStoredConfig(JSON.parse(configResponse.data.configJson)) } catch { applyStoredConfig(defaultConfig) }
   draw()
 }
-async function save() { try { await hrApi.saveDashboardConfig(JSON.stringify(config)); configVisible.value = false; draw(); ElMessage.success('仪表盘配置已保存') } catch (error) { ElMessage.error(error.message) } }
+async function save() {
+  try {
+    savingConfig = true
+    await hrApi.saveDashboardConfig(JSON.stringify(config))
+    configVisible.value = false
+    draw()
+    ElMessage.success('仪表盘配置已保存')
+  } catch (error) {
+    savingConfig = false
+    ElMessage.error(error.message)
+  }
+}
 function money(value) { return `¥${Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` }
 function percent(value) { return value === null || value === undefined ? '—' : `${Number(value).toFixed(2)}%` }
 function chartTypeLabel(type) { return type === 'pie' ? '饼图' : type === 'table' ? '表格' : '柱状图' }

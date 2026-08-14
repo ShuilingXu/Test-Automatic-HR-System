@@ -21,7 +21,7 @@
           </el-radio-group>
         </div>
         <div v-show="chartTypes[section.key] !== 'table'" :ref="(element) => setChart(section.key, element)" class="chart" />
-        <el-table :data="rows(section.key)" stripe empty-text="当前月份暂无数据">
+        <el-table v-if="chartTypes[section.key] === 'table'" :data="rows(section.key)" stripe empty-text="当前月份暂无数据">
           <el-table-column v-for="column in tableColumns[section.key]" :key="column.key" :prop="column.key" :label="column.label" :min-width="column.width || 130">
             <template #default="{ row }">{{ formatValue(row[column.key], column) }}</template>
           </el-table-column>
@@ -48,6 +48,9 @@ const sections = [
   { key: 'dismissal', label: '辞退情况' }, { key: 'department', label: '部门情况' },
 ]
 const chartTypes = reactive({ salary: 'bar', recruitment: 'bar', dismissal: 'pie', department: 'bar' })
+let loadTimer = null
+let activeController = null
+let disposed = false
 const tableColumns = {
   salary: [
     { key: 'employeeCode', label: '工号' }, { key: 'employeeName', label: '员工' },
@@ -119,7 +122,24 @@ function draw() {
     }, { notMerge: true })
   })
 }
-async function load() { data.value = (await hrApi.statistics(month.value)).data; draw() }
+function load() {
+  if (disposed) return
+  if (loadTimer) window.clearTimeout(loadTimer)
+  loadTimer = window.setTimeout(async () => {
+    activeController?.abort()
+    activeController = new AbortController()
+    const controller = activeController
+    try {
+      const response = await hrApi.statistics(month.value, controller.signal)
+      if (!disposed && controller === activeController) {
+        data.value = response.data
+        draw()
+      }
+    } catch (error) {
+      if (error.code !== 'ERR_CANCELED' && error.name !== 'CanceledError') console.error(error)
+    }
+  }, 250)
+}
 function money(value) { return `¥${Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` }
 function percent(value) { return value === null || value === undefined ? '—' : `${Number(value).toFixed(2)}%` }
 function formatValue(value, column) { if (column.money) return money(value); if (column.percent) return percent(value); return value ?? '—' }
@@ -127,7 +147,13 @@ function resizeCharts() { Object.values(charts).forEach((chart) => chart.resize(
 
 window.addEventListener('resize', resizeCharts)
 load()
-onBeforeUnmount(() => { window.removeEventListener('resize', resizeCharts); Object.values(charts).forEach((chart) => chart.dispose()) })
+onBeforeUnmount(() => {
+  disposed = true
+  if (loadTimer) window.clearTimeout(loadTimer)
+  activeController?.abort()
+  window.removeEventListener('resize', resizeCharts)
+  Object.values(charts).forEach((chart) => chart.dispose())
+})
 </script>
 
 <style scoped>

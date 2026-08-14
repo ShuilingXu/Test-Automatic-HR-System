@@ -121,7 +121,7 @@ export const hrApi = {
   deleteEmployee(id) { return request.delete(`/hr/employees/${id}`) },
   employeeTemplate() { return request.get('/hr/employees/template', { responseType: 'blob' }) },
   importEmployees(file) { const form = new FormData(); form.append('file', file); return request.post('/hr/employees/import', form, { headers: { 'Content-Type': 'multipart/form-data' } }) },
-  statistics(month) { return request.get('/hr/statistics', { params: { month } }) },
+  statistics(month, signal) { return request.get('/hr/statistics', { params: { month }, signal }) },
   getDashboardConfig() { return request.get('/hr/dashboard/config') },
   saveDashboardConfig(configJson) { return request.post('/hr/dashboard/config', { configJson }) },
 }

@@ -531,6 +531,8 @@ GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端
 
 自动部署会先把新后端写入同文件系统的暂存 JAR，等待旧 systemd 进程完全停止后再原子替换，避免运行中的 JVM 读取到被覆盖的归档。`auto-hr.service` 通过 `EnvironmentFile=/opt/auto-hr/.env` 导入部署配置；该文件权限应保持为 `0600`。新版本无法启动或 60 秒内未通过健康检查时，流水线会恢复上一版 JAR 并重新启动服务，同时将本次部署标记为失败。
 
+当前发布流水线使用 SSH `StrictHostKeyChecking=accept-new`：首次连接会记录服务器返回的 host key，后续连接仍会校验已记录的 key。正式部署前应通过独立渠道核对服务器指纹并预置到部署账号的 `known_hosts`；不要在未核对指纹的情况下首次运行自动部署。
+
 本地也可生成同一发行包：
 
 ```bash

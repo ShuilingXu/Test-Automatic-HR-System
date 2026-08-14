@@ -22,12 +22,19 @@ TABLES = [
     # cannot be postponed with SET CONSTRAINTS ALL DEFERRED.
     "sys_user", "hr_department", "recruitment_job", "recruitment_candidate",
     "hr_employee", "hr_integration_binding", "recruitment_resume_file",
+    "hr_salary_history", "hr_performance_month", "hr_overtime_month",
+    "hr_social_insurance_month", "hr_special_deduction_month", "hr_payroll_month",
+    "user_dashboard_config",
     "interview_batch", "interview_question", "interview_candidate", "interview_submission",
     "sys_audit_log", "interview_knowledge_base", "interview_knowledge_item",
     "interview_job_knowledge_weight", "interview_llm_config", "interview_process_template",
     "interview_process_template_stage", "interview_process", "interview_process_stage",
     "interview_ai_record", "interview_video_session",
 ]
+
+EXPECTED_TABLE_COUNT = 29
+if len(TABLES) != EXPECTED_TABLE_COUNT:
+    raise RuntimeError(f"Migration table list must contain {EXPECTED_TABLE_COUNT} tables, got {len(TABLES)}")
 
 TYPE_COLUMNS = {
     "smallint", "integer", "bigint", "numeric", "decimal", "real", "double precision",
@@ -44,6 +51,10 @@ DEFERRED_REFERENCE_COLUMNS = {
 }
 
 DEFAULT_BACKUP_DIR = Path(__file__).resolve().parent.parent / "backups" / "postgres-migration"
+# Coordinate one-time migrations with the application's startup migration runner.
+# PostgreSQL advisory locks are session-scoped and are released automatically when
+# the psycopg connection closes, including error paths.
+MIGRATION_LOCK_ID = 4_154_857_282_026
 
 
 def quote(identifier):
@@ -73,6 +84,15 @@ def require_empty_target(cursor):
         raise SystemExit(
             "Target PostgreSQL contains data in: " + joined
             + ". Re-run only after verification with --force-overwrite."
+        )
+
+
+def require_target_schema(cursor):
+    missing = [table for table in TABLES if not target_table_exists(cursor, table)]
+    if missing:
+        raise SystemExit(
+            "Target PostgreSQL is missing required schema tables: " + ", ".join(missing)
+            + ". Run the application schema migration before importing data."
         )
 
 
@@ -119,13 +139,10 @@ def backup_postgres(postgres_dsn, backup_dir, retention_days):
     destination_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc)
     destination = destination_dir / f"autohr-before-overwrite-{timestamp:%Y%m%dT%H%M%SZ}.dump"
-    environment = os.environ.copy()
-    environment["PGDATABASE"] = postgres_dsn
     try:
         subprocess.run(
-            [pg_dump, "--format=custom", "--file", str(destination)],
+            [pg_dump, "--format=custom", "--file", str(destination), postgres_dsn],
             check=True,
-            env=environment,
         )
     except subprocess.CalledProcessError as error:
         destination.unlink(missing_ok=True)
@@ -160,6 +177,8 @@ def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False,
         with psycopg.connect(postgres_dsn) as target:
             try:
                 with target.cursor() as cursor:
+                    cursor.execute("SELECT pg_advisory_lock(%s)", (MIGRATION_LOCK_ID,))
+                    require_target_schema(cursor)
                     if not dry_run and not force_overwrite:
                         require_empty_target(cursor)
                     if not dry_run:
@@ -170,6 +189,7 @@ def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False,
                                 table_list = ", ".join(quote(table) for table in target_tables)
                                 cursor.execute(f"TRUNCATE TABLE {table_list} CASCADE")
                     deferred_updates = []
+                    migrated_tables = set()
                     for table in TABLES:
                         columns = [row[1] for row in source.execute(f"PRAGMA table_info({quote(table)})")]
                         if not columns:
@@ -177,6 +197,7 @@ def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False,
                             continue
                         if not target_table_exists(cursor, table):
                             raise SystemExit(f"Target PostgreSQL table is missing: {table}")
+                        migrated_tables.add(table)
                         target_types = target_column_types(cursor, table)
                         missing_columns = [column for column in columns if column not in target_types]
                         if missing_columns:
@@ -218,6 +239,7 @@ def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False,
                                     f"Could not restore {table}.{column} for source row {row_id}"
                                 )
                         reset_sequences(cursor)
+                    print(f"Migration table coverage: {len(migrated_tables)}/{EXPECTED_TABLE_COUNT}")
             except BaseException:
                 target.rollback()
                 print("PostgreSQL migration failed; all target changes were rolled back.", file=sys.stderr)
