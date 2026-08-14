@@ -63,12 +63,15 @@ class PayrollPersistenceIntegrationTest {
         jdbc.update("INSERT INTO hr_social_insurance_month (employee_id,salary_month,pension,medical,unemployment,housing_fund) VALUES (1,'2026-08',1000,200,50,750)");
         jdbc.update("INSERT INTO hr_special_deduction_month (employee_id,salary_month,children_education,continuing_education,housing_loan_interest,housing_rent,elderly_support,infant_care,other_deduction) VALUES (1,'2026-08',1000,0,0,0,0,0,0)");
 
-        PayrollVO payroll = service(jdbc).generate(request(1L, "2026-08")).get(0);
+        PayrollServiceImpl service = service(jdbc);
+        PayrollVO payroll = service.generate(request(1L, "2026-08")).get(0);
 
         assertEquals(new BigDecimal("21100.00"), payroll.getGrossIncome());
         assertEquals(new BigDecimal("13100.00"), payroll.getCumulativeTaxableIncome());
         assertEquals(new BigDecimal("393.00"), payroll.getCurrentTaxWithheld());
         assertEquals(new BigDecimal("18707.00"), payroll.getNetPay());
+        assertEquals("110***********0001", payroll.getIdCardNo());
+        assertEquals("110***********0001", service.listPayroll("2026-08", 1L).get(0).getIdCardNo());
     }
 
     @Test

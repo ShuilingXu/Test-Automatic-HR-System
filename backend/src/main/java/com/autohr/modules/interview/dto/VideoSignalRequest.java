@@ -11,6 +11,4 @@ public class VideoSignalRequest {
     private String answerSdp;
     @Size(max = 4096, message = "ICE候选不能超过4096个字符")
     private String iceCandidate;
-    @Size(max = 500, message = "录像路径不能超过500个字符")
-    private String recordingPath;
 }

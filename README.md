@@ -174,7 +174,7 @@ npm.cmd run build
 
 1. 使用默认后台账号登录 `/login`。
 2. 登录成功后，后台用户进入 `/admin`，面试者进入 `/user`。
-3. 前端会保存 JWT 到 `localStorage` 的 `demo-token`，并在后续请求中自动添加 `Authorization: Bearer <token>`。
+3. 前端会保存 JWT 到 `localStorage` 的 `autohr-access-token`，并在后续请求中自动添加 `Authorization: Bearer <token>`。旧版本的 `demo-token` 会在首次读取时自动迁移，退出登录时新旧 key 会一并清理。
 
 ### 2. 维护组织和员工信息
 

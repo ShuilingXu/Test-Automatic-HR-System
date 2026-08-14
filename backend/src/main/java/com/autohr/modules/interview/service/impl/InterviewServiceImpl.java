@@ -1066,7 +1066,7 @@ public class InterviewServiceImpl implements InterviewService {
     public InterviewVO completeVideoSession(Long processId) {
         InterviewProcess templateProcess = requireProcess(processId);
         ensureInProgress(templateProcess);
-        requireActiveVideoInteraction(processId);
+        requireVideoCompletionAvailable(templateProcess);
         if (isTemplateProcess(templateProcess)) {
             return completeTemplateVideoSession(templateProcess);
         }
@@ -1074,23 +1074,16 @@ public class InterviewServiceImpl implements InterviewService {
         if (isTerminalVideoSessionStatus(session.getSessionStatus())) {
             return toVideoSessionVO(session);
         }
-        if (!isTerminalVideoSessionStatus(session.getSessionStatus()) && !StrUtil.equals(session.getSessionStatus(), "END_REQUESTED")) {
-            session.setEndTime(session.getEndTime() == null ? LocalDateTime.now() : session.getEndTime());
-            session.setRecordingEndRequestedAt(session.getRecordingEndRequestedAt() == null ? LocalDateTime.now().plusSeconds(3) : session.getRecordingEndRequestedAt());
-            session.setSessionStatus("END_REQUESTED");
-            videoSessionMapper.updateById(session);
+        session = requestVideoSessionEnd(session);
+        if (isTerminalVideoSessionStatus(session.getSessionStatus())) {
+            return toVideoSessionVO(session);
         }
         InterviewProcess process = requireProcess(processId);
         if (StrUtil.equals(process.getCurrentStage(), "VIDEO") && StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
             if (videoMergeService.canMerge(session)) {
-                prepareVideoMerge(session);
-                videoSessionMapper.updateById(session);
-                scheduleVideoMergeAndSummary(session.getId());
+                session = claimVideoSessionForMerge(session);
             } else {
-                process.setStageStatus("UPLOADING");
-                process.setProcessStatusView("视频录制上传中");
-                processMapper.updateById(process);
-                updateCandidateStage(process);
+                markStandardVideoUploading(process);
             }
         }
         return toVideoSessionVO(session);
@@ -1124,20 +1117,14 @@ public class InterviewServiceImpl implements InterviewService {
         if (isTerminalVideoSessionStatus(session.getSessionStatus())) {
             return toVideoSessionVO(session);
         }
-        if (!StrUtil.equals(session.getSessionStatus(), "END_REQUESTED")) {
-            session.setEndTime(session.getEndTime() == null ? LocalDateTime.now() : session.getEndTime());
-            session.setRecordingEndRequestedAt(session.getRecordingEndRequestedAt() == null ? LocalDateTime.now().plusSeconds(3) : session.getRecordingEndRequestedAt());
-            session.setSessionStatus("END_REQUESTED");
-            videoSessionMapper.updateById(session);
+        session = requestVideoSessionEnd(session);
+        if (isTerminalVideoSessionStatus(session.getSessionStatus())) {
+            return toVideoSessionVO(session);
         }
         if (videoMergeService.canMerge(session)) {
-            prepareVideoMerge(session);
-            videoSessionMapper.updateById(session);
-            scheduleVideoMergeAndSummary(session.getId());
+            session = claimVideoSessionForMerge(session);
         } else {
-            setTemplateStageStatus(process, stage, "UPLOADING");
-            processMapper.updateById(process);
-            updateCandidateStage(process);
+            markTemplateVideoUploading(process, stage);
         }
         return toVideoSessionVO(session);
     }
@@ -1421,10 +1408,10 @@ public class InterviewServiceImpl implements InterviewService {
     @Transactional
     public InterviewVideoSession getDownloadableVideoSession(Long processId, Long processStageId) {
         InterviewVideoSession session = processStageId == null ? requireVideoSessionByProcess(processId) : requireVideoSessionForStage(processId, processStageId);
-        if (videoMergeService.canMerge(session) && !isReadableFile(session.getMergedRecordingPath())) {
-            prepareVideoMerge(session);
-            videoSessionMapper.updateById(session);
-            scheduleVideoMergeAndSummary(session.getId());
+        if (videoMergeService.canMerge(session)
+                && !isReadableFile(session.getMergedRecordingPath())
+                && !StrUtil.equalsAny(session.getSummaryStatus(), "PENDING_MERGE", "MERGING")) {
+            queueVideoMerge(session);
         }
         return session;
     }
@@ -1437,9 +1424,9 @@ public class InterviewServiceImpl implements InterviewService {
             if (!videoMergeService.canMerge(session)) {
                 throw new BusinessException("缺少双方录像，无法重新合并");
             }
-            prepareVideoMerge(session);
-            videoSessionMapper.updateById(session);
-            scheduleVideoMergeAndSummary(session.getId());
+            if (!queueVideoMerge(session)) {
+                throw new BusinessException("录像合并状态已变化，请刷新后重试");
+            }
             return getProcess(processId);
         }
         if (!isReadableFile(StrUtil.blankToDefault(session.getMergedRecordingPath(), session.getRecordingPath()))) {
@@ -1448,12 +1435,18 @@ public class InterviewServiceImpl implements InterviewService {
         if (StrUtil.equals(session.getSummaryStatus(), "PROCESSING")) {
             throw new BusinessException("转写与会议概要正在生成，请稍候");
         }
-        session.setAudioPath(null);
-        session.setAudioFileName(null);
-        session.setTranscriptText(null);
-        session.setSummaryText(null);
-        session.setSummaryStatus("PENDING");
-        videoSessionMapper.updateById(session);
+        LambdaUpdateWrapper<InterviewVideoSession> retryUpdate = new LambdaUpdateWrapper<InterviewVideoSession>()
+                .eq(InterviewVideoSession::getId, session.getId())
+                .eq(session.getSummaryStatus() != null, InterviewVideoSession::getSummaryStatus, session.getSummaryStatus())
+                .isNull(session.getSummaryStatus() == null, InterviewVideoSession::getSummaryStatus)
+                .set(InterviewVideoSession::getAudioPath, null)
+                .set(InterviewVideoSession::getAudioFileName, null)
+                .set(InterviewVideoSession::getTranscriptText, null)
+                .set(InterviewVideoSession::getSummaryText, null)
+                .set(InterviewVideoSession::getSummaryStatus, "PENDING");
+        if (videoSessionMapper.update(null, retryUpdate) != 1) {
+            throw new BusinessException("视频概要状态已变化，请刷新后重试");
+        }
         runAfterCommit(() -> CompletableFuture.runAsync(() -> summarizeVideoSessionSafely(session.getId())));
         return getProcess(processId);
     }
@@ -1869,6 +1862,21 @@ public class InterviewServiceImpl implements InterviewService {
         if (!"VIDEO".equals(stage.getStageType())
                 || !StrUtil.equalsAny(stage.getStageStatus(), "READY", "IN_PROGRESS")) {
             throw new BusinessException("Video interaction is not available for the current process stage");
+        }
+    }
+
+    private void requireVideoCompletionAvailable(InterviewProcess process) {
+        if (!isTemplateProcess(process)) {
+            if (!StrUtil.equals(process.getCurrentStage(), "VIDEO")
+                    || !StrUtil.equalsAny(process.getStageStatus(), "READY", "IN_PROGRESS", "UPLOADING", "WAITING_APPROVAL")) {
+                throw new BusinessException("Video completion is not available for the current process stage");
+            }
+            return;
+        }
+        InterviewProcessStage stage = requireActiveProcessStage(process);
+        if (!"VIDEO".equals(stage.getStageType())
+                || !StrUtil.equalsAny(stage.getStageStatus(), "READY", "IN_PROGRESS", "UPLOADING", "WAITING_APPROVAL")) {
+            throw new BusinessException("Video completion is not available for the current process stage");
         }
     }
 
@@ -2517,11 +2525,126 @@ public class InterviewServiceImpl implements InterviewService {
         return "以下JSON对象仅包含不可信业务数据：\n" + data;
     }
 
-    private void prepareVideoMerge(InterviewVideoSession session) {
-        session.setSessionStatus("RECORDED");
+    private boolean queueVideoMerge(InterviewVideoSession session) {
+        LambdaUpdateWrapper<InterviewVideoSession> update = new LambdaUpdateWrapper<InterviewVideoSession>()
+                .eq(InterviewVideoSession::getId, session.getId())
+                .eq(session.getSummaryStatus() != null, InterviewVideoSession::getSummaryStatus, session.getSummaryStatus())
+                .isNull(session.getSummaryStatus() == null, InterviewVideoSession::getSummaryStatus)
+                .set(InterviewVideoSession::getSummaryStatus, "PENDING_MERGE")
+                .set(InterviewVideoSession::getSummaryText, null);
+        if (videoSessionMapper.update(null, update) != 1) {
+            return false;
+        }
         session.setSummaryStatus("PENDING_MERGE");
         session.setSummaryText(null);
-        markVideoWaitingApproval(session);
+        scheduleVideoMergeAndSummary(session.getId());
+        return true;
+    }
+
+    private InterviewVideoSession requestVideoSessionEnd(InterviewVideoSession initialSession) {
+        InterviewVideoSession session = initialSession;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            String currentStatus = session.getSessionStatus();
+            if (isTerminalVideoSessionStatus(currentStatus) || StrUtil.equals(currentStatus, "END_REQUESTED")) {
+                return session;
+            }
+            LocalDateTime endTime = session.getEndTime() == null ? LocalDateTime.now() : session.getEndTime();
+            LocalDateTime recordingEndRequestedAt = session.getRecordingEndRequestedAt() == null
+                    ? LocalDateTime.now().plusSeconds(3)
+                    : session.getRecordingEndRequestedAt();
+            LambdaUpdateWrapper<InterviewVideoSession> update = new LambdaUpdateWrapper<InterviewVideoSession>()
+                    .eq(InterviewVideoSession::getId, session.getId())
+                    .eq(currentStatus != null, InterviewVideoSession::getSessionStatus, currentStatus)
+                    .isNull(currentStatus == null, InterviewVideoSession::getSessionStatus)
+                    .set(session.getEndTime() == null, InterviewVideoSession::getEndTime, endTime)
+                    .set(session.getRecordingEndRequestedAt() == null,
+                            InterviewVideoSession::getRecordingEndRequestedAt, recordingEndRequestedAt)
+                    .set(InterviewVideoSession::getSessionStatus, "END_REQUESTED");
+            if (videoSessionMapper.update(null, update) == 1) {
+                session.setEndTime(endTime);
+                session.setRecordingEndRequestedAt(recordingEndRequestedAt);
+                session.setSessionStatus("END_REQUESTED");
+                return session;
+            }
+            session = videoSessionMapper.selectById(session.getId());
+            if (session == null) {
+                throw new BusinessException("视频面试会话不存在");
+            }
+        }
+        throw new BusinessException("视频结束状态发生并发变化，请重试");
+    }
+
+    private InterviewVideoSession claimVideoSessionForMerge(InterviewVideoSession initialSession) {
+        InterviewVideoSession session = initialSession;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (isTerminalVideoSessionStatus(session.getSessionStatus())) {
+                return session;
+            }
+            if (!StrUtil.equals(session.getSessionStatus(), "END_REQUESTED")
+                    || !videoMergeService.canMerge(session)) {
+                return session;
+            }
+            int updated = videoSessionMapper.update(null, new LambdaUpdateWrapper<InterviewVideoSession>()
+                    .eq(InterviewVideoSession::getId, session.getId())
+                    .eq(InterviewVideoSession::getSessionStatus, "END_REQUESTED")
+                    .set(InterviewVideoSession::getSessionStatus, "RECORDED")
+                    .set(InterviewVideoSession::getSummaryStatus, "PENDING_MERGE")
+                    .set(InterviewVideoSession::getSummaryText, null));
+            if (updated == 1) {
+                session.setSessionStatus("RECORDED");
+                session.setSummaryStatus("PENDING_MERGE");
+                session.setSummaryText(null);
+                markVideoWaitingApproval(session);
+                scheduleVideoMergeAndSummary(session.getId());
+                return session;
+            }
+            session = videoSessionMapper.selectById(session.getId());
+            if (session == null) {
+                throw new BusinessException("视频面试会话不存在");
+            }
+        }
+        throw new BusinessException("录像合并状态发生并发变化，请重试");
+    }
+
+    private void markStandardVideoUploading(InterviewProcess process) {
+        int updated = processMapper.update(null, new LambdaUpdateWrapper<InterviewProcess>()
+                .eq(InterviewProcess::getId, process.getId())
+                .eq(InterviewProcess::getOverallStatus, "IN_PROGRESS")
+                .eq(InterviewProcess::getCurrentStage, "VIDEO")
+                .in(InterviewProcess::getStageStatus, List.of("READY", "IN_PROGRESS"))
+                .set(InterviewProcess::getStageStatus, "UPLOADING")
+                .set(InterviewProcess::getProcessStatusView, "视频录制上传中"));
+        if (updated == 1) {
+            process.setStageStatus("UPLOADING");
+            process.setProcessStatusView("视频录制上传中");
+            updateCandidateStage(process);
+        }
+    }
+
+    private void markTemplateVideoUploading(InterviewProcess process, InterviewProcessStage stage) {
+        int stageUpdated = processStageMapper.update(null, new LambdaUpdateWrapper<InterviewProcessStage>()
+                .eq(InterviewProcessStage::getId, stage.getId())
+                .eq(InterviewProcessStage::getProcessId, process.getId())
+                .eq(InterviewProcessStage::getStageType, "VIDEO")
+                .in(InterviewProcessStage::getStageStatus, List.of("READY", "IN_PROGRESS"))
+                .set(InterviewProcessStage::getStageStatus, "UPLOADING"));
+        if (stageUpdated != 1) {
+            return;
+        }
+        String statusView = stageStatusView(stage.getStageName(), "UPLOADING");
+        int processUpdated = processMapper.update(null, new LambdaUpdateWrapper<InterviewProcess>()
+                .eq(InterviewProcess::getId, process.getId())
+                .eq(InterviewProcess::getOverallStatus, "IN_PROGRESS")
+                .eq(InterviewProcess::getCurrentStage, "VIDEO")
+                .in(InterviewProcess::getStageStatus, List.of("READY", "IN_PROGRESS"))
+                .set(InterviewProcess::getStageStatus, "UPLOADING")
+                .set(InterviewProcess::getProcessStatusView, statusView));
+        if (processUpdated == 1) {
+            stage.setStageStatus("UPLOADING");
+            process.setStageStatus("UPLOADING");
+            process.setProcessStatusView(statusView);
+            updateCandidateStage(process);
+        }
     }
 
     private void scheduleVideoMergeAndSummary(Long sessionId) {
@@ -2545,8 +2668,17 @@ public class InterviewServiceImpl implements InterviewService {
             }
             try {
                 videoMergeService.mergeRecordings(session);
-                session.setSummaryStatus("PENDING");
-                videoSessionMapper.updateById(session);
+                int persisted = videoSessionMapper.update(null, new LambdaUpdateWrapper<InterviewVideoSession>()
+                        .eq(InterviewVideoSession::getId, sessionId)
+                        .eq(InterviewVideoSession::getSummaryStatus, "MERGING")
+                        .set(InterviewVideoSession::getMergedRecordingPath, session.getMergedRecordingPath())
+                        .set(InterviewVideoSession::getMergedRecordingFileName, session.getMergedRecordingFileName())
+                        .set(InterviewVideoSession::getRecordingPath, session.getRecordingPath())
+                        .set(InterviewVideoSession::getRecordingFileName, session.getRecordingFileName())
+                        .set(InterviewVideoSession::getSummaryStatus, "PENDING"));
+                if (persisted != 1) {
+                    return;
+                }
                 summarizeVideoSessionSafely(sessionId);
                 return;
             } catch (BusinessException ex) {
@@ -2561,13 +2693,19 @@ public class InterviewServiceImpl implements InterviewService {
         videoSessionMapper.update(null, new LambdaUpdateWrapper<InterviewVideoSession>()
                 .eq(InterviewVideoSession::getId, sessionId)
                 .eq(InterviewVideoSession::getSummaryStatus, "MERGING")
-                .set(InterviewVideoSession::getSessionStatus, "RECORDED")
                 .set(InterviewVideoSession::getSummaryStatus, "FAILED_MERGE")
                 .set(InterviewVideoSession::getSummaryText,
                         "录像合并已自动重试3次仍失败。原始录像已保留，审批流程不受影响。原因：" + abbreviate(detail, 240)));
     }
 
     private void summarizeVideoSessionSafely(Long sessionId) {
+        int claimed = videoSessionMapper.update(null, new LambdaUpdateWrapper<InterviewVideoSession>()
+                .eq(InterviewVideoSession::getId, sessionId)
+                .eq(InterviewVideoSession::getSummaryStatus, "PENDING")
+                .set(InterviewVideoSession::getSummaryStatus, "PROCESSING"));
+        if (claimed != 1) {
+            return;
+        }
         InterviewVideoSession session = videoSessionMapper.selectById(sessionId);
         if (session == null) {
             return;
@@ -2576,8 +2714,6 @@ public class InterviewServiceImpl implements InterviewService {
         String hrAudioPath = null;
         String intervieweeAudioPath = null;
         try {
-            session.setSummaryStatus("PROCESSING");
-            videoSessionMapper.updateById(session);
             String transcript;
             if (videoMergeService.canMerge(session)) {
                 hrAudioPath = videoMergeService.extractSpeakerAudio(session, "hr");
@@ -2592,34 +2728,30 @@ public class InterviewServiceImpl implements InterviewService {
             } else {
                 videoMergeService.extractAudio(session);
                 combinedAudioPath = session.getAudioPath();
-                videoSessionMapper.updateById(session);
                 transcript = callAudioTranscription(session.getAudioPath());
                 if (StrUtil.isBlank(transcript)) {
                     throw new BusinessException("阿里云语音转文字未返回识别文本");
                 }
             }
-            session.setTranscriptText(abbreviate(transcript, 20000));
+            String transcriptText = abbreviate(transcript, 20000);
             String summary = callVideoSummaryLlm(transcript);
-            session.setSummaryText(abbreviate(summary, 5000));
-            session.setSummaryStatus("COMPLETED");
-            videoSessionMapper.updateById(session);
+            videoSessionMapper.update(null, new LambdaUpdateWrapper<InterviewVideoSession>()
+                    .eq(InterviewVideoSession::getId, sessionId)
+                    .eq(InterviewVideoSession::getSummaryStatus, "PROCESSING")
+                    .set(InterviewVideoSession::getTranscriptText, transcriptText)
+                    .set(InterviewVideoSession::getSummaryText, abbreviate(summary, 5000))
+                    .set(InterviewVideoSession::getSummaryStatus, "COMPLETED"));
         } catch (Exception ex) {
-            session.setSummaryStatus("FAILED");
-            session.setSummaryText("视频转写或会议概要生成失败。原因：" + abbreviate(ex.getMessage(), 5000));
-            videoSessionMapper.updateById(session);
+            videoSessionMapper.update(null, new LambdaUpdateWrapper<InterviewVideoSession>()
+                    .eq(InterviewVideoSession::getId, sessionId)
+                    .eq(InterviewVideoSession::getSummaryStatus, "PROCESSING")
+                    .set(InterviewVideoSession::getSummaryStatus, "FAILED")
+                    .set(InterviewVideoSession::getSummaryText,
+                            "视频转写或会议概要生成失败。原因：" + abbreviate(ex.getMessage(), 5000)));
         } finally {
             videoMergeService.deleteTemporaryAudio(combinedAudioPath);
             videoMergeService.deleteTemporaryAudio(hrAudioPath);
             videoMergeService.deleteTemporaryAudio(intervieweeAudioPath);
-            if (combinedAudioPath != null) {
-                session.setAudioPath(null);
-                session.setAudioFileName(null);
-                videoSessionMapper.update(null, new LambdaUpdateWrapper<InterviewVideoSession>()
-                        .eq(InterviewVideoSession::getId, sessionId)
-                        .eq(InterviewVideoSession::getAudioPath, combinedAudioPath)
-                        .set(InterviewVideoSession::getAudioPath, null)
-                        .set(InterviewVideoSession::getAudioFileName, null));
-            }
         }
     }
 
@@ -3420,10 +3552,7 @@ public class InterviewServiceImpl implements InterviewService {
             return false;
         }
         if (videoMergeService.canMerge(session)) {
-            prepareVideoMerge(session);
-            videoSessionMapper.updateById(session);
-            scheduleVideoMergeAndSummary(session.getId());
-            return true;
+            return isTerminalVideoSessionStatus(claimVideoSessionForMerge(session).getSessionStatus());
         }
         InterviewProcess process = processMapper.selectById(session.getProcessId());
         if (process == null
@@ -3498,17 +3627,41 @@ public class InterviewServiceImpl implements InterviewService {
             if (stage != null && Objects.equals(stage.getProcessId(), process.getId())
                     && "VIDEO".equals(stage.getStageType()) && StrUtil.equalsAny(stage.getStageStatus(), "READY", "IN_PROGRESS", "UPLOADING")
                     && StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
-                setTemplateStageStatus(process, stage, "WAITING_APPROVAL");
-                processMapper.updateById(process);
-                updateCandidateStage(process);
+                processStageMapper.update(null, new LambdaUpdateWrapper<InterviewProcessStage>()
+                        .eq(InterviewProcessStage::getId, stage.getId())
+                        .eq(InterviewProcessStage::getProcessId, process.getId())
+                        .eq(InterviewProcessStage::getStageType, "VIDEO")
+                        .in(InterviewProcessStage::getStageStatus, List.of("READY", "IN_PROGRESS", "UPLOADING"))
+                        .set(InterviewProcessStage::getStageStatus, "WAITING_APPROVAL"));
+                String statusView = stageStatusView(stage.getStageName(), "WAITING_APPROVAL");
+                int processUpdated = processMapper.update(null, new LambdaUpdateWrapper<InterviewProcess>()
+                        .eq(InterviewProcess::getId, process.getId())
+                        .eq(InterviewProcess::getOverallStatus, "IN_PROGRESS")
+                        .eq(InterviewProcess::getCurrentStage, "VIDEO")
+                        .in(InterviewProcess::getStageStatus, List.of("READY", "IN_PROGRESS", "UPLOADING"))
+                        .set(InterviewProcess::getStageStatus, "WAITING_APPROVAL")
+                        .set(InterviewProcess::getProcessStatusView, statusView));
+                if (processUpdated == 1) {
+                    process.setStageStatus("WAITING_APPROVAL");
+                    process.setProcessStatusView(statusView);
+                    updateCandidateStage(process);
+                }
             }
             return;
         }
         if (StrUtil.equals(process.getCurrentStage(), "VIDEO") && StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
-            process.setStageStatus("WAITING_APPROVAL");
-            process.setProcessStatusView("视频待审批");
-            processMapper.updateById(process);
-            updateCandidateStage(process);
+            int updated = processMapper.update(null, new LambdaUpdateWrapper<InterviewProcess>()
+                    .eq(InterviewProcess::getId, process.getId())
+                    .eq(InterviewProcess::getOverallStatus, "IN_PROGRESS")
+                    .eq(InterviewProcess::getCurrentStage, "VIDEO")
+                    .in(InterviewProcess::getStageStatus, List.of("READY", "IN_PROGRESS", "UPLOADING"))
+                    .set(InterviewProcess::getStageStatus, "WAITING_APPROVAL")
+                    .set(InterviewProcess::getProcessStatusView, "视频待审批"));
+            if (updated == 1) {
+                process.setStageStatus("WAITING_APPROVAL");
+                process.setProcessStatusView("视频待审批");
+                updateCandidateStage(process);
+            }
         }
     }
 

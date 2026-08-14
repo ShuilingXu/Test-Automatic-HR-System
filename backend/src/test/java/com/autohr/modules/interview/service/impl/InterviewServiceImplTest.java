@@ -11,6 +11,8 @@ import com.autohr.modules.interview.dto.InterviewDecisionRequest;
 import com.autohr.modules.interview.dto.VideoSignalRequest;
 import com.autohr.modules.interview.entity.InterviewKnowledgeBase;
 import com.autohr.modules.interview.entity.InterviewProcess;
+import com.autohr.modules.interview.entity.InterviewProcessStage;
+import com.autohr.modules.interview.entity.InterviewVideoSession;
 import com.autohr.modules.interview.mapper.InterviewAiRecordMapper;
 import com.autohr.modules.interview.mapper.InterviewJobKnowledgeWeightMapper;
 import com.autohr.modules.interview.mapper.InterviewKnowledgeBaseMapper;
@@ -27,6 +29,7 @@ import com.autohr.modules.recruitment.mapper.RecruitmentJobMapper;
 import com.autohr.modules.system.service.SystemConfigService;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
@@ -43,6 +46,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -58,6 +62,8 @@ class InterviewServiceImplTest {
     static void initializeMyBatisMetadata() {
         MybatisConfiguration configuration = new MybatisConfiguration();
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(configuration, "test"), InterviewProcess.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(configuration, "test"), InterviewProcessStage.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(configuration, "test"), InterviewVideoSession.class);
     }
 
     @Mock InterviewKnowledgeBaseMapper knowledgeBaseMapper;
@@ -117,6 +123,90 @@ class InterviewServiceImplTest {
 
         verify(processMapper, never()).selectById(any());
         verify(videoSessionMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void standardVideoEndDoesNotOverwriteConcurrentRecordedState() {
+        InterviewProcess process = activeVideoProcess(false);
+        InterviewVideoSession stale = videoSession(7L, null, "RECORDING");
+        InterviewVideoSession recorded = videoSession(7L, null, "RECORDED");
+        recorded.setHrRecordingPath("/recordings/hr.webm");
+        recorded.setIntervieweeRecordingPath("/recordings/interviewee.webm");
+        when(processMapper.selectById(42L)).thenReturn(process);
+        when(videoSessionMapper.selectOne(any())).thenReturn(stale);
+        when(videoSessionMapper.update(
+                ArgumentMatchers.<InterviewVideoSession>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewVideoSession>>any())).thenReturn(0);
+        when(videoSessionMapper.selectById(7L)).thenReturn(recorded);
+
+        assertEquals("RECORDED", service.completeVideoSession(42L).getSessionStatus());
+
+        verify(videoSessionMapper).update(
+                ArgumentMatchers.<InterviewVideoSession>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewVideoSession>>argThat(
+                        wrapper -> wrapper.getSqlSegment().contains("session_status")));
+        verify(videoSessionMapper, never()).updateById(any());
+        verify(processMapper, never()).updateById(any());
+    }
+
+    @Test
+    void secondVideoEndRemainsIdempotentWhileRecordingsAreUploading() {
+        InterviewProcess process = activeVideoProcess(false);
+        process.setStageStatus("UPLOADING");
+        InterviewVideoSession session = videoSession(7L, null, "END_REQUESTED");
+        when(processMapper.selectById(42L)).thenReturn(process);
+        when(videoSessionMapper.selectOne(any())).thenReturn(session);
+
+        assertEquals("END_REQUESTED", service.completeVideoSession(42L).getSessionStatus());
+        verify(videoSessionMapper, never()).updateById(any());
+    }
+
+    @Test
+    void templateVideoEndDoesNotOverwriteConcurrentRecordedState() {
+        InterviewProcess process = activeVideoProcess(true);
+        InterviewProcessStage stage = new InterviewProcessStage();
+        stage.setId(11L);
+        stage.setProcessId(42L);
+        stage.setStageName("视频一面");
+        stage.setStageType("VIDEO");
+        stage.setStageStatus("IN_PROGRESS");
+        InterviewVideoSession stale = videoSession(7L, 11L, "RECORDING");
+        InterviewVideoSession recorded = videoSession(7L, 11L, "RECORDED");
+        recorded.setHrRecordingPath("/recordings/hr.webm");
+        recorded.setIntervieweeRecordingPath("/recordings/interviewee.webm");
+        when(processMapper.selectById(42L)).thenReturn(process);
+        when(processStageMapper.selectOne(any())).thenReturn(stage);
+        when(videoSessionMapper.selectOne(any())).thenReturn(stale);
+        when(videoSessionMapper.update(
+                ArgumentMatchers.<InterviewVideoSession>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewVideoSession>>any())).thenReturn(0);
+        when(videoSessionMapper.selectById(7L)).thenReturn(recorded);
+
+        assertEquals("RECORDED", service.completeVideoSession(42L).getSessionStatus());
+
+        verify(videoSessionMapper).update(
+                ArgumentMatchers.<InterviewVideoSession>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewVideoSession>>argThat(
+                        wrapper -> wrapper.getSqlSegment().contains("session_status")));
+        verify(videoSessionMapper, never()).updateById(any());
+        verify(processStageMapper, never()).updateById(any());
+        verify(processMapper, never()).updateById(any());
+    }
+
+    @Test
+    void mergeFailureDoesNotOverwriteAnExistingApprovalDecision() {
+        ReflectionTestUtils.invokeMethod(service, "markVideoMergeFailed", 7L, "ffmpeg failed");
+
+        verify(videoSessionMapper).update(
+                ArgumentMatchers.<InterviewVideoSession>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewVideoSession>>argThat(wrapper -> {
+                    if (!(wrapper instanceof LambdaUpdateWrapper<?> update)) {
+                        return false;
+                    }
+                    String sqlSet = update.getSqlSet();
+                    return sqlSet.contains("summary_status") && !sqlSet.contains("session_status");
+                }));
+        verify(videoSessionMapper, never()).updateById(any());
     }
 
     @Test
@@ -211,5 +301,24 @@ class InterviewServiceImplTest {
 
         assertThrows(BusinessException.class, () -> ReflectionTestUtils.invokeMethod(service,
                 "validateRecordingFile", "recording.webm", "video/webm", file));
+    }
+
+    private InterviewProcess activeVideoProcess(boolean template) {
+        InterviewProcess process = new InterviewProcess();
+        process.setId(42L);
+        process.setTemplateId(template ? 9L : null);
+        process.setOverallStatus("IN_PROGRESS");
+        process.setCurrentStage("VIDEO");
+        process.setStageStatus("IN_PROGRESS");
+        return process;
+    }
+
+    private InterviewVideoSession videoSession(Long id, Long processStageId, String status) {
+        InterviewVideoSession session = new InterviewVideoSession();
+        session.setId(id);
+        session.setProcessId(42L);
+        session.setProcessStageId(processStageId);
+        session.setSessionStatus(status);
+        return session;
     }
 }
