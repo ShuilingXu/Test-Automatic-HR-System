@@ -8,6 +8,7 @@ ConditionPathExists=/opt/auto-hr/.env
 Type=simple
 User=root
 WorkingDirectory=/opt/auto-hr
+EnvironmentFile=/opt/auto-hr/.env
 Environment=SPRING_PROFILES_ACTIVE=prod
 Environment=SERVER_ADDRESS=127.0.0.1
 Environment=SERVER_PORT=8081

@@ -511,7 +511,7 @@ python3 scripts/migrate-sqlite-to-postgres.py autohr.db --dsn "$POSTGRES_DSN" --
 
 GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。每次 `main` 构建都会创建或更新 `build-<运行编号>` GitHub 预发布版；推送 `v*` 标签会创建正式 Release，Release 发布不依赖部署 Secrets，不会因未配置服务器而跳过。若在仓库 Secrets 配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_WEB_ROOT` 和可选的 `DEPLOY_PORT`，`main` 推送会自动发布到服务器；`DEPLOY_WEB_ROOT` 应为 OpenResty/Nginx 的站点静态目录，例如 1Panel OpenResty 的 `/opt/1panel/www/sites/hr.zroevn.cn/index`。首次部署还必须配置 `DEPLOY_INITIAL_ENV`，其内容为完整的 `.env` 文件，至少包含 `JWT_SECRET`、`DB_TYPE`、`DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD` 和 `INTERVIEW_TURN_SHARED_SECRET`；已有服务器上的 `.env` 不会被覆盖。未配置部署 Secrets 时只跳过远端部署，构建产物和 GitHub 预发布版仍会正常生成。
 
-自动部署会先把新后端写入同文件系统的暂存 JAR，等待旧 systemd 进程完全停止后再原子替换，避免运行中的 JVM 读取到被覆盖的归档。新版本无法启动或 60 秒内未通过健康检查时，流水线会恢复上一版 JAR 并重新启动服务，同时将本次部署标记为失败。
+自动部署会先把新后端写入同文件系统的暂存 JAR，等待旧 systemd 进程完全停止后再原子替换，避免运行中的 JVM 读取到被覆盖的归档。`auto-hr.service` 通过 `EnvironmentFile=/opt/auto-hr/.env` 导入部署配置；该文件权限应保持为 `0600`。新版本无法启动或 60 秒内未通过健康检查时，流水线会恢复上一版 JAR 并重新启动服务，同时将本次部署标记为失败。
 
 本地也可生成同一发行包：
 
