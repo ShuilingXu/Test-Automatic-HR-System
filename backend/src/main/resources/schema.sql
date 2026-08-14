@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS hr_integration_binding (
 CREATE INDEX IF NOT EXISTS idx_hr_department_parent_department_id ON hr_department(parent_department_id);
 CREATE INDEX IF NOT EXISTS idx_hr_employee_department_id ON hr_employee(department_id);
 CREATE INDEX IF NOT EXISTS idx_hr_employee_manager_employee_id ON hr_employee(manager_employee_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hr_employee_source_candidate_id ON hr_employee(source_candidate_id);
 CREATE INDEX IF NOT EXISTS idx_hr_integration_binding_module_code ON hr_integration_binding(module_code);
 CREATE INDEX IF NOT EXISTS idx_hr_integration_binding_employee_id ON hr_integration_binding(employee_id);
 
@@ -121,6 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_recruitment_job_status ON recruitment_job(status)
 CREATE INDEX IF NOT EXISTS idx_recruitment_job_department_id ON recruitment_job(department_id);
 CREATE INDEX IF NOT EXISTS idx_recruitment_candidate_job_id ON recruitment_candidate(job_id);
 CREATE INDEX IF NOT EXISTS idx_recruitment_candidate_status ON recruitment_candidate(application_status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_recruitment_candidate_job_interviewee ON recruitment_candidate(job_id, interviewee_user_id);
 CREATE INDEX IF NOT EXISTS idx_recruitment_resume_candidate_id ON recruitment_resume_file(candidate_id);
 
 CREATE TABLE IF NOT EXISTS interview_batch (
@@ -384,7 +386,7 @@ CREATE TABLE IF NOT EXISTS interview_process_stage (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_interview_process_candidate_id ON interview_process(recruitment_candidate_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_interview_process_candidate_id ON interview_process(recruitment_candidate_id);
 CREATE INDEX IF NOT EXISTS idx_interview_process_template_id ON interview_process(template_id);
 CREATE INDEX IF NOT EXISTS idx_interview_process_stage ON interview_process(current_stage);
 CREATE INDEX IF NOT EXISTS idx_interview_ai_record_process_id ON interview_ai_record(process_id);

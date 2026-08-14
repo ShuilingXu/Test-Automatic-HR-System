@@ -64,7 +64,9 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
             migrateInterviewProcessStageColumns(connection, statement);
             migrateRecruitmentCandidateColumns(connection, statement);
             migrateRecruitmentJobColumns(connection, statement);
+            migrateHrEmployeeColumns(connection, statement);
             migrateSysUserColumns(connection, statement);
+            assertNoDuplicateBusinessKeys(statement);
             migrateDatabaseGeneratedPrimaryKeys(connection, statement);
             for (String sql : statements.stream().filter(this::isCreateIndex).toList()) {
                 execute(statement, sql);
@@ -189,6 +191,13 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "recruitment_job", "department_id", "INTEGER");
     }
 
+    private void migrateHrEmployeeColumns(Connection connection, Statement statement) throws SQLException {
+        addColumnIfMissing(connection, statement, "hr_employee", "source_candidate_id", "INTEGER");
+        addColumnIfMissing(connection, statement, "hr_employee", "interview_stage_status", "VARCHAR(64)");
+        addColumnIfMissing(connection, statement, "hr_employee", "source_channel", "VARCHAR(64)");
+        addColumnIfMissing(connection, statement, "hr_employee", "notes", "VARCHAR(1000)");
+    }
+
     private void addColumnIfMissing(Connection connection, Statement statement, String table, String column, String definition) throws SQLException {
         if (columnExists(connection, table, column)) {
             return;
@@ -228,6 +237,27 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
             if (resultSet.next() && resultSet.getLong(1) > 0) {
                 throw new IllegalStateException("Cannot add global " + label
                         + " uniqueness while duplicate normalized sys_user contacts exist. Resolve duplicates before deployment.");
+            }
+        }
+    }
+
+    private void assertNoDuplicateBusinessKeys(Statement statement) throws SQLException {
+        assertNoDuplicateBusinessKey(statement, "recruitment_candidate", "job_id, interviewee_user_id",
+                "interviewee_user_id IS NOT NULL", "candidate applications for one job and interviewee");
+        assertNoDuplicateBusinessKey(statement, "interview_process", "recruitment_candidate_id",
+                "recruitment_candidate_id IS NOT NULL", "interview processes for one candidate");
+        assertNoDuplicateBusinessKey(statement, "hr_employee", "source_candidate_id",
+                "source_candidate_id IS NOT NULL", "employees generated from one candidate");
+    }
+
+    private void assertNoDuplicateBusinessKey(Statement statement, String table, String columns,
+                                              String predicate, String label) throws SQLException {
+        String sql = "SELECT COUNT(*) FROM (SELECT " + columns + " FROM " + table
+                + " WHERE " + predicate + " GROUP BY " + columns + " HAVING COUNT(*) > 1) duplicate_rows";
+        try (ResultSet resultSet = statement.executeQuery(sql)) {
+            if (resultSet.next() && resultSet.getLong(1) > 0) {
+                throw new IllegalStateException("Cannot enforce uniqueness for " + label
+                        + " while duplicate rows exist. Resolve duplicates before deployment.");
             }
         }
     }

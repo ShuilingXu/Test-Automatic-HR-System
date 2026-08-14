@@ -46,6 +46,7 @@ import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -191,7 +192,11 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         candidate.setApplicationStatus("SUBMITTED");
         candidate.setIntervieweeUserId(user.getId());
         candidate.setResumeLlmStatus("PENDING");
-        candidateMapper.insert(candidate);
+        try {
+            candidateMapper.insert(candidate);
+        } catch (DataIntegrityViolationException ex) {
+            throw new BusinessException("您已投递过该招聘岗位，不能重复投递");
+        }
         auditLogService.log(user.getId(), displayName(user), user.getRoleCode(), "RECRUITMENT", "APPLY_CANDIDATE", "RECRUITMENT_CANDIDATE", String.valueOf(candidate.getId()), candidate.getFullName() + " 投递岗位 " + request.getJobId());
         runAfterCommit(() -> CompletableFuture.runAsync(() -> evaluateCandidateResumeSafely(candidate.getId(), null)));
         return toCandidateVO(requireCandidate(candidate.getId()), loadJobMap(), loadResumeMap());

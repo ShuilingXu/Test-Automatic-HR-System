@@ -62,6 +62,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -128,6 +129,10 @@ public class InterviewServiceImpl implements InterviewService {
     private boolean llmDebug;
 
     private static final long MAX_RECORDING_SIZE = 100 * 1024 * 1024;
+    private static final int MAX_ICE_CANDIDATE_LENGTH = 4096;
+    private static final int MAX_ICE_CANDIDATE_COUNT = 256;
+    private static final int MAX_ICE_CANDIDATES_LENGTH = 256 * 1024;
+    private static final int ICE_APPEND_MAX_ATTEMPTS = 5;
     private static final int VIDEO_MERGE_MAX_ATTEMPTS = 3;
     private static final long MISSING_RECORDING_TIMEOUT_MINUTES = 10L;
     private static final Set<String> ALLOWED_RECORDING_CONTENT_TYPES = Set.of("video/webm", "application/octet-stream");
@@ -488,7 +493,11 @@ public class InterviewServiceImpl implements InterviewService {
         process.setVideoApproved(0);
         process.setOnsiteApproved(0);
         process.setProcessStatusView(firstTemplateStage == null ? "AI面" : stageStatusView(firstTemplateStage.getStageName(), process.getStageStatus()));
-        processMapper.insert(process);
+        try {
+            processMapper.insert(process);
+        } catch (DataIntegrityViolationException ex) {
+            throw new BusinessException("该候选人已存在面试流程");
+        }
         if (template != null) {
             cloneTemplateStages(process, templateStages);
             if ("VIDEO".equals(process.getCurrentStage())) {
@@ -664,8 +673,10 @@ public class InterviewServiceImpl implements InterviewService {
                 sendSse(emitter, "done", result);
                 emitter.complete();
             } catch (Exception ex) {
+                String errorId = UUID.randomUUID().toString();
+                log.warn("AI answer stream failed [{}] for process {}", errorId, request.getProcessId(), ex);
                 try {
-                    sendSse(emitter, "error", abbreviate(ex.getMessage()));
+                    sendSse(emitter, "error", "AI处理失败，请稍后重试（错误编号：" + errorId + "）");
                 } catch (IOException ignored) {
                 }
                 emitter.completeWithError(ex);
@@ -934,6 +945,7 @@ public class InterviewServiceImpl implements InterviewService {
                 throw new BusinessException("视频面试尚未结束，不能审批");
             }
         }
+        claimProcessDecision(process, expectedType, "WAITING_APPROVAL");
         stage.setApproved(request.getApproved());
         stage.setApprovedHrUserId(request.getApproverUserId());
         stage.setApprovedHrName(request.getApproverName());
@@ -963,6 +975,7 @@ public class InterviewServiceImpl implements InterviewService {
         if (!StrUtil.equals(process.getCurrentStage(), "AI") || !StrUtil.equals(process.getStageStatus(), "WAITING_APPROVAL")) {
             throw new BusinessException("当前流程不在AI审批阶段");
         }
+        claimProcessDecision(process, "AI", "WAITING_APPROVAL");
         if (request.getApproved() == 1) {
             process.setCurrentStage("VIDEO");
             process.setStageStatus("READY");
@@ -998,6 +1011,7 @@ public class InterviewServiceImpl implements InterviewService {
         if (!(StrUtil.equals(session.getSessionStatus(), "WAITING_APPROVAL") || StrUtil.equals(session.getSessionStatus(), "RECORDED"))) {
             throw new BusinessException("视频面试尚未结束，不能审批");
         }
+        claimProcessDecision(process, "VIDEO", "WAITING_APPROVAL");
         process.setVideoApproved(request.getApproved());
         process.setApprovedHrUserId(request.getApproverUserId());
         process.setApprovedHrName(request.getApproverName());
@@ -1024,6 +1038,7 @@ public class InterviewServiceImpl implements InterviewService {
         if (!StrUtil.equals(process.getCurrentStage(), "ONSITE")) {
             throw new BusinessException("当前流程不在线下面审批阶段");
         }
+        claimProcessDecision(process, "ONSITE", null);
         process.setOnsiteApproved(request.getApproved());
         process.setApprovedHrUserId(request.getApproverUserId());
         process.setApprovedHrName(request.getApproverName());
@@ -1048,6 +1063,7 @@ public class InterviewServiceImpl implements InterviewService {
     public InterviewVO terminateProcess(Long processId, InterviewDecisionRequest request) {
         InterviewProcess process = requireProcess(processId);
         ensureInProgress(process);
+        claimProcessDecision(process, null, null);
         process.setOverallStatus("TERMINATED");
         process.setStageStatus("TERMINATED");
         process.setProcessStatusView("已终止");
@@ -1119,32 +1135,52 @@ public class InterviewServiceImpl implements InterviewService {
     @Override
     @Transactional
     public VideoSignalVO addHrIceCandidate(Long processId, VideoSignalRequest request) {
-        InterviewVideoSession session = requireVideoSessionByProcess(processId);
-        if (!isCurrentIceCandidate(session.getHrOfferSdp(), request.getIceCandidate())) {
-            return toVideoSignalVO(session);
+        String candidate = validateIceCandidate(request.getIceCandidate());
+        for (int attempt = 0; attempt < ICE_APPEND_MAX_ATTEMPTS; attempt++) {
+            InterviewVideoSession session = requireVideoSessionByProcess(processId);
+            if (!isCurrentIceCandidate(session.getHrOfferSdp(), candidate)
+                    || containsSignal(session.getHrIceCandidates(), candidate)) {
+                return toVideoSignalVO(session);
+            }
+            String existing = session.getHrIceCandidates();
+            String appended = appendIceCandidate(existing, candidate);
+            LambdaUpdateWrapper<InterviewVideoSession> update = new LambdaUpdateWrapper<InterviewVideoSession>()
+                    .eq(InterviewVideoSession::getId, session.getId())
+                    .eq(existing != null, InterviewVideoSession::getHrIceCandidates, existing)
+                    .isNull(existing == null, InterviewVideoSession::getHrIceCandidates)
+                    .set(InterviewVideoSession::getHrIceCandidates, appended);
+            if (videoSessionMapper.update(null, update) == 1) {
+                session.setHrIceCandidates(appended);
+                return toVideoSignalVO(session);
+            }
         }
-        if (containsSignal(session.getHrIceCandidates(), request.getIceCandidate())) {
-            return toVideoSignalVO(session);
-        }
-        session.setHrIceCandidates(appendSignal(session.getHrIceCandidates(), request.getIceCandidate()));
-        videoSessionMapper.updateById(session);
-        return toVideoSignalVO(session);
+        throw new BusinessException("ICE候选更新冲突，请重试");
     }
 
     @Override
     @Transactional
     public VideoSignalVO addIntervieweeIceCandidate(Long processId, VideoSignalRequest request, Long intervieweeUserId, String intervieweeName) {
         requireIntervieweeProcess(processId, intervieweeUserId);
-        InterviewVideoSession session = requireVideoSessionByProcess(processId);
-        if (!isCurrentIceCandidate(session.getIntervieweeAnswerSdp(), request.getIceCandidate())) {
-            return toIntervieweeVideoSignalVO(session);
+        String candidate = validateIceCandidate(request.getIceCandidate());
+        for (int attempt = 0; attempt < ICE_APPEND_MAX_ATTEMPTS; attempt++) {
+            InterviewVideoSession session = requireVideoSessionByProcess(processId);
+            if (!isCurrentIceCandidate(session.getIntervieweeAnswerSdp(), candidate)
+                    || containsSignal(session.getIntervieweeIceCandidates(), candidate)) {
+                return toIntervieweeVideoSignalVO(session);
+            }
+            String existing = session.getIntervieweeIceCandidates();
+            String appended = appendIceCandidate(existing, candidate);
+            LambdaUpdateWrapper<InterviewVideoSession> update = new LambdaUpdateWrapper<InterviewVideoSession>()
+                    .eq(InterviewVideoSession::getId, session.getId())
+                    .eq(existing != null, InterviewVideoSession::getIntervieweeIceCandidates, existing)
+                    .isNull(existing == null, InterviewVideoSession::getIntervieweeIceCandidates)
+                    .set(InterviewVideoSession::getIntervieweeIceCandidates, appended);
+            if (videoSessionMapper.update(null, update) == 1) {
+                session.setIntervieweeIceCandidates(appended);
+                return toIntervieweeVideoSignalVO(session);
+            }
         }
-        if (containsSignal(session.getIntervieweeIceCandidates(), request.getIceCandidate())) {
-            return toIntervieweeVideoSignalVO(session);
-        }
-        session.setIntervieweeIceCandidates(appendSignal(session.getIntervieweeIceCandidates(), request.getIceCandidate()));
-        videoSessionMapper.updateById(session);
-        return toIntervieweeVideoSignalVO(session);
+        throw new BusinessException("ICE候选更新冲突，请重试");
     }
 
     @Override
@@ -1646,6 +1682,18 @@ public class InterviewServiceImpl implements InterviewService {
     private void ensureInProgress(InterviewProcess process) {
         if (!StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
             throw new BusinessException("当前流程已结束，不能重复审批或回退");
+        }
+    }
+
+    private void claimProcessDecision(InterviewProcess process, String expectedStage, String expectedStageStatus) {
+        LambdaUpdateWrapper<InterviewProcess> claim = new LambdaUpdateWrapper<InterviewProcess>()
+                .eq(InterviewProcess::getId, process.getId())
+                .eq(InterviewProcess::getOverallStatus, "IN_PROGRESS")
+                .eq(StrUtil.isNotBlank(expectedStage), InterviewProcess::getCurrentStage, expectedStage)
+                .eq(StrUtil.isNotBlank(expectedStageStatus), InterviewProcess::getStageStatus, expectedStageStatus)
+                .set(InterviewProcess::getOverallStatus, "DECISION_PROCESSING");
+        if (processMapper.update(null, claim) != 1) {
+            throw new BusinessException("流程状态已变化，请刷新后重试");
         }
     }
 
@@ -2629,11 +2677,30 @@ public class InterviewServiceImpl implements InterviewService {
                 .orElse(null);
     }
 
-    private String appendSignal(String existing, String value) {
-        if (StrUtil.isBlank(existing)) {
-            return value;
+    private String validateIceCandidate(String candidate) {
+        if (StrUtil.isBlank(candidate)) {
+            throw new BusinessException("ICE候选不能为空");
         }
-        return existing + "\n" + value;
+        if (candidate.length() > MAX_ICE_CANDIDATE_LENGTH) {
+            throw new BusinessException("ICE候选不能超过4096个字符");
+        }
+        return candidate;
+    }
+
+    private String appendIceCandidate(String existing, String candidate) {
+        if (StrUtil.isBlank(existing)) {
+            return candidate;
+        }
+        long existingCount = java.util.Arrays.stream(existing.split("\\n"))
+                .filter(StrUtil::isNotBlank)
+                .count();
+        if (existingCount >= MAX_ICE_CANDIDATE_COUNT) {
+            throw new BusinessException("ICE候选数量已达到上限");
+        }
+        if (existing.length() + candidate.length() + 1 > MAX_ICE_CANDIDATES_LENGTH) {
+            throw new BusinessException("ICE候选总长度已达到上限");
+        }
+        return existing + "\n" + candidate;
     }
 
     private boolean containsSignal(String existing, String value) {

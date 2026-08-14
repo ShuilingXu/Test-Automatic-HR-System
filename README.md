@@ -425,7 +425,37 @@ JWT_SECRET=replace-with-a-secure-secret-at-least-32-chars
 
 开发环境可在 MySQL 或 PostgreSQL 连接失败时回退到 SQLite；生产环境必须显式配置 `DB_TYPE`，且非 SQLite 数据库必须提供 `DB_URL`。
 
-全库 22 张业务表统一使用数据库生成主键：SQLite 使用 `INTEGER PRIMARY KEY AUTOINCREMENT`，MySQL 使用 `AUTO_INCREMENT`，PostgreSQL 使用 Identity/Sequence。应用启动迁移会为既有 MySQL/PostgreSQL 表补齐生成器并将序列推进到现有最大主键之后，业务代码不再计算或手工写入下一主键。
+全库 22 张业务表统一使用数据库生成主键，不保留手工主键例外：SQLite 使用 `INTEGER PRIMARY KEY AUTOINCREMENT`，MySQL 使用 `AUTO_INCREMENT`，PostgreSQL 使用 Identity/Sequence。应用启动迁移会为既有 MySQL/PostgreSQL 表补齐生成器并将序列推进到现有最大主键之后，业务代码不再计算或手工写入下一主键。
+
+应用还会建立以下业务唯一约束，防止并发请求产生重复报名、重复面试流程或重复待入职员工：
+
+- `recruitment_candidate(job_id, interviewee_user_id)`
+- `interview_process(recruitment_candidate_id)`
+- `hr_employee(source_candidate_id)`
+
+升级既有数据库前可先执行只读预检：
+
+```sql
+SELECT job_id, interviewee_user_id, COUNT(*)
+FROM recruitment_candidate
+WHERE interviewee_user_id IS NOT NULL
+GROUP BY job_id, interviewee_user_id
+HAVING COUNT(*) > 1;
+
+SELECT recruitment_candidate_id, COUNT(*)
+FROM interview_process
+WHERE recruitment_candidate_id IS NOT NULL
+GROUP BY recruitment_candidate_id
+HAVING COUNT(*) > 1;
+
+SELECT source_candidate_id, COUNT(*)
+FROM hr_employee
+WHERE source_candidate_id IS NOT NULL
+GROUP BY source_candidate_id
+HAVING COUNT(*) > 1;
+```
+
+任一查询返回记录时，启动迁移会拒绝建立唯一索引并终止启动，不会自动删除或合并历史数据。确认并处理重复记录后再重新启动服务。
 
 ### 生产 PostgreSQL 与邮件
 

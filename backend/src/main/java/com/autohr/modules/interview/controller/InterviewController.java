@@ -293,7 +293,7 @@ public class InterviewController {
 
     @PostMapping("/hr/video-offer/{processId}")
     public ApiResponse<VideoSignalVO> publishOffer(@PathVariable Long processId,
-                                                   @RequestBody VideoSignalRequest request) {
+                                                   @Valid @RequestBody VideoSignalRequest request) {
         return ApiResponse.success(interviewService.publishHrOffer(processId, request));
     }
 
@@ -305,21 +305,21 @@ public class InterviewController {
     @PostMapping("/interviewee/video-answer/{processId}")
     public ApiResponse<VideoSignalVO> submitAnswer(Authentication authentication,
                                                    @PathVariable Long processId,
-                                                   @RequestBody VideoSignalRequest request) {
+                                                   @Valid @RequestBody VideoSignalRequest request) {
         SessionUserVO current = currentUser(authentication);
         return ApiResponse.success(interviewService.submitIntervieweeAnswer(processId, request, current.getId(), current.getDisplayName()));
     }
 
     @PostMapping("/hr/video-ice/{processId}")
     public ApiResponse<VideoSignalVO> addHrIce(@PathVariable Long processId,
-                                               @RequestBody VideoSignalRequest request) {
+                                               @Valid @RequestBody VideoSignalRequest request) {
         return ApiResponse.success(interviewService.addHrIceCandidate(processId, request));
     }
 
     @PostMapping("/interviewee/video-ice/{processId}")
     public ApiResponse<VideoSignalVO> addIntervieweeIce(Authentication authentication,
                                                         @PathVariable Long processId,
-                                                        @RequestBody VideoSignalRequest request) {
+                                                        @Valid @RequestBody VideoSignalRequest request) {
         SessionUserVO current = currentUser(authentication);
         return ApiResponse.success(interviewService.addIntervieweeIceCandidate(processId, request, current.getId(), current.getDisplayName()));
     }
