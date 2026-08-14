@@ -1,6 +1,5 @@
 package com.autohr.modules.auth.service.impl;
 
-import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import com.aliyun.dysmsapi20170525.Client;
 import com.aliyun.dysmsapi20170525.models.SendSmsRequest;
@@ -15,7 +14,9 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,6 +33,7 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
     private static final int EXPIRE_MINUTES = 5;
     private static final int RESEND_SECONDS = 60;
     private static final int MAX_VERIFY_ATTEMPTS = 5;
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final String REGISTER_PURPOSE = "register";
     private static final String PASSWORD_RESET_PURPOSE = "password-reset";
 
@@ -60,22 +62,29 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
     }
 
     private void sendCode(String purpose, String mobilePhone, String email, String captchaId, String captchaCode) {
-        cleanupExpiredCodes();
-        captchaService.verifyCaptcha(captchaId, captchaCode);
         String target = normalizeTarget(mobilePhone, email);
+        captchaService.verifyCaptcha(captchaId, captchaCode);
         String codeKey = codeKey(purpose, target);
-        CodeRecord oldRecord = codeStore.get(codeKey);
-        if (oldRecord != null && oldRecord.sentAt().plusSeconds(RESEND_SECONDS).isAfter(LocalDateTime.now())) {
-            throw new BusinessException("验证码发送过于频繁，请稍后再试");
-        }
-        String code = RandomUtil.randomNumbers(6);
-        if (target.startsWith("sms:")) {
-            sendSms(target.substring(4), code);
-        } else {
-            sendEmail(target.substring(6), code);
-        }
+        cleanupExpiredCodes();
         LocalDateTime now = LocalDateTime.now();
-        codeStore.put(codeKey, new CodeRecord(code, now, now.plusMinutes(EXPIRE_MINUTES)));
+        String code = String.format(Locale.ROOT, "%06d", SECURE_RANDOM.nextInt(1_000_000));
+        CodeRecord pendingRecord = new CodeRecord(code, now, now.plusMinutes(EXPIRE_MINUTES));
+        codeStore.compute(codeKey, (key, oldRecord) -> {
+            if (oldRecord != null && oldRecord.sentAt().plusSeconds(RESEND_SECONDS).isAfter(LocalDateTime.now())) {
+                throw new BusinessException("验证码发送过于频繁，请稍后再试");
+            }
+            return pendingRecord;
+        });
+        try {
+            if (target.startsWith("sms:")) {
+                sendSms(target.substring(4), code);
+            } else {
+                sendEmail(target.substring(6), code);
+            }
+        } catch (RuntimeException ex) {
+            codeStore.remove(codeKey, pendingRecord);
+            throw ex;
+        }
     }
 
     private synchronized void verifyCode(String purpose, String mobilePhone, String email, String code) {

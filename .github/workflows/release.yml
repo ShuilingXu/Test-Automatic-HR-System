@@ -88,23 +88,44 @@ jobs:
           DEPLOY_INITIAL_ENV: ${{ secrets.DEPLOY_INITIAL_ENV }}
         run: |
           DEPLOY_WEB_ROOT_B64="$(printf '%s' "$DEPLOY_WEB_ROOT" | base64 | tr -d '\n')"
-          DEPLOY_INITIAL_ENV_B64="$(printf '%s' "$DEPLOY_INITIAL_ENV" | base64 | tr -d '\n')"
           scp -P "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new auto-hr-release.zip "$DEPLOY_USER@$DEPLOY_HOST:/tmp/auto-hr-release.zip"
-          ssh -p "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" "DEPLOY_WEB_ROOT_B64='$DEPLOY_WEB_ROOT_B64' DEPLOY_INITIAL_ENV_B64='$DEPLOY_INITIAL_ENV_B64' bash -s" <<'REMOTE'
+          if [ -n "$DEPLOY_INITIAL_ENV" ]; then
+            umask 077
+            printf '%s' "$DEPLOY_INITIAL_ENV" > deploy-initial.env
+            scp -P "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new deploy-initial.env "$DEPLOY_USER@$DEPLOY_HOST:/tmp/auto-hr-initial.env"
+            rm -f deploy-initial.env
+          fi
+          ssh -p "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" "DEPLOY_WEB_ROOT_B64='$DEPLOY_WEB_ROOT_B64' bash -s" <<'REMOTE'
             set -euo pipefail
             DEPLOY_WEB_ROOT="$(printf '%s' "$DEPLOY_WEB_ROOT_B64" | base64 --decode)"
+            cleanup() {
+              rm -f /tmp/auto-hr-release.zip /tmp/auto-hr-initial.env
+            }
+            trap cleanup EXIT
             sudo install -d -m 0755 /opt/auto-hr "$DEPLOY_WEB_ROOT"
             if [ ! -f /opt/auto-hr/.env ]; then
-              if [ -z "$DEPLOY_INITIAL_ENV_B64" ]; then
+              if [ ! -s /tmp/auto-hr-initial.env ]; then
                 echo "First deployment requires the DEPLOY_INITIAL_ENV repository secret." >&2
                 exit 1
               fi
-              printf '%s' "$DEPLOY_INITIAL_ENV_B64" | base64 --decode | sudo tee /opt/auto-hr/.env >/dev/null
-              sudo chmod 0600 /opt/auto-hr/.env
+              sudo install -m 0600 /tmp/auto-hr-initial.env /opt/auto-hr/.env
             fi
             sudo chmod 0600 /opt/auto-hr/.env
             sudo rm -rf /tmp/auto-hr-release
-            sudo python3 -c 'import zipfile; zipfile.ZipFile("/tmp/auto-hr-release.zip").extractall("/tmp/auto-hr-release")'
+            sudo python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          archive_path = Path("/tmp/auto-hr-release.zip")
+          destination_root = Path("/tmp/auto-hr-release").resolve()
+          destination_root.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(archive_path) as archive:
+              for member in archive.infolist():
+                  destination = (destination_root / member.filename).resolve()
+                  if destination != destination_root and destination_root not in destination.parents:
+                      raise SystemExit(f"Unsafe path in release archive: {member.filename}")
+                  archive.extract(member, destination_root)
+          PY
             sudo cp -a /tmp/auto-hr-release/auto-hr-release/. /opt/auto-hr/
             sudo cp -a /opt/auto-hr/frontend/. "$DEPLOY_WEB_ROOT"/
             sudo chmod 0755 /opt/auto-hr/start.sh

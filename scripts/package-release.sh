@@ -26,8 +26,13 @@ mkdir -p "$BACKEND_DIR/target/classes/static"
 cp -R "$FRONTEND_DIR/dist/." "$BACKEND_DIR/target/classes/static/"
 mvn -q -f "$BACKEND_DIR/pom.xml" -DskipTests package
 
-JAR_FILE="$(find "$BACKEND_DIR/target" -maxdepth 1 -name '*.jar' ! -name '*.original' | head -n 1)"
-test -n "$JAR_FILE"
+mapfile -t JAR_FILES < <(find "$BACKEND_DIR/target" -maxdepth 1 -type f -name '*.jar' ! -name '*.original' -print)
+if [ "${#JAR_FILES[@]}" -ne 1 ]; then
+  echo "Expected exactly one executable JAR in $BACKEND_DIR/target; found ${#JAR_FILES[@]}." >&2
+  printf '%s\n' "${JAR_FILES[@]}" >&2
+  exit 1
+fi
+JAR_FILE="${JAR_FILES[0]}"
 cp "$JAR_FILE" "$PACKAGE_DIR/backend/auto-hr.jar"
 cp -R "$FRONTEND_DIR/dist/." "$PACKAGE_DIR/frontend/"
 cp "$ROOT_DIR/.env.example" "$PACKAGE_DIR/.env.example"

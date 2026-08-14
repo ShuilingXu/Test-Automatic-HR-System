@@ -112,6 +112,9 @@ public class AuthServiceImpl implements AuthService {
         user.setDisplayName(StrUtil.blankToDefault(request.getDisplayName(), user.getDisplayName()));
         user.setMobilePhone(StrUtil.blankToDefault(request.getMobilePhone(), user.getMobilePhone()));
         user.setEmail(request.getEmail());
+        if (StrUtil.isBlank(user.getMobilePhone()) && StrUtil.isBlank(user.getEmail())) {
+            throw new BusinessException("手机号和邮箱至少需要保留一种");
+        }
         user.setProfileCompleted(1);
         sysUserMapper.updateById(user);
         return toSessionUser(user);

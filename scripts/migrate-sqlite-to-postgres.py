@@ -3,6 +3,7 @@
 
 import argparse
 import os
+from pathlib import Path
 import sqlite3
 
 try:
@@ -94,15 +95,24 @@ def reset_sequences(cursor):
 
 
 def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False):
-    source = sqlite3.connect(sqlite_path)
+    source_path = Path(sqlite_path)
+    if not source_path.is_file():
+        raise SystemExit(f"SQLite source file does not exist: {source_path}")
+    source = sqlite3.connect(f"{source_path.resolve().as_uri()}?mode=ro", uri=True)
     source.row_factory = sqlite3.Row
     try:
+        source.execute("BEGIN")
         with psycopg.connect(postgres_dsn) as target:
             with target.cursor() as cursor:
                 if not dry_run and not force_overwrite:
                     require_empty_target(cursor)
                 if not dry_run:
                     cursor.execute("SET CONSTRAINTS ALL DEFERRED")
+                    if force_overwrite:
+                        target_tables = [table for table in TABLES if target_table_exists(cursor, table)]
+                        if target_tables:
+                            table_list = ", ".join(quote(table) for table in target_tables)
+                            cursor.execute(f"TRUNCATE TABLE {table_list} CASCADE")
                 for table in TABLES:
                     columns = [row[1] for row in source.execute(f"PRAGMA table_info({quote(table)})")]
                     if not columns:
@@ -118,7 +128,6 @@ def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False):
                     print(f"{table}: {len(rows)} rows")
                     if dry_run:
                         continue
-                    cursor.execute(f"TRUNCATE TABLE {quote(table)} CASCADE")
                     if rows:
                         column_list = ", ".join(quote(column) for column in columns)
                         placeholders = ", ".join(["%s"] * len(columns))
