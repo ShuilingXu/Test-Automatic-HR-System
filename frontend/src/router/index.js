@@ -8,6 +8,9 @@ import CandidateDetailView from '../views/CandidateDetailView.vue'
 import InterviewAdminView from '../views/InterviewAdminView.vue'
 import UserPortalView from '../views/UserPortalView.vue'
 import ForcePasswordChangeView from '../views/ForcePasswordChangeView.vue'
+import DashboardView from '../views/DashboardView.vue'
+import PayrollView from '../views/PayrollView.vue'
+import StatisticsView from '../views/StatisticsView.vue'
 import { readSessionUser } from '../utils/session'
 
 const KNOWN_ROLES = new Set(['IT_ADMIN', 'HR_ADMIN', 'HR_USER', 'INTERVIEWEE'])
@@ -17,7 +20,10 @@ const routes = [
   { path: '/login', name: 'login', component: LoginView },
   { path: '/change-password', name: 'change-password', component: ForcePasswordChangeView, meta: { requiresAuth: true } },
   { path: '/admin', redirect: '/admin/dashboard' },
-  { path: '/admin/dashboard', name: 'admin-dashboard', component: ConsoleView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'], consoleTab: 'dashboard' } },
+  { path: '/hr/employees', redirect: '/admin/employees' },
+  { path: '/admin/dashboard', name: 'admin-dashboard', component: DashboardView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'] } },
+  { path: '/admin/payroll', name: 'admin-payroll', component: PayrollView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'] } },
+  { path: '/admin/statistics', name: 'admin-statistics', component: StatisticsView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN', 'HR_USER'] } },
   { path: '/admin/audit', name: 'admin-audit', component: ConsoleView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN'], consoleTab: 'audit' } },
   { path: '/admin/users', name: 'admin-users', component: ConsoleView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN'], consoleTab: 'users' } },
   { path: '/admin/users/:id', name: 'admin-user-detail', component: ConsoleView, meta: { requiresAuth: true, roles: ['IT_ADMIN', 'HR_ADMIN'], consoleTab: 'users' } },

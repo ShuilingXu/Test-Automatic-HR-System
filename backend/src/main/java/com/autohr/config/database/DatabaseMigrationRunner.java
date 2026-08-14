@@ -27,6 +27,8 @@ import java.util.List;
 public class DatabaseMigrationRunner implements CommandLineRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrationRunner.class);
+    private static final long POSTGRES_MIGRATION_LOCK_ID = 4_154_857_282_026L;
+    private static final String MYSQL_MIGRATION_LOCK_NAME = "autohr_schema_migration";
     private static final List<String> PRIMARY_KEY_TABLES = List.of(
             "hr_department", "hr_employee", "hr_integration_binding",
             "recruitment_job", "recruitment_candidate", "recruitment_resume_file",
@@ -35,6 +37,9 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
             "interview_knowledge_base", "interview_knowledge_item", "interview_job_knowledge_weight",
             "interview_llm_config", "interview_process", "interview_ai_record", "interview_video_session",
             "interview_process_template", "interview_process_template_stage", "interview_process_stage"
+            , "hr_salary_history", "hr_performance_month", "hr_overtime_month",
+            "hr_social_insurance_month", "hr_special_deduction_month", "hr_payroll_month",
+            "user_dashboard_config"
     );
 
     private final DataSource dataSource;
@@ -54,24 +59,30 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
             return;
         }
         List<String> statements = loadStatements();
-        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
-            for (String sql : statements.stream().filter(sql -> !isCreateIndex(sql)).toList()) {
-                execute(statement, sql);
-            }
-            migrateInterviewProcessColumns(connection, statement);
-            migrateInterviewProcessTemplateColumns(connection, statement);
-            migrateInterviewAiRecordColumns(connection, statement);
-            migrateInterviewVideoSessionColumns(connection, statement);
-            migrateInterviewProcessStageColumns(connection, statement);
-            migrateRecruitmentCandidateColumns(connection, statement);
-            migrateRecruitmentJobColumns(connection, statement);
-            migrateHrEmployeeColumns(connection, statement);
-            migrateSysUserColumns(connection, statement);
-            migrateReferentialIntegrityConstraints(connection, statement);
-            assertNoDuplicateBusinessKeys(statement);
-            migrateDatabaseGeneratedPrimaryKeys(connection, statement);
-            for (String sql : statements.stream().filter(this::isCreateIndex).toList()) {
-                execute(statement, sql);
+        try (Connection connection = dataSource.getConnection()) {
+            acquireMigrationLock(connection);
+            try (Statement statement = connection.createStatement()) {
+                for (String sql : statements.stream().filter(sql -> !isCreateIndex(sql)).toList()) {
+                    execute(statement, sql);
+                }
+                migrateInterviewProcessColumns(connection, statement);
+                migrateInterviewProcessTemplateColumns(connection, statement);
+                migrateInterviewAiRecordColumns(connection, statement);
+                migrateInterviewVideoSessionColumns(connection, statement);
+                migrateInterviewProcessStageColumns(connection, statement);
+                migrateRecruitmentCandidateColumns(connection, statement);
+                migrateRecruitmentJobColumns(connection, statement);
+                migrateHrEmployeeColumns(connection, statement);
+                migrateInterviewLlmConfigColumns(connection, statement);
+                migrateSysUserColumns(connection, statement);
+                migrateReferentialIntegrityConstraints(connection, statement);
+                assertNoDuplicateBusinessKeys(statement);
+                migrateDatabaseGeneratedPrimaryKeys(connection, statement);
+                for (String sql : statements.stream().filter(this::isCreateIndex).toList()) {
+                    execute(statement, sql);
+                }
+            } finally {
+                releaseMigrationLock(connection);
             }
         }
         log.info("Database migration completed for {}", activeDatabase.type());
@@ -91,10 +102,14 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         return switch (activeDatabase.type()) {
             case SQLITE -> schema;
             case MYSQL -> schema
+                    .replace("    FOREIGN KEY (department_id) REFERENCES hr_department(id),\n    FOREIGN KEY (job_id) REFERENCES recruitment_job(id)\n);",
+                            "    FOREIGN KEY (department_id) REFERENCES hr_department(id)\n);")
                     .replace("CREATE UNIQUE INDEX IF NOT EXISTS", "CREATE UNIQUE INDEX")
                     .replace("CREATE INDEX IF NOT EXISTS", "CREATE INDEX")
                     .replace("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY AUTO_INCREMENT");
             case PGSQL -> schema
+                    .replace("    FOREIGN KEY (department_id) REFERENCES hr_department(id),\n    FOREIGN KEY (job_id) REFERENCES recruitment_job(id)\n);",
+                            "    FOREIGN KEY (department_id) REFERENCES hr_department(id)\n);")
                     .replace("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY")
                     .replace("DATETIME", "TIMESTAMP");
         };
@@ -122,6 +137,13 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
                     || errorCode == 1061
                     || messageContains(ex, "already exists")
                     || messageContains(ex, "Duplicate key name");
+        }
+        if (normalized.startsWith("ALTER TABLE") && normalized.contains(" ADD COLUMN ")) {
+            return "42701".equals(ex.getSQLState())
+                    || "42S21".equals(ex.getSQLState())
+                    || ex.getErrorCode() == 1060
+                    || messageContains(ex, "already exists")
+                    || messageContains(ex, "duplicate column");
         }
         return false;
     }
@@ -165,6 +187,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "interview_ai_record", "answer_lease_expires_at", dateTimeType());
         addColumnIfMissing(connection, statement, "interview_ai_record", "answer_processing_attempts", "INTEGER NOT NULL DEFAULT 0");
         addColumnIfMissing(connection, statement, "interview_ai_record", "answer_error", "VARCHAR(1000)");
+        addColumnIfMissing(connection, statement, "interview_ai_record", "interviewer_comment", "VARCHAR(2000)");
         statement.executeUpdate("UPDATE interview_ai_record SET stage_scope_id = COALESCE(process_stage_id, 0)");
         statement.executeUpdate("UPDATE interview_ai_record SET question_status = COALESCE(question_status, 'READY')");
         statement.executeUpdate("UPDATE interview_ai_record SET answer_status = CASE "
@@ -192,7 +215,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "interview_video_session", "transcript_text", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "summary_text", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "summary_status", "VARCHAR(32)");
-        widenColumnIfNeeded(statement, "interview_video_session", "summary_status", "VARCHAR(128)");
+        widenColumnIfNeeded(connection, statement, "interview_video_session", "summary_status", "VARCHAR(128)");
         addColumnIfMissing(connection, statement, "interview_video_session", "hr_offer_sdp", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_answer_sdp", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "hr_ice_candidates", "TEXT");
@@ -214,6 +237,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
 
     private void migrateRecruitmentJobColumns(Connection connection, Statement statement) throws SQLException {
         addColumnIfMissing(connection, statement, "recruitment_job", "department_id", "INTEGER");
+        addColumnIfMissing(connection, statement, "recruitment_job", "default_overtime_rate", "DECIMAL(12,2) NOT NULL DEFAULT 0");
     }
 
     private void migrateHrEmployeeColumns(Connection connection, Statement statement) throws SQLException {
@@ -221,14 +245,27 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "hr_employee", "interview_stage_status", "VARCHAR(64)");
         addColumnIfMissing(connection, statement, "hr_employee", "source_channel", "VARCHAR(64)");
         addColumnIfMissing(connection, statement, "hr_employee", "notes", "VARCHAR(1000)");
+        addColumnIfMissing(connection, statement, "hr_employee", "job_id", "INTEGER");
+        addColumnIfMissing(connection, statement, "hr_employee", "base_salary", "DECIMAL(12,2) NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, statement, "hr_employee", "salary_confirmed", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, statement, "hr_employee", "overtime_rate", "DECIMAL(12,2)");
+        addColumnIfMissing(connection, statement, "hr_employee", "dismissal_reason", "VARCHAR(64)");
+        addColumnIfMissing(connection, statement, "hr_employee", "dismissal_date", "DATE");
+        statement.executeUpdate("UPDATE hr_employee SET job_id = (SELECT MIN(j.id) FROM recruitment_job j "
+                + "WHERE j.job_title = hr_employee.position_name) WHERE job_id IS NULL");
+    }
+
+    private void migrateInterviewLlmConfigColumns(Connection connection, Statement statement) throws SQLException {
+        widenColumnIfNeeded(connection, statement, "interview_llm_config", "api_key", "VARCHAR(512)");
     }
 
     private void migrateReferentialIntegrityConstraints(Connection connection, Statement statement) throws SQLException {
         if (activeDatabase.type() == DatabaseType.SQLITE) {
-            // SQLite cannot add foreign-key constraints to existing tables without rebuilding them.
+            rebuildSqliteEmployeeTableForJobForeignKey(connection, statement);
             return;
         }
         ensureForeignKey(connection, statement, "fk_hr_employee_manager", "hr_employee", "manager_employee_id", "hr_employee");
+        ensureForeignKey(connection, statement, "fk_hr_employee_job", "hr_employee", "job_id", "recruitment_job");
         ensureForeignKey(connection, statement, "fk_hr_department_parent", "hr_department", "parent_department_id", "hr_department");
         ensureForeignKey(connection, statement, "fk_hr_department_manager", "hr_department", "manager_employee_id", "hr_employee");
         ensureEmployeeSourceCandidateForeignKey(connection, statement);
@@ -245,6 +282,61 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         ensureForeignKey(connection, statement, "fk_video_session_process", "interview_video_session", "process_id", "interview_process");
         ensureForeignKey(connection, statement, "fk_video_session_stage", "interview_video_session", "process_stage_id", "interview_process_stage");
         ensureForeignKey(connection, statement, "fk_video_session_approver", "interview_video_session", "approver_user_id", "sys_user");
+    }
+
+    private void rebuildSqliteEmployeeTableForJobForeignKey(Connection connection, Statement statement) throws SQLException {
+        if (foreignKeyExists(connection, "hr_employee", "job_id", "recruitment_job")) {
+            return;
+        }
+        boolean foreignKeysEnabled;
+        try (ResultSet result = statement.executeQuery("PRAGMA foreign_keys")) {
+            foreignKeysEnabled = result.next() && result.getInt(1) == 1;
+        }
+        boolean originalAutoCommit = connection.getAutoCommit();
+        if (!originalAutoCommit) {
+            connection.commit();
+        }
+        statement.execute("PRAGMA foreign_keys=OFF");
+        connection.setAutoCommit(false);
+        try (Statement migration = connection.createStatement()) {
+            migration.executeUpdate("CREATE TABLE hr_employee_migration ("
+                    + "id INTEGER PRIMARY KEY AUTOINCREMENT, employee_code VARCHAR(64) NOT NULL UNIQUE, "
+                    + "full_name VARCHAR(64) NOT NULL, id_card_no VARCHAR(32) NOT NULL UNIQUE, "
+                    + "mobile_phone VARCHAR(32) NOT NULL UNIQUE, email VARCHAR(128), "
+                    + "recruitment_major VARCHAR(128) NOT NULL, position_name VARCHAR(128) NOT NULL, "
+                    + "manager_employee_id INTEGER, department_id INTEGER NOT NULL, "
+                    + "bank_account_no VARCHAR(64) NOT NULL, bank_name VARCHAR(128) NOT NULL, "
+                    + "hire_date DATE NOT NULL, employment_status INTEGER NOT NULL DEFAULT 0, "
+                    + "source_candidate_id INTEGER, interview_stage_status VARCHAR(64), source_channel VARCHAR(64), "
+                    + "notes VARCHAR(1000), job_id INTEGER, base_salary DECIMAL(12,2) NOT NULL DEFAULT 0, "
+                    + "salary_confirmed INTEGER NOT NULL DEFAULT 0, overtime_rate DECIMAL(12,2), "
+                    + "dismissal_reason VARCHAR(64), dismissal_date DATE, "
+                    + "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "FOREIGN KEY (department_id) REFERENCES hr_department(id), "
+                    + "FOREIGN KEY (job_id) REFERENCES recruitment_job(id))");
+            String columns = "id,employee_code,full_name,id_card_no,mobile_phone,email,recruitment_major,"
+                    + "position_name,manager_employee_id,department_id,bank_account_no,bank_name,hire_date,"
+                    + "employment_status,source_candidate_id,interview_stage_status,source_channel,notes,job_id,"
+                    + "base_salary,salary_confirmed,overtime_rate,dismissal_reason,dismissal_date,created_at,updated_at";
+            migration.executeUpdate("INSERT INTO hr_employee_migration (" + columns + ") SELECT " + columns + " FROM hr_employee");
+            migration.executeUpdate("DROP TABLE hr_employee");
+            migration.executeUpdate("ALTER TABLE hr_employee_migration RENAME TO hr_employee");
+            connection.commit();
+            log.info("Rebuilt SQLite hr_employee table with job_id foreign key");
+        } catch (SQLException | RuntimeException ex) {
+            try {
+                connection.rollback();
+            } catch (SQLException rollbackError) {
+                ex.addSuppressed(rollbackError);
+            }
+            throw ex;
+        } finally {
+            connection.setAutoCommit(originalAutoCommit);
+            if (foreignKeysEnabled) {
+                statement.execute("PRAGMA foreign_keys=ON");
+            }
+        }
     }
 
     /**
@@ -506,11 +598,83 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         }
     }
 
-    private void widenColumnIfNeeded(Statement statement, String table, String column, String definition) throws SQLException {
-        if (activeDatabase.type() != DatabaseType.PGSQL) {
+    private void widenColumnIfNeeded(Connection connection, Statement statement, String table, String column,
+                                     String definition) throws SQLException {
+        if (activeDatabase.type() == DatabaseType.SQLITE) {
             return;
         }
-        statement.executeUpdate("ALTER TABLE " + table + " ALTER COLUMN " + column + " TYPE " + definition);
+        int open = definition.indexOf('(');
+        int close = definition.indexOf(')', open + 1);
+        if (open < 0 || close < 0) {
+            throw new SQLException("Unsupported variable-length column definition: " + definition);
+        }
+        int desiredLength = Integer.parseInt(definition.substring(open + 1, close));
+        String query = activeDatabase.type() == DatabaseType.PGSQL
+                ? "SELECT data_type, character_maximum_length FROM information_schema.columns "
+                    + "WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?"
+                : "SELECT data_type, character_maximum_length FROM information_schema.columns "
+                    + "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?";
+        try (PreparedStatement queryStatement = connection.prepareStatement(query)) {
+            queryStatement.setString(1, table);
+            queryStatement.setString(2, column);
+            try (ResultSet result = queryStatement.executeQuery()) {
+                if (!result.next()) {
+                    throw new SQLException("Missing column " + table + "." + column);
+                }
+                Number currentLength = (Number) result.getObject("character_maximum_length");
+                String dataType = result.getString("data_type");
+                boolean variableCharacter = "character varying".equalsIgnoreCase(dataType)
+                        || "varchar".equalsIgnoreCase(dataType);
+                if (!variableCharacter
+                        || (currentLength != null && currentLength.longValue() >= desiredLength)) {
+                    return;
+                }
+            }
+        }
+        if (activeDatabase.type() == DatabaseType.PGSQL) {
+            statement.executeUpdate("ALTER TABLE " + table + " ALTER COLUMN " + column + " TYPE " + definition);
+        } else {
+            statement.executeUpdate("ALTER TABLE " + table + " MODIFY COLUMN " + column + " " + definition);
+        }
+    }
+
+    private void acquireMigrationLock(Connection connection) throws SQLException {
+        if (activeDatabase.type() == DatabaseType.PGSQL) {
+            try (PreparedStatement statement = connection.prepareStatement("SELECT pg_advisory_lock(?)")) {
+                statement.setLong(1, POSTGRES_MIGRATION_LOCK_ID);
+                statement.execute();
+            }
+        } else if (activeDatabase.type() == DatabaseType.MYSQL) {
+            try (PreparedStatement statement = connection.prepareStatement("SELECT GET_LOCK(?, 60)")) {
+                statement.setString(1, MYSQL_MIGRATION_LOCK_NAME);
+                try (ResultSet result = statement.executeQuery()) {
+                    if (!result.next() || result.getInt(1) != 1) {
+                        throw new SQLException("Timed out waiting for the database migration lock");
+                    }
+                }
+            }
+        }
+    }
+
+    private void releaseMigrationLock(Connection connection) {
+        String sql = switch (activeDatabase.type()) {
+            case PGSQL -> "SELECT pg_advisory_unlock(?)";
+            case MYSQL -> "SELECT RELEASE_LOCK(?)";
+            case SQLITE -> null;
+        };
+        if (sql == null) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            if (activeDatabase.type() == DatabaseType.PGSQL) {
+                statement.setLong(1, POSTGRES_MIGRATION_LOCK_ID);
+            } else {
+                statement.setString(1, MYSQL_MIGRATION_LOCK_NAME);
+            }
+            statement.execute();
+        } catch (SQLException ex) {
+            log.warn("Could not release the database migration lock", ex);
+        }
     }
 
     private boolean messageContains(SQLException ex, String value) {

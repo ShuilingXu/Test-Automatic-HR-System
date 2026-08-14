@@ -96,7 +96,6 @@ public class VideoMergeService {
                         output.toString()
                 ), "分离音频失败");
             }
-            s3ObjectStorageService.archiveIfEnabled(output, "interview-recordings/" + output.getFileName(), "audio/L16");
             session.setAudioPath(output.toString());
             session.setAudioFileName(output.getFileName().toString());
         } catch (IOException ex) {
@@ -127,7 +126,6 @@ public class VideoMergeService {
                     "-c:a", "pcm_s16le",
                     output.toString()
             ), "分离" + speaker + "音频失败");
-            s3ObjectStorageService.archiveIfEnabled(output, "interview-recordings/" + output.getFileName(), "audio/L16");
             return output.toString();
         } catch (IOException ex) {
             throw new BusinessException("分离" + speaker + "音频失败: " + ex.getMessage());
@@ -208,6 +206,21 @@ public class VideoMergeService {
 
     private boolean isReadableRecording(String path) {
         return path != null && Files.isRegularFile(Path.of(path)) && Files.isReadable(Path.of(path));
+    }
+
+    public void deleteTemporaryAudio(String audioPath) {
+        if (audioPath == null || audioPath.isBlank()) {
+            return;
+        }
+        try {
+            Path path = Path.of(audioPath).normalize().toAbsolutePath();
+            if (path.startsWith(UploadPaths.RECORDING_DIR)
+                    && path.getFileName().toString().toLowerCase().endsWith(".pcm")) {
+                Files.deleteIfExists(path);
+            }
+        } catch (IOException | RuntimeException ignored) {
+            // Temporary audio cleanup is best effort and must not replace the transcription result.
+        }
     }
 
     private String abbreviate(String text) {

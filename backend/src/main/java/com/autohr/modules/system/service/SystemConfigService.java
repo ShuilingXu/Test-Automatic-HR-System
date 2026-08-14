@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 @Service
@@ -25,22 +26,28 @@ public class SystemConfigService {
 
     private static final Pattern ENV_KEY_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
     private final Path envPath;
+    private final Function<String, String> environmentLookup;
 
     public SystemConfigService() {
-        this(Paths.get(".env"));
+        this(Paths.get(".env"), System::getenv);
     }
 
     SystemConfigService(Path envPath) {
+        this(envPath, System::getenv);
+    }
+
+    SystemConfigService(Path envPath, Function<String, String> environmentLookup) {
         this.envPath = envPath;
+        this.environmentLookup = environmentLookup;
     }
 
     public synchronized Map<String, String> loadConfig(String... keys) {
         Map<String, String> envFile = readEnvFile();
         Map<String, String> result = new LinkedHashMap<>();
         for (String key : keys) {
-            String value = envFile.get(key);
+            String value = environmentLookup.apply(key);
             if (value == null) {
-                value = System.getenv(key);
+                value = envFile.get(key);
             }
             result.put(key, value == null ? "" : value);
         }

@@ -8,6 +8,10 @@ import com.autohr.modules.hr.entity.Employee;
 import com.autohr.modules.hr.mapper.DepartmentMapper;
 import com.autohr.modules.hr.mapper.EmployeeMapper;
 import com.autohr.modules.hr.mapper.IntegrationBindingMapper;
+import com.autohr.modules.hr.mapper.SalaryHistoryMapper;
+import com.autohr.modules.recruitment.entity.RecruitmentJob;
+import com.autohr.modules.recruitment.mapper.RecruitmentJobMapper;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentMatchers;
@@ -37,6 +41,10 @@ class HrServiceImplTest {
     @Mock
     private IntegrationBindingMapper integrationBindingMapper;
 
+    @Mock private RecruitmentJobMapper recruitmentJobMapper;
+    @Mock private SalaryHistoryMapper salaryHistoryMapper;
+    @Mock private JdbcTemplate jdbc;
+
     @InjectMocks
     private HrServiceImpl hrService;
 
@@ -49,6 +57,8 @@ class HrServiceImplTest {
         inserted.setEmployeeCode("EMP-42");
         inserted.setFullName("Test User");
         when(departmentMapper.selectById(department.getId())).thenReturn(department);
+        when(recruitmentJobMapper.selectById(3L)).thenReturn(job(3L));
+        when(salaryHistoryMapper.selectOne(any())).thenReturn(null);
         when(employeeMapper.selectCount(any())).thenReturn(0L);
         doAnswer(invocation -> {
             Employee employee = invocation.getArgument(0);
@@ -61,7 +71,7 @@ class HrServiceImplTest {
 
         EmployeeSaveRequest request = employeeRequest(null);
         request.setEmployeeCode("EMP-42");
-        EmployeeVO saved = hrService.saveEmployee(request);
+        EmployeeVO saved = hrService.saveEmployee(request, 1L);
 
         assertEquals(inserted.getId(), saved.getId());
         verify(employeeMapper).insert(any(Employee.class));
@@ -75,7 +85,7 @@ class HrServiceImplTest {
         when(departmentMapper.selectById(department.getId())).thenReturn(department);
         when(employeeMapper.selectCount(any())).thenReturn(0L);
 
-        assertThrows(BusinessException.class, () -> hrService.saveEmployee(employeeRequest(99L)));
+        assertThrows(BusinessException.class, () -> hrService.saveEmployee(employeeRequest(99L), 1L));
 
         verify(employeeMapper, never()).insert(any(Employee.class));
         verify(employeeMapper, never()).updateById(any(Employee.class));
@@ -88,6 +98,8 @@ class HrServiceImplTest {
         return department;
     }
 
+    private RecruitmentJob job(Long id) { RecruitmentJob job = new RecruitmentJob(); job.setId(id); job.setJobTitle("Engineer"); return job; }
+
     private EmployeeSaveRequest employeeRequest(Long id) {
         EmployeeSaveRequest request = new EmployeeSaveRequest();
         request.setId(id);
@@ -95,7 +107,8 @@ class HrServiceImplTest {
         request.setIdCardNo("110101199001011234");
         request.setMobilePhone("13800138000");
         request.setRecruitmentMajor("Engineering");
-        request.setPositionName("Engineer");
+        request.setJobId(3L);
+        request.setBaseSalary(new java.math.BigDecimal("10000"));
         request.setDepartmentId(7L);
         request.setBankAccountNo("6222020000000000");
         request.setBankName("Test Bank");

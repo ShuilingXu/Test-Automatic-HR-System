@@ -1,6 +1,7 @@
 package com.autohr.modules.hr.dto;
 
 import lombok.Data;
+import java.math.BigDecimal;
 
 @Data
 public class HrDashboardVO {
@@ -12,4 +13,8 @@ public class HrDashboardVO {
     private Long resignedCount;
     private Long recruitmentBindingCount;
     private Long performanceBindingCount;
+    private Long openJobCount;
+    private Long currentMonthHireCount;
+    private Long currentMonthDismissalCount;
+    private BigDecimal averageGrossSalary;
 }

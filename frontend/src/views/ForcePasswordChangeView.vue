@@ -31,6 +31,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi } from '../services/api'
 import { isStrongPassword, strongPasswordMessage } from '../utils/password'
+import { writeSession } from '../utils/session'
 
 const router = useRouter()
 const submitting = ref(false)
@@ -52,8 +53,7 @@ async function submit() {
   submitting.value = true
   try {
     const response = await authApi.changePassword({ currentPassword: form.currentPassword, newPassword: form.newPassword })
-    localStorage.setItem('demo-token', response.data.token)
-    localStorage.setItem('session-user', JSON.stringify(response.data.user))
+    writeSession(response.data.token, response.data.user)
     ElMessage.success('密码已修改')
     router.replace(targetByRole(response.data.user.roleCode))
   } catch (error) {

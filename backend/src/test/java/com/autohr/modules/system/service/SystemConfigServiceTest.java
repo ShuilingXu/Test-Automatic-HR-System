@@ -40,4 +40,17 @@ class SystemConfigServiceTest {
         assertEquals(updates.get("S3_SESSION_TOKEN"), springProperties.getProperty("S3_SESSION_TOKEN"));
         assertEquals("value", springProperties.getProperty("UNCHANGED"));
     }
+
+    @Test
+    void processEnvironmentOverridesTheEnvFile() throws Exception {
+        Path envPath = tempDirectory.resolve("priority.env");
+        Files.writeString(envPath, "SMTP_HOST=file.example.com\nSMTP_PORT=587\n", StandardCharsets.UTF_8);
+        Map<String, String> processEnvironment = Map.of("SMTP_HOST", "runtime.example.com");
+        SystemConfigService service = new SystemConfigService(envPath, processEnvironment::get);
+
+        Map<String, String> config = service.loadConfig("SMTP_HOST", "SMTP_PORT");
+
+        assertEquals("runtime.example.com", config.get("SMTP_HOST"));
+        assertEquals("587", config.get("SMTP_PORT"));
+    }
 }

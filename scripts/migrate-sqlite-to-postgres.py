@@ -17,8 +17,11 @@ except ImportError as error:
 
 
 TABLES = [
-    "sys_user", "hr_department", "hr_employee", "hr_integration_binding",
-    "recruitment_job", "recruitment_candidate", "recruitment_resume_file",
+    # Parent rows must be copied before a source-candidate employee reference.
+    # PostgreSQL's production FK is intentionally non-deferrable and therefore
+    # cannot be postponed with SET CONSTRAINTS ALL DEFERRED.
+    "sys_user", "hr_department", "recruitment_job", "recruitment_candidate",
+    "hr_employee", "hr_integration_binding", "recruitment_resume_file",
     "interview_batch", "interview_question", "interview_candidate", "interview_submission",
     "sys_audit_log", "interview_knowledge_base", "interview_knowledge_item",
     "interview_job_knowledge_weight", "interview_llm_config", "interview_process_template",
@@ -30,6 +33,14 @@ TYPE_COLUMNS = {
     "smallint", "integer", "bigint", "numeric", "decimal", "real", "double precision",
     "boolean", "date", "time without time zone", "time with time zone",
     "timestamp without time zone", "timestamp with time zone",
+}
+
+# These nullable relationships can point to rows that have not been inserted yet,
+# including rows in the same table. Insert them as NULL and restore them after all
+# parent rows exist because production PostgreSQL constraints are non-deferrable.
+DEFERRED_REFERENCE_COLUMNS = {
+    "hr_department": ("parent_department_id", "manager_employee_id"),
+    "hr_employee": ("manager_employee_id",),
 }
 
 DEFAULT_BACKUP_DIR = Path(__file__).resolve().parent.parent / "backups" / "postgres-migration"
@@ -158,6 +169,7 @@ def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False,
                             if target_tables:
                                 table_list = ", ".join(quote(table) for table in target_tables)
                                 cursor.execute(f"TRUNCATE TABLE {table_list} CASCADE")
+                    deferred_updates = []
                     for table in TABLES:
                         columns = [row[1] for row in source.execute(f"PRAGMA table_info({quote(table)})")]
                         if not columns:
@@ -176,14 +188,35 @@ def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False,
                         if rows:
                             column_list = ", ".join(quote(column) for column in columns)
                             placeholders = ", ".join(["%s"] * len(columns))
+                            deferred_columns = [
+                                column for column in DEFERRED_REFERENCE_COLUMNS.get(table, ())
+                                if column in columns
+                            ]
+                            values = []
+                            for row in rows:
+                                normalized = {
+                                    column: normalize_value(row[column], target_types[column])
+                                    for column in columns
+                                }
+                                for column in deferred_columns:
+                                    if normalized[column] is not None:
+                                        deferred_updates.append((table, row["id"], column, normalized[column]))
+                                        normalized[column] = None
+                                values.append(tuple(normalized[column] for column in columns))
                             cursor.executemany(
                                 f"INSERT INTO {quote(table)} ({column_list}) VALUES ({placeholders})",
-                                [
-                                    tuple(normalize_value(row[column], target_types[column]) for column in columns)
-                                    for row in rows
-                                ],
+                                values,
                             )
                     if not dry_run:
+                        for table, row_id, column, reference_id in deferred_updates:
+                            cursor.execute(
+                                f"UPDATE {quote(table)} SET {quote(column)} = %s WHERE id = %s",
+                                (reference_id, row_id),
+                            )
+                            if cursor.rowcount != 1:
+                                raise RuntimeError(
+                                    f"Could not restore {table}.{column} for source row {row_id}"
+                                )
                         reset_sequences(cursor)
             except BaseException:
                 target.rollback()

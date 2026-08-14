@@ -34,6 +34,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/system/**").hasAnyAuthority("ROLE_IT_ADMIN", "IT_ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/recruitment/candidates/**").hasAnyAuthority("ROLE_INTERVIEWEE", "INTERVIEWEE")
                         .requestMatchers("/api/auth/admin/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "IT_ADMIN", "HR_ADMIN")
+                        .requestMatchers("/api/hr/payroll/**", "/api/hr/statistics/**", "/api/hr/dashboard/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "ROLE_HR_USER", "IT_ADMIN", "HR_ADMIN", "HR_USER")
                         .requestMatchers("/api/hr/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "ROLE_HR_USER", "IT_ADMIN", "HR_ADMIN", "HR_USER")
                         .requestMatchers("/api/recruitment/admin/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "ROLE_HR_USER", "IT_ADMIN", "HR_ADMIN", "HR_USER")
                         .requestMatchers("/api/interview/it/**").hasAnyAuthority("ROLE_IT_ADMIN", "IT_ADMIN")

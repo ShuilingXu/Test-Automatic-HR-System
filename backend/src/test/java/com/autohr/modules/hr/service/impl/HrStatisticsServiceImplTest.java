@@ -1,0 +1,86 @@
+package com.autohr.modules.hr.service.impl;
+
+import com.autohr.config.database.ActiveDatabase;
+import com.autohr.config.database.AppMigrationProperties;
+import com.autohr.config.database.DatabaseMigrationRunner;
+import com.autohr.config.database.DatabaseType;
+import com.autohr.modules.hr.dto.HrStatisticsVO;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+
+import java.math.BigDecimal;
+import java.nio.file.Path;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+class HrStatisticsServiceImplTest {
+    @TempDir Path tempDirectory;
+
+    @Test
+    void usesLiveMonthlyInputsAndExcludesUnconfirmedEmployees() throws Exception {
+        JdbcTemplate jdbc = migratedDatabase("statistics.db");
+        jdbc.update("INSERT INTO hr_department (department_code,department_name,description) VALUES ('D1','研发部','研发')");
+        jdbc.update("INSERT INTO recruitment_job (job_code,job_title,department_name,requirements,responsibilities,publish_date) VALUES ('J1','工程师','研发部','要求','职责','2026-01-01')");
+        insertEmployee(jdbc, "E001", "已确认员工", "110101199001010011", "13800000001", 1, new BigDecimal("10000.00"));
+        insertEmployee(jdbc, "E002", "未确认员工", "110101199001010022", "13800000002", 0, new BigDecimal("99999.00"));
+        jdbc.update("INSERT INTO hr_salary_history (employee_id,effective_month,base_salary_before,base_salary_after) VALUES (1,'2026-01',0,10000)");
+        jdbc.update("INSERT INTO hr_performance_month (employee_id,salary_month,amount) VALUES (1,'2026-08',1000)");
+        jdbc.update("INSERT INTO hr_overtime_month (employee_id,salary_month,overtime_hours,unit_rate,overtime_pay) VALUES (1,'2026-08',10,40,400)");
+
+        HrStatisticsVO statistics = new HrStatisticsServiceImpl(jdbc).statistics("2026-08");
+
+        assertEquals(new BigDecimal("11400.00"), statistics.getSalary().getGrossTotal());
+        assertEquals(new BigDecimal("11400.00"), statistics.getSalary().getAverageGross());
+        assertEquals(new BigDecimal("14.00"), statistics.getSalary().getMonthOverMonth());
+        assertEquals(1, statistics.getSalary().getEmployees().size());
+        assertEquals(new BigDecimal("11400.00"), statistics.getDepartment().getAverageSalaries().get(0).get("averageGross"));
+    }
+
+    @Test
+    void jobAverageSalaryUsesTheSelectedMonthsEffectiveSalary() throws Exception {
+        JdbcTemplate jdbc = migratedDatabase("job-history.db");
+        jdbc.update("INSERT INTO hr_department (department_code,department_name,description) VALUES ('D1','研发部','研发')");
+        jdbc.update("INSERT INTO recruitment_job (job_code,job_title,department_name,requirements,responsibilities,publish_date) VALUES ('J1','工程师','研发部','要求','职责','2026-01-01')");
+        insertEmployee(jdbc, "E001", "员工一", "110101199001010011", "13800000001", 1, new BigDecimal("15000.00"));
+        jdbc.update("INSERT INTO hr_salary_history (employee_id,effective_month,base_salary_before,base_salary_after) VALUES (1,'2026-01',0,10000),(1,'2026-08',10000,15000)");
+
+        HrStatisticsServiceImpl service = new HrStatisticsServiceImpl(jdbc);
+
+        assertEquals(new BigDecimal("10000.00"), service.statistics("2026-06").getRecruitment()
+                .getJobAverageSalaries().get(0).get("averageBaseSalary"));
+        assertEquals(new BigDecimal("15000.00"), service.statistics("2026-08").getRecruitment()
+                .getJobAverageSalaries().get(0).get("averageBaseSalary"));
+    }
+
+    @Test
+    void newEmployeeGrowthUsesBaseSalaryRatherThanPerformanceOrOvertime() throws Exception {
+        JdbcTemplate jdbc = migratedDatabase("new-employee-growth.db");
+        jdbc.update("INSERT INTO hr_department (department_code,department_name,description) VALUES ('D1','研发部','研发')");
+        jdbc.update("INSERT INTO recruitment_job (job_code,job_title,department_name,requirements,responsibilities,publish_date) VALUES ('J1','工程师','研发部','要求','职责','2026-01-01')");
+        insertEmployee(jdbc, "E001", "新员工", "110101199001010011", "13800000001", 1, new BigDecimal("12000.00"));
+        jdbc.update("UPDATE hr_employee SET hire_date='2026-07-01' WHERE employee_code='E001'");
+        jdbc.update("INSERT INTO hr_salary_history (employee_id,effective_month,base_salary_before,base_salary_after) VALUES (1,'2026-07',0,10000),(1,'2026-08',10000,12000)");
+        jdbc.update("INSERT INTO hr_performance_month (employee_id,salary_month,amount) VALUES (1,'2026-08',3000)");
+        jdbc.update("INSERT INTO hr_overtime_month (employee_id,salary_month,overtime_hours,unit_rate,overtime_pay) VALUES (1,'2026-08',10,100,1000)");
+
+        HrStatisticsVO statistics = new HrStatisticsServiceImpl(jdbc).statistics("2026-08");
+
+        assertEquals(new BigDecimal("16000.00"), statistics.getSalary().getEmployees().get(0).get("grossIncome"));
+        assertEquals(new BigDecimal("20.00"), statistics.getSalary().getEmployees().get(0).get("newEmployeeGrowth"));
+    }
+
+    private JdbcTemplate migratedDatabase(String fileName) throws Exception {
+        String url = "jdbc:sqlite:" + tempDirectory.resolve(fileName).toString().replace('\\', '/');
+        DriverManagerDataSource dataSource = new DriverManagerDataSource(url);
+        new DatabaseMigrationRunner(dataSource, new ActiveDatabase(DatabaseType.SQLITE, url, "", "", false), new AppMigrationProperties()).run();
+        return new JdbcTemplate(dataSource);
+    }
+
+    private void insertEmployee(JdbcTemplate jdbc, String code, String name, String idCard, String mobile,
+                                int confirmed, BigDecimal salary) {
+        jdbc.update("INSERT INTO hr_employee (employee_code,full_name,id_card_no,mobile_phone,recruitment_major,position_name,department_id,bank_account_no,bank_name,hire_date,employment_status,job_id,base_salary,salary_confirmed) VALUES (?,?,?,?,?,?,?,?,?,'2026-01-01',1,1,?,?)",
+                code, name, idCard, mobile, "计算机", "工程师", 1, "6222000000000000" + confirmed, "测试银行", salary, confirmed);
+    }
+}

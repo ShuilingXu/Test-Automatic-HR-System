@@ -52,6 +52,15 @@ public class AuthRedisSecurityStore {
                     + "return count",
             Long.class
     );
+    private static final DefaultRedisScript<Long> CLAIM_RATE_LIMITED_EVENT_SCRIPT = new DefaultRedisScript<>(
+            "if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end; "
+                    + "local count = redis.call('INCR', KEYS[2]); "
+                    + "if count == 1 then redis.call('EXPIRE', KEYS[2], ARGV[1]) end; "
+                    + "if count > tonumber(ARGV[2]) then return -1 end; "
+                    + "redis.call('SET', KEYS[1], '1', 'EX', ARGV[3]); "
+                    + "return 1",
+            Long.class
+    );
 
     private final StringRedisTemplate redisTemplate;
     private final String keyPrefix;
@@ -137,6 +146,23 @@ public class AuthRedisSecurityStore {
         }
     }
 
+    public boolean claimRateLimitedEvent(String scope, String identity, String eventId, int limit,
+                                         int windowSeconds, int eventTtlSeconds, String message) {
+        if (limit < 1 || windowSeconds < 1 || eventTtlSeconds < 1) {
+            throw new IllegalStateException("Event rate-limit configuration must be positive");
+        }
+        Long result = execute(() -> redisTemplate.execute(CLAIM_RATE_LIMITED_EVENT_SCRIPT,
+                List.of(idempotencyKey(scope, identity, eventId), rateLimitKey(scope, identity)),
+                String.valueOf(windowSeconds), String.valueOf(limit), String.valueOf(eventTtlSeconds)));
+        if (result == null) {
+            throw unavailable();
+        }
+        if (result == -1L) {
+            throw new BusinessException(message);
+        }
+        return result == 1L;
+    }
+
     private String captchaKey(String captchaId) {
         return keyPrefix + ":captcha:" + captchaId;
     }
@@ -147,6 +173,10 @@ public class AuthRedisSecurityStore {
 
     private String rateLimitKey(String scope, String identity) {
         return keyPrefix + ":rate:" + scope + ':' + fingerprint(identity);
+    }
+
+    private String idempotencyKey(String scope, String identity, String eventId) {
+        return keyPrefix + ":event:" + scope + ':' + fingerprint(identity + ':' + eventId);
     }
 
     private String fingerprint(String value) {

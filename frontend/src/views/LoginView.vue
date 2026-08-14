@@ -85,6 +85,7 @@ import { useRouter, RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi } from '../services/api'
 import { isStrongPassword, strongPasswordMessage } from '../utils/password'
+import { writeSession } from '../utils/session'
 
 const router = useRouter()
 const loginForm = reactive({ username: '', password: '', captchaId: '', captchaCode: '' })
@@ -104,8 +105,7 @@ function targetByRole(roleCode) {
 async function login() {
   try {
     const response = await authApi.login({ ...loginForm })
-    localStorage.setItem('demo-token', response.data.token)
-    localStorage.setItem('session-user', JSON.stringify(response.data.user))
+    writeSession(response.data.token, response.data.user)
     ElMessage.success('登录成功')
     router.push(Number(response.data.user.mustChangePassword) === 1 ? '/change-password' : targetByRole(response.data.user.roleCode))
   } catch (error) {
@@ -120,8 +120,16 @@ async function register() {
     return
   }
   try {
-    const { contactType, ...payload } = registerForm
-    await authApi.register(payload)
+    await authApi.register({
+      username: registerForm.username,
+      password: registerForm.password,
+      displayName: registerForm.displayName,
+      mobilePhone: registerForm.mobilePhone,
+      email: registerForm.email,
+      verificationCode: registerForm.verificationCode,
+      captchaId: registerForm.captchaId,
+      captchaCode: registerForm.captchaCode,
+    })
     ElMessage.success('注册成功，请登录后完善信息')
     loginForm.username = registerForm.username
     loginForm.password = registerForm.password
@@ -173,8 +181,12 @@ async function resetPassword() {
     return
   }
   try {
-    const { contactType, captchaId, captchaCode, ...payload } = passwordResetForm
-    await authApi.resetPassword(payload)
+    await authApi.resetPassword({
+      mobilePhone: passwordResetForm.mobilePhone,
+      email: passwordResetForm.email,
+      verificationCode: passwordResetForm.verificationCode,
+      newPassword: passwordResetForm.newPassword,
+    })
     passwordResetVisible.value = false
     loginForm.password = ''
     ElMessage.success('密码已重置，请使用新密码登录')

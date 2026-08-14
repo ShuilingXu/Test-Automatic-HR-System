@@ -1,6 +1,7 @@
 package com.autohr.modules.system.controller;
 
 import com.autohr.common.api.ApiResponse;
+import com.autohr.common.exception.BusinessException;
 import com.autohr.modules.system.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.net.URI;
 
 @RestController
 @RequestMapping("/api/system")
@@ -61,6 +63,9 @@ public class SystemConfigController {
         safeUpdates.entrySet().removeIf(entry -> !CONFIG_KEY_SET.contains(entry.getKey()));
         safeUpdates.entrySet().removeIf(e -> "****".equals(e.getValue()));
         safeUpdates.entrySet().removeIf(e -> RETAIN_ON_BLANK_KEYS.contains(e.getKey()) && (e.getValue() == null || e.getValue().isBlank()));
+        Map<String, String> effectiveConfig = systemConfigService.loadConfig(CONFIG_KEYS);
+        effectiveConfig.putAll(safeUpdates);
+        validateS3Config(effectiveConfig);
         systemConfigService.saveConfig(safeUpdates);
         Map<String, String> config = systemConfigService.loadConfig(CONFIG_KEYS);
         maskSecrets(config);
@@ -70,6 +75,40 @@ public class SystemConfigController {
     private void mask(Map<String, String> config, String key) {
         if (config.containsKey(key) && !config.get(key).isEmpty()) {
             config.put(key, "****");
+        }
+    }
+
+    private void validateS3Config(Map<String, String> config) {
+        if (!Boolean.parseBoolean(config.get("S3_ENABLED"))) {
+            return;
+        }
+        requireValue(config, "S3_ENDPOINT", "S3 external endpoint is required when object storage is enabled");
+        requireValue(config, "S3_REGION", "S3 region is required when object storage is enabled");
+        requireValue(config, "S3_BUCKET", "S3 bucket is required when object storage is enabled");
+        requireValue(config, "S3_ACCESS_KEY_ID", "S3 access key is required when object storage is enabled");
+        requireValue(config, "S3_SECRET_ACCESS_KEY", "S3 secret key is required when object storage is enabled");
+        validateHttpEndpoint(config.get("S3_ENDPOINT"), "S3 external endpoint");
+        if (Boolean.parseBoolean(config.get("S3_INTERNAL_ENDPOINT_ENABLED"))) {
+            requireValue(config, "S3_INTERNAL_ENDPOINT", "S3 internal endpoint is required when internal upload is enabled");
+            validateHttpEndpoint(config.get("S3_INTERNAL_ENDPOINT"), "S3 internal endpoint");
+        }
+    }
+
+    private void requireValue(Map<String, String> config, String key, String message) {
+        if (config.get(key) == null || config.get(key).isBlank()) {
+            throw new BusinessException(message);
+        }
+    }
+
+    private void validateHttpEndpoint(String value, String label) {
+        try {
+            URI endpoint = URI.create(value.trim());
+            if (endpoint.getHost() == null
+                    || !("http".equalsIgnoreCase(endpoint.getScheme()) || "https".equalsIgnoreCase(endpoint.getScheme()))) {
+                throw new IllegalArgumentException("unsupported endpoint");
+            }
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException(label + " must be an absolute HTTP or HTTPS URL");
         }
     }
 }

@@ -9,6 +9,7 @@ import lombok.Data;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 @Data
 @TableName("hr_employee")
@@ -34,6 +35,12 @@ public class Employee {
     private String interviewStageStatus;
     private String sourceChannel;
     private String notes;
+    private Long jobId;
+    private BigDecimal baseSalary;
+    private Integer salaryConfirmed;
+    private BigDecimal overtimeRate;
+    private String dismissalReason;
+    private LocalDate dismissalDate;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

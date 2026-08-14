@@ -184,9 +184,14 @@ public class VerificationCodeServiceImpl implements VerificationCodeService {
         sender.setUsername(config.get("SMTP_USERNAME"));
         sender.setPassword(config.get("SMTP_PASSWORD"));
         Properties props = sender.getJavaMailProperties();
+        String startTlsEnabled = StrUtil.blankToDefault(config.get("SMTP_STARTTLS_ENABLED"), "true");
+        if (!Boolean.parseBoolean(startTlsEnabled)) {
+            throw new BusinessException("SMTP必须启用STARTTLS");
+        }
         props.put("mail.smtp.auth", "true");
         props.put("mail.smtp.ssl.enable", StrUtil.blankToDefault(config.get("SMTP_SSL_ENABLED"), "false"));
-        props.put("mail.smtp.starttls.enable", StrUtil.blankToDefault(config.get("SMTP_STARTTLS_ENABLED"), "true"));
+        props.put("mail.smtp.starttls.enable", "true");
+        props.put("mail.smtp.starttls.required", "true");
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(StrUtil.blankToDefault(config.get("SMTP_FROM"), config.get("SMTP_USERNAME")));
         message.setTo(email);

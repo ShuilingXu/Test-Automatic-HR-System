@@ -18,9 +18,14 @@ public interface HrService {
 
     void deleteDepartment(Long id);
 
-    EmployeeVO saveEmployee(EmployeeSaveRequest request);
+    EmployeeVO saveEmployee(EmployeeSaveRequest request, Long operatorUserId);
 
-    PageResponse<EmployeeVO> listEmployees(Long departmentId, Integer employmentStatus, String keyword, PageQuery pageQuery);
+    EmployeeVO getEmployee(Long id);
+
+    PageResponse<EmployeeVO> listEmployees(Long departmentId, Integer employmentStatus, String name, String employeeCode,
+                                           String mobilePhone, String keyword, PageQuery pageQuery);
+    PageResponse<EmployeeVO> listEmployees(Long departmentId, Integer employmentStatus, String name, String employeeCode,
+                                           String mobilePhone, Boolean mobileExact, String keyword, PageQuery pageQuery);
 
     void deleteEmployee(Long id);
 

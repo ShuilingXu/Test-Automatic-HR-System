@@ -5,6 +5,9 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.math.BigDecimal;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 
 @Data
 public class JobSaveRequest {
@@ -36,4 +39,8 @@ public class JobSaveRequest {
     private LocalDate publishDate;
     private LocalDate closeDate;
     private Integer status;
+
+    @DecimalMin(value = "0.00", message = "Default overtime rate cannot be negative")
+    @Digits(integer = 10, fraction = 2, message = "Default overtime rate must fit DECIMAL(12,2)")
+    private BigDecimal defaultOvertimeRate;
 }

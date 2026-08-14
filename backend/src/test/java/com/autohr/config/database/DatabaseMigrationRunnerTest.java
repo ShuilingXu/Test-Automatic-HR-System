@@ -8,6 +8,7 @@ import javax.sql.DataSource;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,6 +54,87 @@ class DatabaseMigrationRunnerTest {
         assertTrue(error.getMessage().contains("candidate applications"));
     }
 
+    @Test
+    void createsPayrollSchemaWithConstraintsAndIsIdempotent() throws Exception {
+        String url = "jdbc:sqlite:" + tempDirectory.resolve("payroll-migration.db").toString().replace('\\', '/');
+        DataSource dataSource = new DriverManagerDataSource(url);
+        DatabaseMigrationRunner runner = new DatabaseMigrationRunner(
+                dataSource,
+                new ActiveDatabase(DatabaseType.SQLITE, url, "", "", false),
+                new AppMigrationProperties());
+
+        runner.run();
+        runner.run();
+
+        try (Connection connection = dataSource.getConnection()) {
+            assertColumn(connection, "hr_employee", "job_id");
+            assertColumn(connection, "hr_employee", "base_salary");
+            assertColumn(connection, "hr_employee", "salary_confirmed");
+            assertColumn(connection, "recruitment_job", "default_overtime_rate");
+            assertUniqueIndex(connection, "hr_salary_history", "uq_salary_history_employee_month");
+            assertUniqueIndex(connection, "hr_performance_month", "uq_performance_employee_month");
+            assertUniqueIndex(connection, "hr_overtime_month", "uq_overtime_employee_month");
+            assertUniqueIndex(connection, "hr_social_insurance_month", "uq_social_employee_month");
+            assertUniqueIndex(connection, "hr_special_deduction_month", "uq_special_employee_month");
+            assertUniqueIndex(connection, "hr_payroll_month", "uq_payroll_employee_month");
+            assertForeignKey(connection, "hr_employee", "job_id", "recruitment_job");
+            assertForeignKey(connection, "hr_payroll_month", "employee_id", "hr_employee");
+        }
+    }
+
+    @Test
+    void upgradesLegacySqliteEmployeesAndEnforcesTheJobForeignKey() throws Exception {
+        String url = "jdbc:sqlite:" + tempDirectory.resolve("legacy-payroll.db").toString().replace('\\', '/');
+        DataSource dataSource = new DriverManagerDataSource(url);
+        DatabaseMigrationRunner runner = new DatabaseMigrationRunner(
+                dataSource,
+                new ActiveDatabase(DatabaseType.SQLITE, url, "", "", false),
+                new AppMigrationProperties());
+        runner.run();
+
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.execute("PRAGMA foreign_keys=OFF");
+            statement.executeUpdate("INSERT INTO hr_department (department_code,department_name,description) "
+                    + "VALUES ('D1','研发部','研发')");
+            statement.executeUpdate("INSERT INTO recruitment_job "
+                    + "(job_code,job_title,department_name,requirements,responsibilities,publish_date) "
+                    + "VALUES ('J1','工程师','研发部','要求','职责','2026-01-01')");
+            statement.executeUpdate("DROP TABLE hr_employee");
+            statement.executeUpdate("CREATE TABLE hr_employee ("
+                    + "id INTEGER PRIMARY KEY AUTOINCREMENT, employee_code VARCHAR(64) NOT NULL UNIQUE, "
+                    + "full_name VARCHAR(64) NOT NULL, id_card_no VARCHAR(32) NOT NULL UNIQUE, "
+                    + "mobile_phone VARCHAR(32) NOT NULL UNIQUE, email VARCHAR(128), "
+                    + "recruitment_major VARCHAR(128) NOT NULL, position_name VARCHAR(128) NOT NULL, "
+                    + "manager_employee_id INTEGER, department_id INTEGER NOT NULL, "
+                    + "bank_account_no VARCHAR(64) NOT NULL, bank_name VARCHAR(128) NOT NULL, "
+                    + "hire_date DATE NOT NULL, employment_status INTEGER NOT NULL DEFAULT 0, "
+                    + "source_candidate_id INTEGER, interview_stage_status VARCHAR(64), source_channel VARCHAR(64), "
+                    + "notes VARCHAR(1000), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    + "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)");
+            statement.executeUpdate("INSERT INTO hr_employee "
+                    + "(employee_code,full_name,id_card_no,mobile_phone,recruitment_major,position_name,department_id,"
+                    + "bank_account_no,bank_name,hire_date,employment_status) VALUES "
+                    + "('E001','存量员工','110101199001010011','13800000001','计算机','工程师',1,"
+                    + "'6222000000000001','测试银行','2025-01-01',1)");
+        }
+
+        runner.run();
+        runner.run();
+
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            assertForeignKey(connection, "hr_employee", "job_id", "recruitment_job");
+            try (ResultSet employee = statement.executeQuery(
+                    "SELECT job_id,base_salary,salary_confirmed FROM hr_employee WHERE employee_code='E001'")) {
+                assertTrue(employee.next());
+                assertEquals(1L, employee.getLong("job_id"));
+                assertEquals("0", employee.getBigDecimal("base_salary").stripTrailingZeros().toPlainString());
+                assertEquals(0, employee.getInt("salary_confirmed"));
+            }
+            statement.execute("PRAGMA foreign_keys=ON");
+            assertThrows(SQLException.class, () -> statement.executeUpdate("UPDATE hr_employee SET job_id=999 WHERE employee_code='E001'"));
+        }
+    }
+
     private void assertUniqueIndex(Connection connection, String table, String expectedName) throws Exception {
         try (Statement statement = connection.createStatement();
              ResultSet indexes = statement.executeQuery("PRAGMA index_list('" + table + "')")) {
@@ -64,6 +146,27 @@ class DatabaseMigrationRunnerTest {
                 }
             }
             assertTrue(found, "Missing unique index " + expectedName);
+        }
+    }
+
+    private void assertColumn(Connection connection, String table, String expectedColumn) throws Exception {
+        try (Statement statement = connection.createStatement();
+             ResultSet columns = statement.executeQuery("PRAGMA table_info('" + table + "')")) {
+            boolean found = false;
+            while (columns.next()) found |= expectedColumn.equalsIgnoreCase(columns.getString("name"));
+            assertTrue(found, "Missing column " + table + "." + expectedColumn);
+        }
+    }
+
+    private void assertForeignKey(Connection connection, String table, String column, String referencedTable) throws Exception {
+        try (Statement statement = connection.createStatement();
+             ResultSet keys = statement.executeQuery("PRAGMA foreign_key_list('" + table + "')")) {
+            boolean found = false;
+            while (keys.next()) {
+                found |= column.equalsIgnoreCase(keys.getString("from"))
+                        && referencedTable.equalsIgnoreCase(keys.getString("table"));
+            }
+            assertTrue(found, "Missing foreign key " + table + "." + column + " -> " + referencedTable);
         }
     }
 }

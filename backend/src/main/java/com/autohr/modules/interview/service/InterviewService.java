@@ -51,7 +51,7 @@ public interface InterviewService {
     InterviewVO createVideoSession(Long processId, Long approverUserId, String approverName);
     InterviewVO intervieweeJoinVideo(Long processId, Long intervieweeUserId, String intervieweeName);
     InterviewVO hrJoinVideo(Long processId, Long approverUserId, String approverName);
-    InterviewVO completeVideoSession(Long processId, String recordingPath);
+    InterviewVO completeVideoSession(Long processId);
     InterviewVO requestIntervieweeVideoEnd(Long processId, Long intervieweeUserId);
     VideoSignalVO publishHrOffer(Long processId, VideoSignalRequest request);
     VideoSignalVO submitIntervieweeAnswer(Long processId, VideoSignalRequest request, Long intervieweeUserId, String intervieweeName);
@@ -59,8 +59,8 @@ public interface InterviewService {
     VideoSignalVO addIntervieweeIceCandidate(Long processId, VideoSignalRequest request, Long intervieweeUserId, String intervieweeName);
     VideoSignalVO getVideoSignalState(Long processId);
     VideoSignalVO getIntervieweeVideoSignalState(Long processId, Long intervieweeUserId);
-    VideoSignalVO uploadHrRecording(Long processId, String originalFileName, String contentType, MultipartFile file);
-    VideoSignalVO uploadIntervieweeRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file);
+    VideoSignalVO uploadHrRecording(Long processId, Long processStageId, String originalFileName, String contentType, MultipartFile file);
+    VideoSignalVO uploadIntervieweeRecording(Long processId, Long processStageId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file);
     InterviewVO uploadAiExamRecording(Long processId, Long intervieweeUserId, String intervieweeName, String originalFileName, String contentType, MultipartFile file);
     InterviewVO reportAntiCheatEvent(AntiCheatEventRequest request, Long intervieweeUserId, String intervieweeName);
     InterviewVideoSession getVideoSession(Long processId, Long processStageId);

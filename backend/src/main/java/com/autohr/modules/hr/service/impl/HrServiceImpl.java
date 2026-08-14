@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.autohr.common.api.PageQuery;
 import com.autohr.common.api.PageResponse;
 import com.autohr.common.exception.BusinessException;
+import com.autohr.common.security.SensitiveDataMasker;
 import com.autohr.modules.hr.dto.DepartmentSaveRequest;
 import com.autohr.modules.hr.dto.DepartmentVO;
 import com.autohr.modules.hr.dto.EmployeeSaveRequest;
@@ -18,7 +19,12 @@ import com.autohr.modules.hr.enums.EmploymentStatus;
 import com.autohr.modules.hr.mapper.DepartmentMapper;
 import com.autohr.modules.hr.mapper.EmployeeMapper;
 import com.autohr.modules.hr.mapper.IntegrationBindingMapper;
+import com.autohr.modules.hr.mapper.SalaryHistoryMapper;
+import com.autohr.modules.hr.entity.SalaryHistory;
+import com.autohr.modules.recruitment.entity.RecruitmentJob;
+import com.autohr.modules.recruitment.mapper.RecruitmentJobMapper;
 import com.autohr.modules.hr.service.HrService;
+import com.autohr.modules.hr.service.HrStatisticsService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -26,8 +32,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.YearMonth;
+import java.math.BigDecimal;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -39,10 +49,15 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class HrServiceImpl implements HrService {
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
 
     private final DepartmentMapper departmentMapper;
     private final EmployeeMapper employeeMapper;
     private final IntegrationBindingMapper integrationBindingMapper;
+    private final RecruitmentJobMapper recruitmentJobMapper;
+    private final SalaryHistoryMapper salaryHistoryMapper;
+    private final JdbcTemplate jdbc;
+    private final HrStatisticsService hrStatisticsService;
 
     @Override
     @Transactional
@@ -101,33 +116,63 @@ public class HrServiceImpl implements HrService {
 
     @Override
     @Transactional
-    public EmployeeVO saveEmployee(EmployeeSaveRequest request) {
+    public EmployeeVO saveEmployee(EmployeeSaveRequest request, Long operatorUserId) {
         Long resolvedId = request.getId();
+        if (resolvedId == null && (request.getBaseSalary() == null || request.getBaseSalary().signum() <= 0)) {
+            throw new BusinessException("New employee base salary must be positive");
+        }
         validateEmployee(request.getDepartmentId(), request.getManagerEmployeeId(), resolvedId);
         validateEmployeeUnique(request, resolvedId);
         Employee employee = resolvedId == null ? new Employee() : requireEmployee(resolvedId);
+        RecruitmentJob job = requireJob(request.getJobId());
+        BigDecimal previousSalary = employee.getBaseSalary() == null ? BigDecimal.ZERO : employee.getBaseSalary();
         String existingCode = employee.getEmployeeCode();
         BeanUtils.copyProperties(request, employee);
+        employee.setPositionName(job.getJobTitle());
+        employee.setBaseSalary(request.getBaseSalary().setScale(2, java.math.RoundingMode.HALF_UP));
+        employee.setOvertimeRate(request.getOvertimeRate() == null ? null
+                : request.getOvertimeRate().setScale(2, java.math.RoundingMode.HALF_UP));
+        employee.setSalaryConfirmed(1);
         if (StrUtil.isBlank(employee.getEmployeeCode())) {
             employee.setEmployeeCode(resolvedId == null ? buildEmployeeCode() : existingCode);
         }
-        employee.setHireDate(Objects.requireNonNullElse(request.getHireDate(), LocalDate.now()));
+        employee.setHireDate(Objects.requireNonNullElse(request.getHireDate(), LocalDate.now(BUSINESS_ZONE)));
         employee.setEmploymentStatus(Objects.requireNonNullElse(request.getEmploymentStatus(), EmploymentStatus.ACTIVE.getCode()));
         if (resolvedId == null) {
             employeeMapper.insert(employee);
         } else {
             employeeMapper.updateById(employee);
         }
-        return toEmployeeVO(requireEmployee(employee.getId()), loadDepartmentMap(), loadEmployeeMap());
+        if (resolvedId == null || previousSalary.compareTo(employee.getBaseSalary()) != 0) {
+            saveSalaryHistory(employee.getId(), previousSalary, employee.getBaseSalary(), request.getSalaryChangeReason(), operatorUserId);
+        }
+        return toEmployeeVO(requireEmployee(employee.getId()), loadDepartmentMap(), loadEmployeeMap(), false);
     }
 
     @Override
-    public PageResponse<EmployeeVO> listEmployees(Long departmentId, Integer employmentStatus, String keyword,
+    public EmployeeVO getEmployee(Long id) {
+        return toEmployeeVO(requireEmployee(id), loadDepartmentMap(), loadEmployeeMap(), true);
+    }
+
+    @Override
+    public PageResponse<EmployeeVO> listEmployees(Long departmentId, Integer employmentStatus, String name,
+                                                   String employeeCode, String mobilePhone, String keyword,
                                                    PageQuery pageQuery) {
+        return listEmployees(departmentId, employmentStatus, name, employeeCode, mobilePhone, false, keyword, pageQuery);
+    }
+
+    @Override
+    public PageResponse<EmployeeVO> listEmployees(Long departmentId, Integer employmentStatus, String name,
+                                                   String employeeCode, String mobilePhone, Boolean mobileExact,
+                                                   String keyword, PageQuery pageQuery) {
         Page<Employee> result = employeeMapper.selectPage(new Page<>(pageQuery.page(), pageQuery.pageSize()),
                 new LambdaQueryWrapper<Employee>()
                 .eq(departmentId != null, Employee::getDepartmentId, departmentId)
                 .eq(employmentStatus != null, Employee::getEmploymentStatus, employmentStatus)
+                .like(StrUtil.isNotBlank(name), Employee::getFullName, name)
+                .eq(StrUtil.isNotBlank(employeeCode), Employee::getEmployeeCode, employeeCode)
+                .eq(StrUtil.isNotBlank(mobilePhone) && Boolean.TRUE.equals(mobileExact), Employee::getMobilePhone, mobilePhone)
+                .like(StrUtil.isNotBlank(mobilePhone) && !Boolean.TRUE.equals(mobileExact), Employee::getMobilePhone, mobilePhone)
                 .and(StrUtil.isNotBlank(keyword), q -> q.like(Employee::getFullName, keyword)
                         .or().like(Employee::getEmployeeCode, keyword)
                         .or().like(Employee::getMobilePhone, keyword)
@@ -135,7 +180,7 @@ public class HrServiceImpl implements HrService {
                 .orderByDesc(Employee::getId));
         Map<Long, Department> departmentMap = loadDepartmentMap();
         Map<Long, Employee> employeeMap = loadEmployeeMap();
-        return PageResponse.of(result.getRecords().stream().map(item -> toEmployeeVO(item, departmentMap, employeeMap)).toList(),
+        return PageResponse.of(result.getRecords().stream().map(item -> toEmployeeVO(item, departmentMap, employeeMap, false)).toList(),
                 result.getTotal(), pageQuery);
     }
 
@@ -213,6 +258,11 @@ public class HrServiceImpl implements HrService {
                 .eq(IntegrationBinding::getModuleCode, "RECRUITMENT")));
         dashboard.setPerformanceBindingCount(integrationBindingMapper.selectCount(new LambdaQueryWrapper<IntegrationBinding>()
                 .eq(IntegrationBinding::getModuleCode, "PERFORMANCE")));
+        YearMonth currentMonth = YearMonth.now(BUSINESS_ZONE);
+        dashboard.setOpenJobCount(jdbc.queryForObject("SELECT COUNT(*) FROM recruitment_job WHERE status=1 AND (close_date IS NULL OR close_date>=?)", Long.class, LocalDate.now(BUSINESS_ZONE)));
+        dashboard.setCurrentMonthHireCount(jdbc.queryForObject("SELECT COUNT(*) FROM hr_employee WHERE hire_date>=? AND hire_date<=?", Long.class, currentMonth.atDay(1), currentMonth.atEndOfMonth()));
+        dashboard.setCurrentMonthDismissalCount(jdbc.queryForObject("SELECT COUNT(*) FROM hr_employee WHERE dismissal_date>=? AND dismissal_date<=?", Long.class, currentMonth.atDay(1), currentMonth.atEndOfMonth()));
+        dashboard.setAverageGrossSalary(hrStatisticsService.statistics(currentMonth.toString()).getSalary().getAverageGross());
         return dashboard;
     }
 
@@ -294,6 +344,38 @@ public class HrServiceImpl implements HrService {
         return employee;
     }
 
+    private RecruitmentJob requireJob(Long id) {
+        RecruitmentJob job = recruitmentJobMapper.selectById(id);
+        if (job == null) {
+            throw new BusinessException("岗位不存在: " + id);
+        }
+        return job;
+    }
+
+    private void saveSalaryHistory(Long employeeId, BigDecimal before, BigDecimal after, String reason, Long operatorUserId) {
+        String month = YearMonth.now(BUSINESS_ZONE).toString();
+        SalaryHistory history = salaryHistoryMapper.selectOne(new LambdaQueryWrapper<SalaryHistory>()
+                .eq(SalaryHistory::getEmployeeId, employeeId)
+                .eq(SalaryHistory::getEffectiveMonth, month)
+                .last("LIMIT 1"));
+        if (history == null) {
+            history = new SalaryHistory();
+            history.setEmployeeId(employeeId);
+            history.setEffectiveMonth(month);
+            history.setCreatedAt(java.time.LocalDateTime.now());
+        }
+        history.setBaseSalaryBefore(before);
+        history.setBaseSalaryAfter(after);
+        history.setReason(StrUtil.blankToDefault(reason, "薪资录入"));
+        history.setOperatorUserId(operatorUserId);
+        history.setCreatedAt(java.time.LocalDateTime.now());
+        if (history.getId() == null) {
+            salaryHistoryMapper.insert(history);
+        } else {
+            salaryHistoryMapper.updateById(history);
+        }
+    }
+
     private IntegrationBinding requireBinding(Long id) {
         IntegrationBinding binding = integrationBindingMapper.selectById(id);
         if (binding == null) {
@@ -324,9 +406,14 @@ public class HrServiceImpl implements HrService {
         return vo;
     }
 
-    private EmployeeVO toEmployeeVO(Employee employee, Map<Long, Department> departmentMap, Map<Long, Employee> employeeMap) {
+    private EmployeeVO toEmployeeVO(Employee employee, Map<Long, Department> departmentMap,
+                                    Map<Long, Employee> employeeMap, boolean revealSensitive) {
         EmployeeVO vo = new EmployeeVO();
         BeanUtils.copyProperties(employee, vo);
+        if (!revealSensitive) {
+            vo.setIdCardNo(SensitiveDataMasker.maskIdentityOrAccount(employee.getIdCardNo()));
+            vo.setBankAccountNo(SensitiveDataMasker.maskIdentityOrAccount(employee.getBankAccountNo()));
+        }
         Department department = departmentMap.get(employee.getDepartmentId());
         if (department != null) {
             vo.setDepartmentName(department.getDepartmentName());
@@ -334,6 +421,12 @@ public class HrServiceImpl implements HrService {
         Employee manager = employeeMap.get(employee.getManagerEmployeeId());
         if (manager != null) {
             vo.setManagerEmployeeName(manager.getFullName());
+        }
+        if (employee.getJobId() != null) {
+            RecruitmentJob job = recruitmentJobMapper.selectById(employee.getJobId());
+            if (job != null) {
+                vo.setJobTitle(job.getJobTitle());
+            }
         }
         return vo;
     }

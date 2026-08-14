@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { clearSession, readSessionToken } from '../utils/session'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
 const request = axios.create({
@@ -7,7 +8,7 @@ const request = axios.create({
 })
 
 request.interceptors.request.use((config) => {
-  const token = window.localStorage.getItem('demo-token')
+  const token = readSessionToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -18,8 +19,7 @@ request.interceptors.response.use(
   (response) => response.data,
   (error) => {
     if (error.response?.status === 401) {
-      window.localStorage.removeItem('demo-token')
-      window.localStorage.removeItem('session-user')
+      clearSession()
       if (window.location.pathname !== '/login') {
         window.location.replace('/login')
       }
@@ -35,33 +35,52 @@ request.interceptors.response.use(
 async function openAuthorizedFile(path, params = {}) {
   const normalizedPath = path.startsWith('/api') ? path.slice(4) : path
   const popup = window.open('about:blank', '_blank')
+  if (!popup) throw new Error('浏览器阻止了文件预览窗口，请允许弹窗后重试')
   try {
-    popup && (popup.opener = null)
+    popup.opener = null
     const downloadUrlResponse = await request.get(`${normalizedPath}/download-url`, { params })
     const externalUrl = downloadUrlResponse?.data?.url
     if (externalUrl) {
-      if (popup) {
-        popup.location.replace(externalUrl)
-      } else {
-        window.location.assign(externalUrl)
-      }
+      popup.location.replace(externalUrl)
       return
     }
     const blob = await request.get(normalizedPath, { params, responseType: 'blob' })
     const objectUrl = URL.createObjectURL(blob)
-    if (popup) {
+    const releaseObjectUrl = releaseWhenPreviewCloses(popup, objectUrl)
+    try {
       popup.location.replace(objectUrl)
-    } else {
-      const link = document.createElement('a')
-      link.href = objectUrl
-      link.target = '_blank'
-      link.click()
+    } catch (error) {
+      releaseObjectUrl()
+      throw error
     }
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
   } catch (error) {
-    popup?.close()
+    popup.close()
     throw error
   }
+}
+
+function releaseWhenPreviewCloses(popup, objectUrl) {
+  let released = false
+  let monitor = null
+  const release = () => {
+    if (released) return
+    released = true
+    if (monitor) window.clearInterval(monitor)
+    URL.revokeObjectURL(objectUrl)
+  }
+  monitor = window.setInterval(() => {
+    if (popup.closed) {
+      release()
+      return
+    }
+    try {
+      const currentUrl = popup.location.href
+      if (currentUrl !== 'about:blank' && currentUrl !== objectUrl) release()
+    } catch {
+      release()
+    }
+  }, 1000)
+  return release
 }
 
 const defaultPageParams = { page: 1, pageSize: 200 }
@@ -71,22 +90,22 @@ async function requestPage(path, params) {
   const response = await request.get(path, { params: pageParams })
   const pagination = response?.data
   if (Array.isArray(pagination)) return response
-
-  const items = [...(pagination?.items || [])]
-  const total = Number(pagination?.total || 0)
-  const page = Number(pagination?.page || pageParams.page)
-  const pageSize = Number(pagination?.pageSize || pageParams.pageSize)
-  const pageCount = pageSize > 0 ? Math.ceil(total / pageSize) : 1
-
-  // Existing management screens are list-oriented. Follow the paginated contract
-  // until they gain dedicated controls so records are never silently hidden at 200.
-  for (let nextPage = page + 1; nextPage <= pageCount; nextPage += 1) {
-    const nextResponse = await request.get(path, {
-      params: { ...pageParams, page: nextPage, pageSize },
-    })
-    items.push(...(nextResponse?.data?.items || []))
-  }
+  const items = pagination?.items || []
   return { ...response, data: items, pagination: { ...pagination, loaded: items.length } }
+}
+
+async function requestAllPages(path, params) {
+  const first = await requestPage(path, { ...params, page: 1, pageSize: 200 })
+  const items = [...first.data]
+  const total = first.pagination?.total ?? items.length
+  let page = 2
+  while (items.length < total) {
+    const next = await requestPage(path, { ...params, page, pageSize: 200 })
+    if (!next.data.length) break
+    items.push(...next.data)
+    page += 1
+  }
+  return { ...first, data: items, pagination: { ...first.pagination, loaded: items.length } }
 }
 
 export const hrApi = {
@@ -95,8 +114,40 @@ export const hrApi = {
   saveDepartment(payload) { return request.post('/hr/departments', payload) },
   deleteDepartment(id) { return request.delete(`/hr/departments/${id}`) },
   listEmployees(params) { return requestPage('/hr/employees', params) },
+  listAllEmployees(params) { return requestAllPages('/hr/employees', params) },
+  getEmployee(id) { return request.get(`/hr/employees/${id}`) },
   saveEmployee(payload) { return request.post('/hr/employees', payload) },
   deleteEmployee(id) { return request.delete(`/hr/employees/${id}`) },
+  employeeTemplate() { return request.get('/hr/employees/template', { responseType: 'blob' }) },
+  importEmployees(file) { const form = new FormData(); form.append('file', file); return request.post('/hr/employees/import', form, { headers: { 'Content-Type': 'multipart/form-data' } }) },
+  statistics(month) { return request.get('/hr/statistics', { params: { month } }) },
+  getDashboardConfig() { return request.get('/hr/dashboard/config') },
+  saveDashboardConfig(configJson) { return request.post('/hr/dashboard/config', { configJson }) },
+}
+
+export const payrollApi = {
+  savePerformance(payload) { return request.post('/hr/payroll/performance', payload) },
+  saveOvertime(payload) { return request.post('/hr/payroll/overtime', payload) },
+  saveSocialInsurance(payload) { return request.post('/hr/payroll/social-insurance', payload) },
+  saveSpecialDeduction(payload) { return request.post('/hr/payroll/special-deductions', payload) },
+  generate(payload) { return request.post('/hr/payroll/generate', payload) },
+  list(params) { return request.get('/hr/payroll', { params }) },
+  listInputs(kind, params) { return request.get(`/hr/payroll/inputs/${kind}`, { params }) },
+  deleteInput(kind, employeeId, salaryMonth) { return request.delete(`/hr/payroll/inputs/${kind}/${employeeId}/${salaryMonth}`) },
+  lock(employeeId, salaryMonth) { return request.post(`/hr/payroll/${employeeId}/${salaryMonth}/lock`) },
+  unlock(employeeId, salaryMonth) { return request.post(`/hr/payroll/${employeeId}/${salaryMonth}/unlock`) },
+  deletePayroll(employeeId, salaryMonth) { return request.delete(`/hr/payroll/${employeeId}/${salaryMonth}`) },
+  import(kind, file) { const form = new FormData(); form.append('file', file); return request.post(`/hr/payroll/${kind}/import`, form, { headers: { 'Content-Type': 'multipart/form-data' } }) },
+  export(params) { return request.get('/hr/payroll/export', { params, responseType: 'blob' }) },
+}
+
+export function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 export const recruitmentApi = {
@@ -137,8 +188,7 @@ export const authApi = {
   deleteUser(id) { return request.delete(`/auth/admin/users/${id}`) },
   logout() {
     return request.post('/auth/logout').finally(() => {
-      window.localStorage.removeItem('demo-token')
-      window.localStorage.removeItem('session-user')
+      clearSession()
     })
   },
 }
@@ -184,6 +234,7 @@ export const interviewApi = {
   deleteProcessTemplate(id, version) { return request.post(`/interview/hr/process-templates/${id}/delete`, null, { params: { version } }) },
   startProcess(payload) { return request.post('/interview/hr/processes', payload) },
   listProcesses(params) { return requestPage('/interview/hr/processes', params) },
+  getProcess(id) { return request.get(`/interview/hr/processes/${id}`) },
   getIntervieweeProcess(processId) { return request.get(`/interview/interviewee/process/${processId}`) },
   getNextAiQuestion(processId) { return request.get(`/interview/interviewee/next-question/${processId}`) },
   listAiRecords(params) { return requestPage('/interview/hr/ai-records', params) },
@@ -195,11 +246,12 @@ export const interviewApi = {
   submitVideoAnswer(processId, payload) { return request.post(`/interview/interviewee/video-answer/${processId}`, payload) },
   addHrIce(processId, payload) { return request.post(`/interview/hr/video-ice/${processId}`, payload) },
   addIntervieweeIce(processId, payload) { return request.post(`/interview/interviewee/video-ice/${processId}`, payload) },
-  uploadVideoRecording(processId, file) {
+  uploadVideoRecording(processId, file, processStageId) {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('originalFileName', file.name)
     formData.append('contentType', file.type || 'video/webm')
+    if (processStageId) formData.append('processStageId', processStageId)
     return request.post(`/interview/interviewee/video-recording/${processId}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
@@ -214,11 +266,12 @@ export const interviewApi = {
     })
   },
   reportAntiCheatEvent(payload) { return request.post('/interview/interviewee/anti-cheat-event', payload) },
-  uploadHrVideoRecording(processId, file) {
+  uploadHrVideoRecording(processId, file, processStageId) {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('originalFileName', file.name)
     formData.append('contentType', file.type || 'video/webm')
+    if (processStageId) formData.append('processStageId', processStageId)
     return request.post(`/interview/hr/video-recording/${processId}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
@@ -228,7 +281,7 @@ export const interviewApi = {
   retryVideoSummary(processId) { return request.post(`/interview/hr/video-summary/${processId}/retry`) },
   intervieweeJoin(processId) { return request.post(`/interview/interviewee/video-join/${processId}`) },
   hrJoin(processId) { return request.post(`/interview/hr/video-join/${processId}`) },
-  completeVideo(processId, params) { return request.post(`/interview/hr/video-complete/${processId}`, null, { params }) },
+  completeVideo(processId) { return request.post(`/interview/hr/video-complete/${processId}`) },
   completeIntervieweeVideo(processId) { return request.post(`/interview/interviewee/video-complete/${processId}`) },
   approveAi(processId, payload) { return request.post(`/interview/hr/approve-ai/${processId}`, payload) },
   approveVideo(processId, payload) { return request.post(`/interview/hr/approve-video/${processId}`, payload) },
@@ -237,7 +290,7 @@ export const interviewApi = {
   updateProcessRemark(processId, payload) { return request.post(`/interview/hr/processes/${processId}/remark`, payload) },
   submitAiAnswer(payload) { return request.post('/interview/interviewee/ai-answer', payload, { timeout: 120000 }) },
   async submitAiAnswerStream(payload, onEvent, options = {}) {
-    const token = window.localStorage.getItem('demo-token')
+    const token = readSessionToken()
     const streamUrl = `${apiBaseUrl.replace(/\/$/, '')}/interview/interviewee/ai-answer/stream`
     const abortController = new AbortController()
     const abortFromCaller = () => abortController.abort()

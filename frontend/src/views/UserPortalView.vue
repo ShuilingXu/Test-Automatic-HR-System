@@ -71,6 +71,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi, recruitmentApi } from '../services/api'
+import { writeSessionUser } from '../utils/session'
 
 const router = useRouter()
 const route = useRoute()
@@ -84,6 +85,7 @@ async function loadSession() {
   try {
     const response = await authApi.getSession()
     Object.assign(session, response.data)
+    writeSessionUser(response.data)
     Object.assign(profileForm, {
       displayName: response.data.displayName || '',
       mobilePhone: response.data.mobilePhone || '',
@@ -109,6 +111,7 @@ async function saveProfile() {
   try {
     const response = await authApi.updateProfile({ ...profileForm })
     Object.assign(session, response.data)
+    writeSessionUser(response.data)
     ElMessage.success('资料已保存')
   } catch (error) {
     ElMessage.error(error.message || '保存失败')

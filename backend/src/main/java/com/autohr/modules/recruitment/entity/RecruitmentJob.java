@@ -9,6 +9,7 @@ import lombok.Data;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 @Data
 @TableName("recruitment_job")
@@ -30,6 +31,7 @@ public class RecruitmentJob {
     private LocalDate publishDate;
     private LocalDate closeDate;
     private Integer status;
+    private BigDecimal defaultOvertimeRate;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

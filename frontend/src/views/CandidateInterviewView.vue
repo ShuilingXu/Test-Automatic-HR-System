@@ -29,6 +29,10 @@
               </div>
               <video ref="aiExamVideo" class="proctor-video" autoplay muted playsinline></video>
               <strong class="recording-label">{{ aiExamRecordingStatusText }}</strong>
+              <div v-if="aiExamRecording.pending || aiExamRecording.limitReached" class="recording-recovery">
+                <small>{{ aiExamRecording.error || aiExamRecording.notice || `有 ${formatRecordingSize(aiExamRecording.byteSize)} 录像等待上传` }}</small>
+                <el-button v-if="aiExamRecording.pending" size="small" plain :loading="aiExamRecording.uploading" @click="retryAiExamRecordingUpload">重试上传</el-button>
+              </div>
             </section>
 
             <section class="sidebar-section compact-section">
@@ -42,7 +46,7 @@
               </div>
               <dl class="exam-facts">
                 <div><dt>全屏</dt><dd>{{ antiCheat.fullscreen ? '已进入' : '未进入' }}</dd></div>
-                <div><dt>切屏记录</dt><dd>{{ antiCheat.switchCount }} / {{ processSummary.antiCheatSwitchLimit || 5 }}</dd></div>
+                <div><dt>监考</dt><dd>已启用</dd></div>
               </dl>
             </section>
 
@@ -103,13 +107,18 @@
           <div class="video-workspace-head">
             <div><p class="page-eyebrow">Live interview</p><h2>{{ stageLabel }}</h2></div>
             <div class="header-actions">
-              <el-button type="primary" @click="joinVideo">加入视频面试</el-button>
+              <el-button type="primary" :loading="joiningVideo" :disabled="joiningVideo" @click="joinVideo">加入视频面试</el-button>
               <el-button @click="stopRecording">结束并上传录制</el-button>
             </div>
           </div>
           <div class="video-grid">
             <div class="video-box"><span>我的画面</span><video ref="localVideo" autoplay muted playsinline></video></div>
             <div class="video-box"><span>面试官画面</span><video ref="remoteVideo" autoplay playsinline></video></div>
+          </div>
+          <div v-if="videoRecording.pending || videoRecording.uploading || videoRecording.error || videoRecording.limitReached" class="recording-recovery video-recording-recovery">
+            <small>{{ videoRecording.uploading ? '面试录像上传中' : (videoRecording.error || videoRecording.notice || `有 ${formatRecordingSize(videoRecording.byteSize)} 录像等待上传`) }}</small>
+            <el-button v-if="videoRecording.pending" size="small" plain :loading="videoRecording.uploading" @click="retryVideoRecordingUpload">重试上传</el-button>
+            <el-button v-else-if="videoRecording.error" size="small" plain @click="retryVideoRecordingStart">重试录制</el-button>
           </div>
         </section>
 
@@ -128,6 +137,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { interviewApi } from '../services/api'
 import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, playVideo, requestCameraAndMicrophone } from '../utils/media'
+import { appendRecordingChunk, beginRecordingSession, buildRecordingFile, deleteRecordingSession, formatRecordingSize, getRecordingSession, MAX_RECORDING_UPLOAD_BYTES, RECORDING_STOP_THRESHOLD_BYTES, RECORDING_WRITE_HIGH_WATER_BYTES, RECORDING_WRITE_LOW_WATER_BYTES, updateRecordingSession } from '../utils/recordingStore'
 
 const route = useRoute()
 const router = useRouter()
@@ -142,10 +152,12 @@ const aiStreamText = ref('')
 const aiPendingRefresh = reactive({ active: false, attempts: 0, questionId: null })
 const runtimeConfig = reactive({ disableDevtoolsShortcuts: true })
 const antiCheat = reactive({ fullscreen: false, switchCount: 0, hasEnteredFullscreen: false, aiEndNotified: false })
-const aiExamRecording = reactive({ active: false, starting: false, uploading: false, uploaded: false, error: '' })
+const aiExamRecording = reactive({ active: false, starting: false, uploading: false, uploaded: false, pending: false, limitReached: false, byteSize: 0, notice: '', error: '' })
+const videoRecording = reactive({ starting: false, uploading: false, pending: false, limitReached: false, byteSize: 0, notice: '', error: '' })
 const localVideo = ref(null)
 const remoteVideo = ref(null)
 const aiExamVideo = ref(null)
+const joiningVideo = ref(false)
 let localStream = null
 let aiExamStream = null
 let componentDisposed = false
@@ -153,18 +165,28 @@ let peer = null
 let pollTimer = null
 let aiRefreshTimer = null
 let recorder = null
-let recordedChunks = []
+let recorderStopPromise = null
+let recordingChunkWrites = Promise.resolve()
+let recordingChunkWriteError = null
+let recordingPendingWriteBytes = 0
 let addedHrIce = new Set()
 let remoteStream = null
 let pendingHrIce = []
-let recordingStopInProgress = false
+let recordingUploadPromise = null
 let handledRecordingEndSignal = ''
 let recordingEndTimer = null
 let videoPollInProgress = false
+let videoProcessStageId = null
 let lastSwitchReportAt = 0
+let antiCheatQueue = []
+let antiCheatSending = false
+let antiCheatRetryTimer = null
 let aiExamRecorder = null
-let aiExamRecordedChunks = []
-let aiExamRecordingStopInProgress = false
+let aiExamRecorderStopPromise = null
+let aiExamChunkWrites = Promise.resolve()
+let aiExamChunkWriteError = null
+let aiExamPendingWriteBytes = 0
+let aiExamRecordingUploadPromise = null
 let aiAnswerAbortController = null
 
 const currentAiRecords = computed(() => processSummary.value?.processStageId
@@ -256,7 +278,6 @@ async function loadProcessRecords(options = {}) {
       interviewApi.listIntervieweeAiRecords({ processId: sessionForm.processId }),
     ])
     processSummary.value = processResponse.data
-    antiCheat.switchCount = processSummary.value?.antiCheatSwitchCount || 0
     currentQuestion.value = questionResponse.data
     aiRecords.value = recordsResponse.data
     if (currentQuestion.value?.answerStatus === 'FAILED' && !aiAnswer.answerContent) {
@@ -264,7 +285,6 @@ async function loadProcessRecords(options = {}) {
     }
     refreshState.retryCount = 0
     refreshState.lastError = ''
-    cacheInterviewSession()
     notifyAiFinishedIfNeeded()
     syncAiAutoRefresh()
   } catch (error) {
@@ -277,9 +297,6 @@ async function loadProcessRecords(options = {}) {
   } finally {
     refreshState.loading = false
   }
-}
-
-function cacheInterviewSession() {
 }
 
 function syncAiAutoRefresh() {
@@ -426,6 +443,7 @@ async function enterAiExamMode() {
       await document.documentElement.requestFullscreen()
       antiCheat.hasEnteredFullscreen = true
     } catch (error) {
+      antiCheat.hasEnteredFullscreen = true
       await reportAntiCheat('FULLSCREEN_DENIED', error.message || '全屏授权失败')
       ElMessage.warning('浏览器未允许全屏，请允许后继续答题')
     }
@@ -463,6 +481,10 @@ function parseStreamData(data) {
 
 async function ensureAiExamRecordingStarted() {
   if (aiExamRecording.active || aiExamRecording.starting) return
+  if (aiExamRecording.limitReached) {
+    ElMessage.warning(recordingLimitNotice(aiExamRecording.uploaded))
+    return
+  }
   if (!window.MediaRecorder) {
     aiExamRecording.error = '当前浏览器不支持录像，请使用最新版 Chrome/Edge'
     await reportAntiCheat('AI_RECORDING_UNSUPPORTED', aiExamRecording.error)
@@ -471,6 +493,17 @@ async function ensureAiExamRecordingStarted() {
   aiExamRecording.starting = true
   aiExamRecording.error = ''
   try {
+    const key = aiExamRecordingKey()
+    const session = await beginRecordingSession(key, {
+      kind: 'candidate-ai',
+      processId: sessionForm.processId,
+      fileName: `ai-exam-${sessionForm.processId}.webm`,
+      contentType: 'video/webm',
+    })
+    if (session.byteSize > 0) {
+      setAiPendingRecording(session, '上次录像尚未上传，请先重试上传')
+      throw new Error(aiExamRecording.error)
+    }
     const stream = await requestCameraAndMicrophone()
     if (componentDisposed) {
       stream.getTracks().forEach((track) => track.stop())
@@ -482,12 +515,23 @@ async function ensureAiExamRecordingStarted() {
       playVideo(aiExamVideo.value)
     }
     aiExamRecorder = createMediaRecorder(aiExamStream)
-    aiExamRecordedChunks = []
-    aiExamRecorder.ondataavailable = (event) => { if (event.data.size > 0) aiExamRecordedChunks.push(event.data) }
-    aiExamRecorder.onstop = () => { aiExamRecording.active = false }
+    aiExamRecorderStopPromise = null
+    aiExamChunkWrites = Promise.resolve()
+    aiExamChunkWriteError = null
+    aiExamPendingWriteBytes = 0
+    const currentRecorder = aiExamRecorder
+    aiExamRecorder.ondataavailable = (event) => queueAiExamRecordingChunk(event.data, currentRecorder)
+    aiExamRecorder.onstop = () => {
+      aiExamRecording.active = false
+      if (aiExamRecording.limitReached) void stopAndUploadAiExamRecording().catch((error) => { if (!componentDisposed) fail(error) })
+    }
     aiExamRecorder.start(1000)
     aiExamRecording.active = true
     aiExamRecording.uploaded = false
+    aiExamRecording.pending = false
+    aiExamRecording.limitReached = false
+    aiExamRecording.byteSize = 0
+    aiExamRecording.notice = ''
     await reportAntiCheat('AI_RECORDING_STARTED', 'AI答题摄像头和麦克风录像已开始')
     ElMessage.success('AI答题录像已开始')
   } catch (error) {
@@ -503,36 +547,32 @@ async function ensureAiExamRecordingStarted() {
 
 function createMediaRecorder(stream) {
   const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type))
-  return mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+  const options = { videoBitsPerSecond: 240_000, audioBitsPerSecond: 32_000 }
+  if (mimeType) options.mimeType = mimeType
+  try {
+    return new MediaRecorder(stream, options)
+  } catch {
+    return mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+  }
 }
 
 async function stopAndUploadAiExamRecording() {
-  if (aiExamRecordingStopInProgress) return
-  if ((!aiExamRecorder || aiExamRecorder.state === 'inactive') && aiExamRecordedChunks.length === 0) return
-  aiExamRecordingStopInProgress = true
+  if (aiExamRecordingUploadPromise) return aiExamRecordingUploadPromise
   aiExamRecording.uploading = true
+  aiExamRecordingUploadPromise = (async () => {
+    try {
+      await stopAiExamRecorderToStore()
+      await uploadStoredAiExamRecording()
+    } catch (error) {
+      await markAiRecordingUploadFailed(error)
+      throw error
+    }
+  })()
   try {
-    if (aiExamRecorder && aiExamRecorder.state !== 'inactive') {
-      const currentRecorder = aiExamRecorder
-      await new Promise((resolve) => {
-        const previousStop = currentRecorder.onstop
-        currentRecorder.onstop = (event) => { previousStop?.(event); resolve() }
-        currentRecorder.stop()
-      })
-      aiExamRecorder = null
-    }
-    const blob = new Blob(aiExamRecordedChunks, { type: 'video/webm' })
-    if (blob.size > 0) {
-      const file = new File([blob], `ai-exam-${sessionForm.processId}.webm`, { type: 'video/webm' })
-      await interviewApi.uploadAiExamRecording(sessionForm.processId, file)
-      aiExamRecordedChunks = []
-      aiExamRecording.uploaded = true
-      await reportAntiCheat('AI_RECORDING_UPLOADED', 'AI答题录像已上传')
-      ElMessage.success('AI答题录像已上传')
-    }
+    await aiExamRecordingUploadPromise
   } finally {
+    aiExamRecordingUploadPromise = null
     aiExamRecording.uploading = false
-    aiExamRecordingStopInProgress = false
     stopAiExamStream()
   }
 }
@@ -544,21 +584,158 @@ function stopAiExamStream() {
   if (aiExamVideo.value) aiExamVideo.value.srcObject = null
 }
 
-async function reportAntiCheat(eventType, detail) {
-  if (!sessionForm.processId) return null
+function reportAntiCheat(eventType, detail) {
+  if (!sessionForm.processId || componentDisposed) return Promise.resolve(null)
+  const eventId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  antiCheatQueue.push({
+    processId: sessionForm.processId,
+    eventType,
+    detail,
+    eventId,
+    occurredAtEpochMillis: Date.now(),
+  })
+  void flushAntiCheatQueue()
+  return Promise.resolve(null)
+}
+
+async function flushAntiCheatQueue() {
+  if (antiCheatSending || componentDisposed || !antiCheatQueue.length) return
+  antiCheatSending = true
+  clearTimeout(antiCheatRetryTimer)
+  antiCheatRetryTimer = null
   try {
-    const response = await interviewApi.reportAntiCheatEvent({ processId: sessionForm.processId, eventType, detail })
-    if (response.data) {
-      processSummary.value = response.data
-      antiCheat.switchCount = response.data.antiCheatSwitchCount || antiCheat.switchCount
-      notifyAiFinishedIfNeeded()
-      if (response.data.stageStatus === 'WAITING_APPROVAL') {
-        currentQuestion.value = null
-        clearAiRefresh()
+    while (!componentDisposed && antiCheatQueue.length) {
+      const event = antiCheatQueue[0]
+      const response = await interviewApi.reportAntiCheatEvent(event)
+      antiCheatQueue.shift()
+      if (response.data) {
+        processSummary.value = response.data
+        notifyAiFinishedIfNeeded()
+        if (response.data.stageStatus === 'WAITING_APPROVAL') {
+          currentQuestion.value = null
+          clearAiRefresh()
+        }
       }
     }
-    return response.data
-  } catch { return null }
+  } catch (error) {
+    if (!componentDisposed) {
+      console.warn('防作弊事件上报失败，将自动重试', error)
+      antiCheatRetryTimer = setTimeout(() => { void flushAntiCheatQueue() }, 2000)
+    }
+  } finally {
+    antiCheatSending = false
+  }
+}
+
+function aiExamRecordingKey() {
+  return `candidate-ai:${sessionForm.processId}`
+}
+
+function candidateVideoRecordingKey() {
+  return `candidate-video:${sessionForm.processId}`
+}
+
+function queueAiExamRecordingChunk(data, currentRecorder) {
+  if (!data?.size) return
+  aiExamPendingWriteBytes += data.size
+  if (aiExamPendingWriteBytes >= RECORDING_WRITE_HIGH_WATER_BYTES && currentRecorder.state === 'recording') currentRecorder.pause()
+  aiExamChunkWrites = aiExamChunkWrites.then(async () => {
+    try {
+      if (aiExamChunkWriteError) return
+      const result = await appendRecordingChunk(aiExamRecordingKey(), data)
+      aiExamRecording.byteSize = result.session?.byteSize || aiExamRecording.byteSize
+      if (result.limitReached) {
+        markAiRecordingLimitReached(result.session)
+        if (currentRecorder.state !== 'inactive') currentRecorder.stop()
+      }
+    } catch (error) {
+      aiExamChunkWriteError = error
+      aiExamRecording.error = `录像暂存失败：${error.message}`
+      if (currentRecorder.state !== 'inactive') currentRecorder.stop()
+    } finally {
+      aiExamPendingWriteBytes = Math.max(0, aiExamPendingWriteBytes - data.size)
+      if (!aiExamChunkWriteError && !aiExamRecording.limitReached && aiExamPendingWriteBytes <= RECORDING_WRITE_LOW_WATER_BYTES && currentRecorder.state === 'paused') currentRecorder.resume()
+    }
+  })
+}
+
+async function stopAiExamRecorderToStore() {
+  if (aiExamRecorder && aiExamRecorder.state !== 'inactive') {
+    const currentRecorder = aiExamRecorder
+    aiExamRecorderStopPromise = new Promise((resolve) => {
+      const previousStop = currentRecorder.onstop
+      currentRecorder.onstop = (event) => { previousStop?.(event); resolve() }
+      currentRecorder.stop()
+    })
+  }
+  if (aiExamRecorderStopPromise) await aiExamRecorderStopPromise
+  aiExamRecorderStopPromise = null
+  aiExamRecorder = null
+  await aiExamChunkWrites
+  if (aiExamChunkWriteError) throw aiExamChunkWriteError
+  const session = await updateRecordingSession(aiExamRecordingKey(), { status: 'ready', error: '' })
+  if (session?.byteSize > 0) setAiPendingRecording(session)
+}
+
+async function uploadStoredAiExamRecording() {
+  const stored = await buildRecordingFile(aiExamRecordingKey())
+  if (!stored?.file.size) return
+  if (stored.file.size > MAX_RECORDING_UPLOAD_BYTES) {
+    throw new Error(`录像大小为 ${formatRecordingSize(stored.file.size)}，超过服务器 100 MB 限制，已保留在本机浏览器中`)
+  }
+  aiExamRecording.pending = true
+  aiExamRecording.byteSize = stored.file.size
+  if (stored.session.limitReached) markAiRecordingLimitReached(stored.session)
+  await updateRecordingSession(aiExamRecordingKey(), { status: 'uploading', error: '' })
+  await interviewApi.uploadAiExamRecording(stored.session.processId || sessionForm.processId, stored.file)
+  await deleteRecordingSession(aiExamRecordingKey())
+  aiExamRecording.pending = false
+  aiExamRecording.byteSize = 0
+  aiExamRecording.error = ''
+  aiExamRecording.uploaded = true
+  if (aiExamRecording.limitReached) aiExamRecording.notice = recordingLimitNotice(true)
+  await reportAntiCheat('AI_RECORDING_UPLOADED', 'AI答题录像已上传')
+  if (!componentDisposed) ElMessage.success('AI答题录像已上传')
+}
+
+async function retryAiExamRecordingUpload() {
+  if (aiExamRecording.uploading) return
+  aiExamRecording.uploading = true
+  try {
+    await uploadStoredAiExamRecording()
+  } catch (error) {
+    await markAiRecordingUploadFailed(error)
+    if (!componentDisposed) fail(error)
+  } finally {
+    aiExamRecording.uploading = false
+  }
+}
+
+function setAiPendingRecording(session, error = session.error || '') {
+  aiExamRecording.pending = Boolean(session?.byteSize)
+  aiExamRecording.byteSize = session?.byteSize || 0
+  aiExamRecording.error = error
+  if (session?.limitReached) markAiRecordingLimitReached(session)
+}
+
+function markAiRecordingLimitReached(session) {
+  aiExamRecording.limitReached = true
+  aiExamRecording.pending = Boolean(session?.byteSize)
+  aiExamRecording.byteSize = session?.byteSize || aiExamRecording.byteSize
+  aiExamRecording.notice = recordingLimitNotice(false)
+}
+
+function recordingLimitNotice(uploaded) {
+  const limit = formatRecordingSize(RECORDING_STOP_THRESHOLD_BYTES)
+  return uploaded
+    ? `录像达到 ${limit} 安全阈值后已自动停止并上传，停止后的内容未继续录制`
+    : `录像已达到 ${limit} 安全阈值，可用部分已保存在本机；请完成上传，停止后的内容不会继续录制`
+}
+
+async function markAiRecordingUploadFailed(error) {
+  const message = error?.message || '录像上传失败'
+  const session = await updateRecordingSession(aiExamRecordingKey(), { status: 'failed', error: message }).catch(() => null)
+  setAiPendingRecording(session || { byteSize: aiExamRecording.byteSize }, message)
 }
 
 function handleFullscreenChange() {
@@ -588,6 +765,7 @@ function reportSwitchEvent(eventType, detail) {
   const now = Date.now()
   if (now - lastSwitchReportAt < 1000) return
   lastSwitchReportAt = now
+  antiCheat.switchCount += 1
   reportAntiCheat(eventType, detail)
 }
 
@@ -636,9 +814,19 @@ function handleClipboardBlocked(event) {
   ElMessage.warning('AI答题期间禁止复制、剪切、粘贴和拖拽')
 }
 async function joinVideo() {
+  if (joiningVideo.value || componentDisposed) return
+  await restoreCandidateVideoRecording()
+  if (videoRecording.pending) {
+    ElMessage.warning('检测到尚未上传的面试录像，请先重试上传后再加入视频面试')
+    return
+  }
+  joiningVideo.value = true
   try {
     await disconnectVideo()
-    await interviewApi.intervieweeJoin(sessionForm.processId)
+    if (componentDisposed) return
+    const joinedSession = (await interviewApi.intervieweeJoin(sessionForm.processId)).data
+    if (componentDisposed) return
+    videoProcessStageId = joinedSession?.processStageId || processSummary.value?.processStageId || null
     const stream = await requestCameraAndMicrophone()
     if (componentDisposed) {
       stream.getTracks().forEach((track) => track.stop())
@@ -647,7 +835,12 @@ async function joinVideo() {
     localStream = stream
     localVideo.value.srcObject = localStream
     playVideo(localVideo.value)
-    peer = createPeerConnection(await loadIceServers())
+    const iceServers = await loadIceServers()
+    if (componentDisposed) {
+      await disconnectVideo({ uploadRecording: false })
+      return
+    }
+    peer = createPeerConnection(iceServers)
     addedHrIce = new Set()
     pendingHrIce = []
     localStream.getTracks().forEach((track) => peer.addTrack(track, localStream))
@@ -663,11 +856,13 @@ async function joinVideo() {
         await interviewApi.addIntervieweeIce(sessionForm.processId, { iceCandidate: JSON.stringify(event.candidate) })
       }
     }
+    if (componentDisposed) return
     pollTimer = setInterval(async () => {
-      if (videoPollInProgress) return
+      if (componentDisposed || !peer || videoPollInProgress) return
       videoPollInProgress = true
       try {
         const state = (await interviewApi.getVideoState(sessionForm.processId)).data
+        if (componentDisposed || !peer) return
         if (state.offerSdp && !peer.currentRemoteDescription) {
           await peer.setRemoteDescription(JSON.parse(state.offerSdp))
           await flushPendingHrIce()
@@ -685,7 +880,7 @@ async function joinVideo() {
           }
         }
         if (state.sessionStatus === 'RECORDING') {
-          startRecordingIfNeeded()
+          void startRecordingIfNeeded().catch((error) => { if (!componentDisposed) fail(error) })
         }
         if (shouldHandleRecordingEnd(state)) {
           handledRecordingEndSignal = recordingEndSignalKey(state)
@@ -694,15 +889,17 @@ async function joinVideo() {
           scheduleRecordingStop(state.recordingEndRequestedAt)
         }
       } catch (error) {
-        console.warn('同步视频状态失败', error)
+        if (!componentDisposed) console.warn('同步视频状态失败', error)
       } finally {
         videoPollInProgress = false
       }
     }, 1000)
-    ElMessage.success('已加入视频面，等待HR就绪后同步开始录制')
+    if (!componentDisposed) ElMessage.success('已加入视频面，等待HR就绪后同步开始录制')
   } catch (error) {
     await disconnectVideo({ uploadRecording: false })
-    ElMessage.error(buildMediaErrorMessage(error))
+    if (!componentDisposed) ElMessage.error(buildMediaErrorMessage(error))
+  } finally {
+    joiningVideo.value = false
   }
 }
 async function stopRecording() {
@@ -726,46 +923,182 @@ function shouldHandleRecordingEnd(state) {
 
 function scheduleRecordingStop(endAt) {
   clearTimeout(recordingEndTimer)
+  recordingEndTimer = null
+  if (componentDisposed) return
   const delay = Math.max(new Date(endAt || Date.now()).getTime() - Date.now(), 0)
   recordingEndTimer = setTimeout(async () => {
+    recordingEndTimer = null
+    if (componentDisposed) return
     try {
       await stopAndUploadRecording()
+      if (componentDisposed) return
       await disconnectVideo({ uploadRecording: false })
     } catch (error) {
-      fail(error)
+      if (!componentDisposed) fail(error)
     }
   }, delay)
 }
 
-function startRecordingIfNeeded() {
-  if (!localStream || (recorder && recorder.state !== 'inactive')) return
-  recorder = new MediaRecorder(localStream)
-  recordedChunks = []
-  recorder.ondataavailable = (event) => { if (event.data.size > 0) recordedChunks.push(event.data) }
-  recorder.start(1000)
-  ElMessage.success('双方已进入视频面，录制已同步开始')
+async function startRecordingIfNeeded() {
+  if (componentDisposed || videoRecording.starting || videoRecording.pending || videoRecording.limitReached || videoRecording.error || !localStream || (recorder && recorder.state !== 'inactive')) return
+  videoRecording.starting = true
+  try {
+    const session = await beginRecordingSession(candidateVideoRecordingKey(), {
+      kind: 'candidate-video',
+      processId: sessionForm.processId,
+      processStageId: videoProcessStageId,
+      fileName: `interviewee-${sessionForm.processId}.webm`,
+      contentType: 'video/webm',
+    })
+    if (session.byteSize > 0) {
+      setPendingVideoRecording(session, '上次录像尚未上传，请先重试上传')
+      return
+    }
+    if (componentDisposed || !localStream) return
+    recorder = createMediaRecorder(localStream)
+    recorderStopPromise = null
+    recordingChunkWrites = Promise.resolve()
+    recordingChunkWriteError = null
+    recordingPendingWriteBytes = 0
+    const currentRecorder = recorder
+    recorder.ondataavailable = (event) => queueVideoRecordingChunk(event.data, currentRecorder)
+    recorder.onstop = () => {
+      if (videoRecording.limitReached) void stopAndUploadRecording().catch((error) => { if (!componentDisposed) fail(error) })
+    }
+    recorder.start(1000)
+    videoRecording.byteSize = 0
+    videoRecording.limitReached = false
+    videoRecording.notice = ''
+    videoRecording.error = ''
+    ElMessage.success('双方已进入视频面，录制已同步开始')
+  } catch (error) {
+    videoRecording.error = `无法启动可靠录像：${error.message}`
+    throw error
+  } finally {
+    videoRecording.starting = false
+  }
+}
+
+function retryVideoRecordingStart() {
+  videoRecording.error = ''
+  void startRecordingIfNeeded().catch((error) => { if (!componentDisposed) fail(error) })
 }
 
 async function stopAndUploadRecording() {
-  if (recordingStopInProgress) return
-  if ((!recorder || recorder.state === 'inactive') && recordedChunks.length === 0) return
-  recordingStopInProgress = true
+  if (recordingUploadPromise) return recordingUploadPromise
+  videoRecording.uploading = true
+  recordingUploadPromise = (async () => {
+    try {
+      await stopVideoRecorderToStore()
+      await uploadStoredVideoRecording()
+    } catch (error) {
+      await markVideoRecordingUploadFailed(error)
+      throw error
+    }
+  })()
   try {
-    if (recorder && recorder.state !== 'inactive') {
-      const currentRecorder = recorder
-      await new Promise((resolve) => { currentRecorder.onstop = resolve; currentRecorder.stop() })
-      recorder = null
-    }
-    const blob = new Blob(recordedChunks, { type: 'video/webm' })
-    if (blob.size > 0) {
-      const file = new File([blob], `interviewee-${sessionForm.processId}.webm`, { type: 'video/webm' })
-      await interviewApi.uploadVideoRecording(sessionForm.processId, file)
-      recordedChunks = []
-      ElMessage.success('面试者录制已上传')
-    }
+    await recordingUploadPromise
   } finally {
-    recordingStopInProgress = false
+    recordingUploadPromise = null
+    videoRecording.uploading = false
   }
+}
+
+function queueVideoRecordingChunk(data, currentRecorder) {
+  if (!data?.size) return
+  recordingPendingWriteBytes += data.size
+  if (recordingPendingWriteBytes >= RECORDING_WRITE_HIGH_WATER_BYTES && currentRecorder.state === 'recording') currentRecorder.pause()
+  recordingChunkWrites = recordingChunkWrites.then(async () => {
+    try {
+      if (recordingChunkWriteError) return
+      const result = await appendRecordingChunk(candidateVideoRecordingKey(), data)
+      videoRecording.byteSize = result.session?.byteSize || videoRecording.byteSize
+      if (result.limitReached) {
+        markVideoRecordingLimitReached(result.session)
+        if (currentRecorder.state !== 'inactive') currentRecorder.stop()
+      }
+    } catch (error) {
+      recordingChunkWriteError = error
+      videoRecording.error = `录像暂存失败：${error.message}`
+      if (currentRecorder.state !== 'inactive') currentRecorder.stop()
+    } finally {
+      recordingPendingWriteBytes = Math.max(0, recordingPendingWriteBytes - data.size)
+      if (!recordingChunkWriteError && !videoRecording.limitReached && recordingPendingWriteBytes <= RECORDING_WRITE_LOW_WATER_BYTES && currentRecorder.state === 'paused') currentRecorder.resume()
+    }
+  })
+}
+
+async function stopVideoRecorderToStore() {
+  if (recorder && recorder.state !== 'inactive') {
+    const currentRecorder = recorder
+    recorderStopPromise = new Promise((resolve) => {
+      const previousStop = currentRecorder.onstop
+      currentRecorder.onstop = (event) => { previousStop?.(event); resolve() }
+      currentRecorder.stop()
+    })
+  }
+  if (recorderStopPromise) await recorderStopPromise
+  recorderStopPromise = null
+  recorder = null
+  await recordingChunkWrites
+  if (recordingChunkWriteError) throw recordingChunkWriteError
+  const session = await updateRecordingSession(candidateVideoRecordingKey(), { status: 'ready', error: '' })
+  if (session?.byteSize > 0) setPendingVideoRecording(session)
+}
+
+async function uploadStoredVideoRecording() {
+  const stored = await buildRecordingFile(candidateVideoRecordingKey())
+  if (!stored?.file.size) return
+  if (stored.file.size > MAX_RECORDING_UPLOAD_BYTES) {
+    throw new Error(`录像大小为 ${formatRecordingSize(stored.file.size)}，超过服务器 100 MB 限制，已保留在本机浏览器中`)
+  }
+  setPendingVideoRecording(stored.session)
+  await updateRecordingSession(candidateVideoRecordingKey(), { status: 'uploading', error: '' })
+  await interviewApi.uploadVideoRecording(
+    stored.session.processId || sessionForm.processId,
+    stored.file,
+    stored.session.processStageId || videoProcessStageId,
+  )
+  await deleteRecordingSession(candidateVideoRecordingKey())
+  videoRecording.pending = false
+  videoRecording.byteSize = 0
+  videoRecording.error = ''
+  if (videoRecording.limitReached) videoRecording.notice = recordingLimitNotice(true)
+  if (!componentDisposed) ElMessage.success('面试者录制已上传')
+}
+
+async function retryVideoRecordingUpload() {
+  if (videoRecording.uploading) return
+  videoRecording.uploading = true
+  try {
+    await uploadStoredVideoRecording()
+  } catch (error) {
+    await markVideoRecordingUploadFailed(error)
+    if (!componentDisposed) fail(error)
+  } finally {
+    videoRecording.uploading = false
+  }
+}
+
+function setPendingVideoRecording(session, error = session.error || '') {
+  videoRecording.pending = Boolean(session?.byteSize)
+  videoRecording.byteSize = session?.byteSize || 0
+  videoRecording.error = error
+  if (session?.limitReached) markVideoRecordingLimitReached(session)
+  if (session?.processStageId) videoProcessStageId = session.processStageId
+}
+
+function markVideoRecordingLimitReached(session) {
+  videoRecording.limitReached = true
+  videoRecording.pending = Boolean(session?.byteSize)
+  videoRecording.byteSize = session?.byteSize || videoRecording.byteSize
+  videoRecording.notice = recordingLimitNotice(false)
+}
+
+async function markVideoRecordingUploadFailed(error) {
+  const message = error?.message || '录像上传失败'
+  const session = await updateRecordingSession(candidateVideoRecordingKey(), { status: 'failed', error: message }).catch(() => null)
+  setPendingVideoRecording(session || { byteSize: videoRecording.byteSize }, message)
 }
 
 async function disconnectVideo({ uploadRecording = true } = {}) {
@@ -780,10 +1113,9 @@ async function disconnectVideo({ uploadRecording = true } = {}) {
     peer?.close()
     peer = null
     recorder = null
-    recordedChunks = []
-    recordingStopInProgress = false
     handledRecordingEndSignal = ''
     videoPollInProgress = false
+    videoProcessStageId = null
     localStream?.getTracks().forEach((track) => track.stop())
     localStream = null
     remoteStream = null
@@ -831,8 +1163,53 @@ async function loadRuntimeConfig() {
   }
 }
 
+async function restorePendingRecordings() {
+  await Promise.all([restoreAiExamRecording(), restoreCandidateVideoRecording()])
+}
+
+async function restoreAiExamRecording() {
+  try {
+    const session = await getRecordingSession(aiExamRecordingKey())
+    if (session?.byteSize > 0) setAiPendingRecording(session)
+  } catch (error) {
+    aiExamRecording.error = error.message
+  }
+}
+
+async function restoreCandidateVideoRecording() {
+  try {
+    const session = await getRecordingSession(candidateVideoRecordingKey())
+    if (session?.byteSize > 0) setPendingVideoRecording(session)
+  } catch (error) {
+    videoRecording.error = error.message
+  }
+}
+
+async function preserveAiExamRecording() {
+  try {
+    await stopAiExamRecorderToStore()
+  } catch (error) {
+    await markAiRecordingUploadFailed(error)
+  }
+}
+
+async function preserveVideoRecording() {
+  try {
+    await stopVideoRecorderToStore()
+  } catch (error) {
+    await markVideoRecordingUploadFailed(error)
+  }
+}
+
+function handlePageHide() {
+  void preserveAiExamRecording()
+  void preserveVideoRecording()
+}
+
 onBeforeUnmount(() => {
   componentDisposed = true
+  clearTimeout(antiCheatRetryTimer)
+  antiCheatRetryTimer = null
   aiAnswerAbortController?.abort()
   clearAiRefresh()
   document.removeEventListener('keydown', handleRestrictedShortcut, true)
@@ -844,8 +1221,11 @@ onBeforeUnmount(() => {
   document.removeEventListener('cut', handleClipboardBlocked, true)
   document.removeEventListener('paste', handleClipboardBlocked, true)
   document.removeEventListener('drop', handleClipboardBlocked, true)
-  stopAndUploadAiExamRecording().catch(() => {})
-  void disconnectVideo().catch(() => {})
+  window.removeEventListener('pagehide', handlePageHide)
+  void preserveAiExamRecording()
+  void preserveVideoRecording()
+  stopAiExamStream()
+  void disconnectVideo({ uploadRecording: false }).catch(() => {})
 })
 
 onMounted(async () => {
@@ -859,11 +1239,13 @@ onMounted(async () => {
   document.addEventListener('cut', handleClipboardBlocked, true)
   document.addEventListener('paste', handleClipboardBlocked, true)
   document.addEventListener('drop', handleClipboardBlocked, true)
+  window.addEventListener('pagehide', handlePageHide)
   if (!sessionForm.processId) {
     ElMessage.warning('请从面试者首页选择报名记录进入面试')
     router.push('/user')
     return
   }
+  await restorePendingRecordings()
   await loadProcessRecords()
   syncAiAutoRefresh()
   if (processSummary.value?.currentStage === 'AI' && processSummary.value?.overallStatus === 'IN_PROGRESS') {
@@ -895,6 +1277,10 @@ onMounted(async () => {
 .recording-dot.active { background: var(--danger); box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.12); }
 .proctor-video { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; background: #111; }
 .recording-label { display: block; margin-top: 10px; color: var(--ink-soft); font-size: 13px; }
+.recording-recovery { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-top: 10px; padding: 10px; border: 1px solid #e4c987; border-radius: 6px; background: #fff9eb; color: #855b09; }
+.recording-recovery small { min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.recording-recovery :deep(.el-button) { flex: 0 0 auto; margin-left: 0; }
+.video-recording-recovery { margin-top: 14px; }
 .compact-section { padding-bottom: 10px; }
 .round-track { display: flex; flex-wrap: wrap; gap: 7px; padding: 4px 0 14px; border-bottom: 1px solid var(--border); }
 .round-track span { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--text-muted); background: var(--surface); font-size: 12px; font-weight: 700; }

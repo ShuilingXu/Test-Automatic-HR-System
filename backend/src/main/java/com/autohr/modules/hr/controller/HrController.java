@@ -71,20 +71,29 @@ public class HrController {
     @PostMapping("/employees")
     public ApiResponse<EmployeeVO> saveEmployee(Authentication authentication,
                                                 @Valid @RequestBody EmployeeSaveRequest request) {
-        EmployeeVO saved = hrService.saveEmployee(request);
         SessionUserVO current = currentUser(authentication);
-        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "ADMIN", request.getId() == null ? "CREATE_EMPLOYEE" : "UPDATE_EMPLOYEE", "HR_EMPLOYEE", String.valueOf(saved.getId()), saved.getFullName());
+        EmployeeVO saved = hrService.saveEmployee(request, current.getId());
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(), "PAYROLL", request.getId() == null ? "CREATE_EMPLOYEE_SALARY" : "UPDATE_EMPLOYEE_SALARY", "HR_EMPLOYEE", String.valueOf(saved.getId()), saved.getFullName());
         return ApiResponse.success(saved);
     }
 
     @GetMapping("/employees")
     public ApiResponse<PageResponse<EmployeeVO>> listEmployees(@RequestParam(required = false) Long departmentId,
                                                        @RequestParam(required = false) Integer employmentStatus,
+                                                       @RequestParam(required = false) String name,
+                                                       @RequestParam(required = false) String employeeCode,
+                                                       @RequestParam(required = false) String mobilePhone,
+                                                       @RequestParam(required = false, defaultValue = "false") Boolean mobileExact,
                                                        @RequestParam(required = false) String keyword,
                                                        @RequestParam(required = false) Integer page,
                                                        @RequestParam(required = false) Integer pageSize) {
-        return ApiResponse.success(hrService.listEmployees(departmentId, employmentStatus, keyword,
+        return ApiResponse.success(hrService.listEmployees(departmentId, employmentStatus, name, employeeCode, mobilePhone, mobileExact, keyword,
                 PageQuery.of(page, pageSize)));
+    }
+
+    @GetMapping("/employees/{id}")
+    public ApiResponse<EmployeeVO> getEmployee(@PathVariable Long id) {
+        return ApiResponse.success(hrService.getEmployee(id));
     }
 
     @DeleteMapping("/employees/{id}")

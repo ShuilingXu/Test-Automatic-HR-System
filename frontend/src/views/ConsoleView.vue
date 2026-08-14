@@ -143,11 +143,16 @@
             <el-form-item label="身份证号"><el-input v-model="employeeForm.idCardNo" /></el-form-item>
             <el-form-item label="手机号"><el-input v-model="employeeForm.mobilePhone" /></el-form-item>
             <el-form-item label="招聘专业"><el-input v-model="employeeForm.recruitmentMajor" /></el-form-item>
-            <el-form-item label="岗位"><el-input v-model="employeeForm.positionName" /></el-form-item>
+            <el-form-item label="岗位"><el-select v-model="employeeForm.jobId" filterable><el-option v-for="item in jobs" :key="item.id" :label="`${item.jobCode} · ${item.jobTitle}`" :value="item.id" /></el-select></el-form-item>
+            <el-form-item label="基本薪资（元/月）"><el-input-number v-model="employeeForm.baseSalary" :min="employeeMode === 'create' ? 0.01 : 0" :precision="2" /></el-form-item>
+            <el-form-item v-if="employeeMode === 'edit'" label="薪资调整原因"><el-input v-model="employeeForm.salaryChangeReason" maxlength="500" /></el-form-item>
+            <el-form-item label="个人加班单价"><el-input-number v-model="employeeForm.overtimeRate" :min="0" :precision="2" /></el-form-item>
             <el-form-item label="直属部门"><el-select v-model="employeeForm.departmentId"><el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" /></el-select></el-form-item>
             <el-form-item label="员工状态"><el-select v-model="employeeForm.employmentStatus"><el-option label="待入职" :value="0" /><el-option label="已入职" :value="1" /><el-option label="停用" :value="2" /><el-option label="已离职" :value="3" /></el-select></el-form-item>
             <el-form-item label="银行卡号"><el-input v-model="employeeForm.bankAccountNo" /></el-form-item>
             <el-form-item label="开户银行"><el-input v-model="employeeForm.bankName" /></el-form-item>
+            <el-form-item label="辞退原因"><el-select v-model="employeeForm.dismissalReason" clearable><el-option v-for="reason in ['试用期不合格','违纪辞退','组织调整','协商解除','其他']" :key="reason" :label="reason" :value="reason" /></el-select></el-form-item>
+            <el-form-item label="辞退日期"><el-date-picker v-model="employeeForm.dismissalDate" type="date" value-format="YYYY-MM-DD" /></el-form-item>
           </el-form>
           <div class="action-row"><el-button type="primary" @click="saveEmployee">{{ employeeMode === 'create' ? '新增员工' : '保存修改' }}</el-button><el-button @click="resetEmployeeForm">清空</el-button></div>
         </template>
@@ -155,10 +160,11 @@
           <el-form :model="employeeFilter" label-position="top" class="filter-grid">
             <el-form-item label="直属部门"><el-select v-model="employeeFilter.departmentId" clearable><el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" /></el-select></el-form-item>
             <el-form-item label="员工状态"><el-select v-model="employeeFilter.employmentStatus" clearable><el-option label="待入职" :value="0" /><el-option label="已入职" :value="1" /><el-option label="停用" :value="2" /><el-option label="已离职" :value="3" /></el-select></el-form-item>
-            <el-form-item label="关键词"><el-input v-model="employeeFilter.keyword" placeholder="姓名 / 工号 / 手机 / 岗位" /></el-form-item>
+            <el-form-item label="姓名"><el-input v-model="employeeFilter.name" /></el-form-item><el-form-item label="工号"><el-input v-model="employeeFilter.employeeCode" /></el-form-item><el-form-item label="联系方式"><el-input v-model="employeeFilter.mobilePhone" /></el-form-item>
+            <el-form-item label="联系方式匹配"><el-radio-group v-model="employeeFilter.mobileExact"><el-radio-button :label="false">模糊</el-radio-button><el-radio-button :label="true">精确</el-radio-button></el-radio-group></el-form-item>
             <el-form-item label="操作"><div class="filter-actions"><el-button type="primary" @click="loadEmployees">查询</el-button><el-button @click="resetEmployeeFilter">重置</el-button></div></el-form-item>
           </el-form>
-          <el-table :data="employees" stripe class="data-table" @row-click="openEmployee"><el-table-column prop="employeeCode" label="工号" /><el-table-column prop="fullName" label="姓名" /><el-table-column prop="departmentName" label="部门" /><el-table-column prop="positionName" label="岗位" /><el-table-column prop="mobilePhone" label="电话" /><el-table-column prop="bankName" label="开户银行" /><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteEmployee(scope.row.id)">删除</el-button></template></el-table-column></el-table>
+          <div class="action-row"><el-button @click="downloadEmployeeTemplate">下载导入模板</el-button><el-upload :show-file-list="false" accept=".xlsx" :http-request="importEmployees"><el-button>批量导入</el-button></el-upload></div><el-table :data="employees" stripe class="data-table" @row-click="openEmployee"><el-table-column prop="employeeCode" label="工号" /><el-table-column prop="fullName" label="姓名" /><el-table-column prop="departmentName" label="部门" /><el-table-column prop="positionName" label="岗位" /><el-table-column prop="baseSalary" label="基本薪资" /><el-table-column prop="mobilePhone" label="电话" /><el-table-column label="身份证号"><template #default="{ row }">{{ mask(row.idCardNo) }}</template></el-table-column><el-table-column label="银行卡号"><template #default="{ row }">{{ mask(row.bankAccountNo) }}</template></el-table-column><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteEmployee(scope.row.id)">删除</el-button></template></el-table-column></el-table>
         </template>
       </section>
 
@@ -183,7 +189,7 @@
         <div class="topline"><div><p class="page-eyebrow">Recruitment</p><h2>招聘后台</h2></div><el-button @click="loadRecruitment">刷新</el-button></div>
         <div class="sub-tabs"><button :class="{ active: recruitmentMode === 'jobCreate' }" @click="showCreateJob">新增岗位</button><button :class="{ active: recruitmentMode === 'jobQuery' }" @click="recruitmentMode = 'jobQuery'">查询岗位</button><button :class="{ active: recruitmentMode === 'jobEdit' }" @click="recruitmentMode = 'jobEdit'">修改岗位</button><button :class="{ active: recruitmentMode === 'candidates' }" @click="recruitmentMode = 'candidates'">候选人信息</button></div>
         <template v-if="recruitmentMode === 'jobCreate' || recruitmentMode === 'jobEdit'">
-          <el-form :model="jobForm" label-position="top" class="form-grid"><el-form-item label="岗位名称"><el-input v-model="jobForm.jobTitle" /></el-form-item><el-form-item label="岗位编码"><el-input v-model="jobForm.jobCode" /></el-form-item><el-form-item label="招聘部门"><el-select v-model="jobForm.departmentId" filterable placeholder="从数据库部门中选择" @change="syncJobDepartmentName"><el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" /></el-select></el-form-item><el-form-item label="工作地点"><el-input v-model="jobForm.workLocation" /></el-form-item><el-form-item label="岗位类型"><el-input v-model="jobForm.jobType" /></el-form-item><el-form-item label="招聘人数"><el-input-number v-model="jobForm.headcount" :min="1" /></el-form-item><el-form-item label="薪资范围"><el-input v-model="jobForm.salaryRange" /></el-form-item><el-form-item label="状态"><el-select v-model="jobForm.status"><el-option label="开放" :value="1" /><el-option label="关闭" :value="0" /></el-select></el-form-item><el-form-item label="岗位职责" class="wide"><el-input v-model="jobForm.responsibilities" type="textarea" :rows="3" /></el-form-item><el-form-item label="任职要求" class="wide"><el-input v-model="jobForm.requirements" type="textarea" :rows="3" /></el-form-item></el-form>
+          <el-form :model="jobForm" label-position="top" class="form-grid"><el-form-item label="岗位名称"><el-input v-model="jobForm.jobTitle" /></el-form-item><el-form-item label="岗位编码"><el-input v-model="jobForm.jobCode" /></el-form-item><el-form-item label="招聘部门"><el-select v-model="jobForm.departmentId" filterable placeholder="从数据库部门中选择" @change="syncJobDepartmentName"><el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" /></el-select></el-form-item><el-form-item label="工作地点"><el-input v-model="jobForm.workLocation" /></el-form-item><el-form-item label="岗位类型"><el-input v-model="jobForm.jobType" /></el-form-item><el-form-item label="招聘人数"><el-input-number v-model="jobForm.headcount" :min="1" /></el-form-item><el-form-item label="薪资范围"><el-input v-model="jobForm.salaryRange" /></el-form-item><el-form-item label="默认加班单价（元/小时）"><el-input-number v-model="jobForm.defaultOvertimeRate" :min="0" :precision="2" /></el-form-item><el-form-item label="状态"><el-select v-model="jobForm.status"><el-option label="开放" :value="1" /><el-option label="关闭" :value="0" /></el-select></el-form-item><el-form-item label="岗位职责" class="wide"><el-input v-model="jobForm.responsibilities" type="textarea" :rows="3" /></el-form-item><el-form-item label="任职要求" class="wide"><el-input v-model="jobForm.requirements" type="textarea" :rows="3" /></el-form-item></el-form>
           <div class="action-row"><el-button type="primary" @click="saveJob">{{ recruitmentMode === 'jobCreate' ? '新增岗位' : '保存修改' }}</el-button><el-button @click="resetJobForm">清空</el-button></div>
         </template>
         <template v-if="recruitmentMode === 'jobQuery'">
@@ -214,6 +220,13 @@
       <div v-if="selectedProcessTemplate" class="template-preview"><strong>{{ selectedProcessTemplate.templateName }}</strong><span>{{ templateStageSummary(selectedProcessTemplate) }}</span></div>
       <template #footer><el-button @click="templateDialogVisible = false">取消</el-button><el-button type="primary" :loading="startingInterview" @click="confirmStartCandidateInterview">发起面试</el-button></template>
     </el-dialog>
+    <el-dialog v-model="employeeImportVisible" title="员工导入结果" width="min(680px, calc(100vw - 32px))">
+      <el-table :data="employeeImportRows" max-height="420">
+        <el-table-column prop="row" label="行号" width="80" />
+        <el-table-column label="结果" width="90"><template #default="{ row }"><el-tag :type="row.success ? 'success' : 'danger'">{{ row.success ? '成功' : '失败' }}</el-tag></template></el-table-column>
+        <el-table-column prop="message" label="明细" min-width="260" />
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
@@ -221,8 +234,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { authApi, hrApi, interviewApi, recruitmentApi, siteContentApi } from '../services/api'
-import { readSessionUser } from '../utils/session'
+import { authApi, downloadBlob, hrApi, interviewApi, recruitmentApi, siteContentApi } from '../services/api'
+import { readSessionUser, writeSessionUser } from '../utils/session'
 import { isStrongPassword, strongPasswordMessage } from '../utils/password'
 
 const router = useRouter()
@@ -236,6 +249,8 @@ const tabs = computed(() => {
     { key: 'departments', label: '部门', to: '/admin/departments' },
     { key: 'employees', label: '员工', to: '/admin/employees' },
     { key: 'recruitment', label: '招聘', to: '/admin/recruitment/jobs' },
+    { key: 'payroll', label: '薪资计算', to: '/admin/payroll' },
+    { key: 'statistics', label: '员工统计', to: '/admin/statistics' },
   ]
   if (isItAdmin.value || isHrAdmin.value) {
     base.splice(3, 0, { key: 'content', label: '站点内容', to: '/admin/content' })
@@ -259,6 +274,8 @@ const users = ref([])
 const auditLogs = ref([])
 const processTemplates = ref([])
 const templateDialogVisible = ref(false)
+const employeeImportVisible = ref(false)
+const employeeImportRows = ref([])
 const selectedTemplateId = ref(null)
 const selectedInterviewCandidate = ref(null)
 const startingInterview = ref(false)
@@ -266,11 +283,11 @@ const consoleReady = ref(false)
 
 const userForm = reactive({ id: null, username: '', displayName: '', roleCode: 'HR_USER', status: 1, mobilePhone: '', email: '', newPassword: '' })
 const departmentForm = reactive({ id: null, departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '', sortOrder: 0, status: 1 })
-const employeeForm = reactive({ id: null, employeeCode: '', fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' })
-const jobForm = reactive({ id: null, jobTitle: '', jobCode: '', departmentId: null, departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 })
+const employeeForm = reactive({ id: null, employeeCode: '', fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', jobId: null, baseSalary: null, salaryChangeReason: '', overtimeRate: null, departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '', dismissalReason: null, dismissalDate: null })
+const jobForm = reactive({ id: null, jobTitle: '', jobCode: '', departmentId: null, departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', defaultOvertimeRate: 0, status: 1 })
 const auditFilter = reactive({ moduleCode: '', actionCode: '', keyword: '' })
 const departmentFilter = reactive({ parentDepartmentId: null, status: null, keyword: '' })
-const employeeFilter = reactive({ departmentId: null, employmentStatus: null, keyword: '' })
+const employeeFilter = reactive({ departmentId: null, employmentStatus: null, name: '', employeeCode: '', mobilePhone: '', mobileExact: false, keyword: '' })
 const jobFilter = reactive({ status: null, departmentName: '', jobType: '', keyword: '' })
 const candidateFilter = reactive({ jobId: null, status: '', interviewStageStatus: '', keyword: '' })
 const contentForm = reactive({ id: null, type: 'announcement', title: '', summary: '', content: '', cover: '', published: false, publishedAt: '' })
@@ -355,12 +372,13 @@ function localizeAction(value) { return actionLabels[value] || value || '-' }
 function localizeTarget(value) { return targetLabels[value] || value || '-' }
 function localizeDetail(value) {
   if (!value) return '-'
-  return Object.entries({ ...roleLabels, ...actionLabels, ...targetLabels, ...detailLabels }).reduce((text, [key, label]) => String(text).replaceAll(key, label), value)
+  const labels = { ...roleLabels, ...actionLabels, ...targetLabels, ...detailLabels }
+  return labels[String(value)] || String(value)
 }
-async function loadSession() { try { const response = await authApi.getSession(); sessionUser.value = response.data; localStorage.setItem('session-user', JSON.stringify(response.data)) } catch (error) { fail(error); router.push('/login') } }
+async function loadSession() { try { const response = await authApi.getSession(); sessionUser.value = response.data; writeSessionUser(response.data) } catch (error) { fail(error); router.push('/login') } }
 async function loadDashboard() { try { Object.assign(dashboard, (await hrApi.getDashboard()).data) } catch (error) { fail(error) } }
 async function loadDepartments() { try { departments.value = (await hrApi.listDepartments(cleanParams(departmentFilter))).data } catch (error) { fail(error) } }
-async function loadEmployees() { try { employees.value = (await hrApi.listEmployees(cleanParams(employeeFilter))).data } catch (error) { fail(error) } }
+async function loadEmployees() { try { employees.value = (await hrApi.listAllEmployees(cleanParams(employeeFilter))).data } catch (error) { fail(error) } }
 async function loadContent() { try { contentItems.value = (await siteContentApi.listAdmin()).data || [] } catch (error) { fail(error) } }
 async function loadJobs() { try { jobs.value = (await recruitmentApi.listAdminJobs(cleanParams(jobFilter))).data } catch (error) { fail(error) } }
 async function loadCandidates() { try { candidates.value = (await recruitmentApi.listCandidates(cleanParams(candidateFilter))).data } catch (error) { fail(error) } }
@@ -383,7 +401,7 @@ async function loadCurrentTab() {
       await Promise.all([loadDepartments(), loadEmployees()])
       break
     case 'employees':
-      await Promise.all([loadEmployees(), loadDepartments()])
+      await Promise.all([loadEmployees(), loadDepartments(), loadJobs()])
       break
     case 'content':
       await loadContent()
@@ -397,13 +415,16 @@ async function loadCurrentTab() {
 async function loadProcessTemplates() { try { processTemplates.value = (await interviewApi.listProcessTemplates({ status: 1 })).data } catch (error) { fail(error) } }
 async function saveDepartment() { try { await hrApi.saveDepartment({ ...departmentForm }); ElMessage.success('部门已保存'); await loadAll() } catch (error) { fail(error) } }
 async function saveEmployee() { try { await hrApi.saveEmployee({ ...employeeForm }); ElMessage.success('员工已保存'); await loadAll() } catch (error) { fail(error) } }
+async function downloadEmployeeTemplate() { try { downloadBlob(await hrApi.employeeTemplate(), 'employee-import-template.xlsx') } catch (error) { fail(error) } }
+async function importEmployees({ file }) { try { const result = (await hrApi.importEmployees(file)).data; employeeImportRows.value = result.rows || []; employeeImportVisible.value = true; ElMessage.success(`导入完成：成功 ${result.successCount} 行，失败 ${result.failureCount} 行`); await loadEmployees() } catch (error) { fail(error) } }
+function mask(value) { if (!value) return '-'; const text = String(value); return text.length <= 4 ? '****' : `${text.slice(0, 3)}****${text.slice(-4)}` }
 async function saveContent() { try { const saved = (await siteContentApi.save({ ...contentForm })).data; Object.assign(contentForm, saved); ElMessage.success(contentForm.published ? '内容已发布' : '草稿已保存'); await loadContent() } catch (error) { fail(error) } }
 async function deleteContent(id) { try { await siteContentApi.remove(id); ElMessage.success('内容已删除'); if (contentForm.id === id) resetContentForm(); await loadContent() } catch (error) { fail(error) } }
 function resetContentForm() { Object.assign(contentForm, { id: null, type: 'announcement', title: '', summary: '', content: '', cover: '', published: false, publishedAt: '' }) }
 function editContent(row) { Object.assign(contentForm, row) }
 async function deleteDepartment(id) { try { await hrApi.deleteDepartment(id); ElMessage.success('部门已删除'); if (departmentForm.id === id) resetDepartmentForm(); await loadAll() } catch (error) { fail(error) } }
 async function deleteEmployee(id) { try { await hrApi.deleteEmployee(id); ElMessage.success('员工已删除'); if (employeeForm.id === id) resetEmployeeForm(); await loadAll() } catch (error) { fail(error) } }
-function resetJobForm() { Object.assign(jobForm, { id: null, jobTitle: '', jobCode: '', departmentId: null, departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', status: 1 }) }
+function resetJobForm() { Object.assign(jobForm, { id: null, jobTitle: '', jobCode: '', departmentId: null, departmentName: '', workLocation: '', jobType: '全职', headcount: 1, requirements: '', responsibilities: '', salaryRange: '', defaultOvertimeRate: 0, status: 1 }) }
 function showCreateJob() { resetJobForm(); recruitmentMode.value = 'jobCreate' }
 function syncJobDepartmentName(departmentId) { jobForm.departmentName = departments.value.find((item) => item.id === departmentId)?.departmentName || '' }
 function editJob(row) { Object.assign(jobForm, row); if (!jobForm.departmentId) { jobForm.departmentId = departments.value.find((item) => item.departmentName === row.departmentName)?.id || null } syncJobDepartmentName(jobForm.departmentId); recruitmentMode.value = 'jobEdit' }
@@ -411,13 +432,13 @@ async function saveJob() { try { syncJobDepartmentName(jobForm.departmentId); aw
 async function deleteJob(id) { try { await recruitmentApi.deleteJob(id); ElMessage.success('岗位已删除'); resetJobForm(); await loadRecruitment() } catch (error) { fail(error) } }
 function resetAuditFilter() { Object.assign(auditFilter, { moduleCode: '', actionCode: '', keyword: '' }); loadAuditLogs() }
 function resetDepartmentFilter() { Object.assign(departmentFilter, { parentDepartmentId: null, status: null, keyword: '' }); loadDepartments() }
-function resetEmployeeFilter() { Object.assign(employeeFilter, { departmentId: null, employmentStatus: null, keyword: '' }); loadEmployees() }
+function resetEmployeeFilter() { Object.assign(employeeFilter, { departmentId: null, employmentStatus: null, name: '', employeeCode: '', mobilePhone: '', mobileExact: false, keyword: '' }); loadEmployees() }
 function resetJobFilter() { Object.assign(jobFilter, { status: null, departmentName: '', jobType: '', keyword: '' }); loadJobs() }
 function resetCandidateFilter() { Object.assign(candidateFilter, { jobId: null, status: '', interviewStageStatus: '', keyword: '' }); loadCandidates() }
 function resetDepartmentForm() { Object.assign(departmentForm, { id: null, departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '', sortOrder: 0, status: 1 }) }
 function showCreateDepartment() { resetDepartmentForm(); departmentMode.value = 'create' }
 function editDepartment(row) { Object.assign(departmentForm, row); if (departmentForm.parentDepartmentId === departmentForm.id) departmentForm.parentDepartmentId = null; departmentMode.value = 'edit' }
-function resetEmployeeForm() { Object.assign(employeeForm, { id: null, employeeCode: '', fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '' }) }
+function resetEmployeeForm() { Object.assign(employeeForm, { id: null, employeeCode: '', fullName: '', idCardNo: '', mobilePhone: '', recruitmentMajor: '', positionName: '', jobId: null, baseSalary: null, salaryChangeReason: '', overtimeRate: null, departmentId: null, employmentStatus: 1, bankAccountNo: '', bankName: '', dismissalReason: null, dismissalDate: null }) }
 function showCreateEmployee() { resetEmployeeForm(); employeeMode.value = 'create' }
 function editEmployee(row) { Object.assign(employeeForm, row); employeeMode.value = 'edit' }
 function openUser(row) { router.push(`/admin/users/${row.id}`) }
@@ -511,9 +532,10 @@ onMounted(async () => {
   await loadCurrentTab()
 })
 watch(() => route.fullPath, () => {
-  syncRouteState()
   if (consoleReady.value) {
     void loadCurrentTab()
+  } else {
+    syncRouteState()
   }
 }, { immediate: true })
 
@@ -525,8 +547,7 @@ function syncRouteState() {
     const row = departments.value.find((item) => item.id === id)
     if (row) editDepartment(row)
   } else if (activeTab.value === 'employees') {
-    const row = employees.value.find((item) => item.id === id)
-    if (row) editEmployee(row)
+    void hrApi.getEmployee(id).then((response) => editEmployee(response.data)).catch(fail)
   } else if (activeTab.value === 'users') {
     const row = users.value.find((item) => item.id === id)
     if (row) editUser(row)

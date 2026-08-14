@@ -37,8 +37,9 @@ cp "$JAR_FILE" "$PACKAGE_DIR/backend/auto-hr.jar"
 cp -R "$FRONTEND_DIR/dist/." "$PACKAGE_DIR/frontend/"
 cp "$ROOT_DIR/.env.example" "$PACKAGE_DIR/.env.example"
 cp "$ROOT_DIR/scripts/start-release.sh" "$PACKAGE_DIR/start.sh"
+cp "$ROOT_DIR/scripts/install-release.sh" "$PACKAGE_DIR/install-systemd.sh"
 cp "$ROOT_DIR/scripts/auto-hr.service" "$PACKAGE_DIR/auto-hr.service"
-chmod +x "$PACKAGE_DIR/start.sh"
+chmod +x "$PACKAGE_DIR/start.sh" "$PACKAGE_DIR/install-systemd.sh"
 
 (
   cd "$RELEASE_DIR"

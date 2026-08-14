@@ -7,5 +7,5 @@ mkdir -p uploads logs
 
 exec java ${JAVA_OPTS:-} -jar "$APP_DIR/backend/auto-hr.jar" \
   --spring.profiles.active="${SPRING_PROFILES_ACTIVE:-prod}" \
-  --server.address="${SERVER_ADDRESS:-0.0.0.0}" \
-  --server.port="${SERVER_PORT:-8080}"
+  --server.address="${SERVER_ADDRESS:-127.0.0.1}" \
+  --server.port="${SERVER_PORT:-8081}"

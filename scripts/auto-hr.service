@@ -6,7 +6,9 @@ ConditionPathExists=/opt/auto-hr/.env
 
 [Service]
 Type=simple
-User=root
+User=autohr
+Group=autohr
+UMask=0077
 WorkingDirectory=/opt/auto-hr
 EnvironmentFile=/opt/auto-hr/.env
 Environment=SPRING_PROFILES_ACTIVE=prod

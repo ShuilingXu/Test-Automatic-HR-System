@@ -223,6 +223,11 @@ public class InterviewController {
                 PageQuery.of(page, pageSize)));
     }
 
+    @GetMapping("/hr/processes/{id}")
+    public ApiResponse<InterviewVO> getProcess(@PathVariable Long id) {
+        return ApiResponse.success(interviewService.getProcess(id));
+    }
+
     @GetMapping("/interviewee/process/{processId}")
     public ApiResponse<InterviewVO> getIntervieweeProcess(Authentication authentication,
                                                           @PathVariable Long processId) {
@@ -298,9 +303,8 @@ public class InterviewController {
     }
 
     @PostMapping("/hr/video-complete/{processId}")
-    public ApiResponse<InterviewVO> completeVideo(@PathVariable Long processId,
-                                                    @RequestParam(required = false) String recordingPath) {
-        return ApiResponse.success(interviewService.completeVideoSession(processId, recordingPath));
+    public ApiResponse<InterviewVO> completeVideo(@PathVariable Long processId) {
+        return ApiResponse.success(interviewService.completeVideoSession(processId));
     }
 
     @PostMapping("/interviewee/video-complete/{processId}")
@@ -312,10 +316,11 @@ public class InterviewController {
 
     @PostMapping("/hr/video-recording/{processId}")
     public ApiResponse<VideoSignalVO> uploadHrRecording(@PathVariable Long processId,
-                                                         @RequestParam String originalFileName,
-                                                         @RequestParam(required = false) String contentType,
-                                                         @RequestParam("file") MultipartFile file) {
-        return ApiResponse.success(interviewService.uploadHrRecording(processId, originalFileName, contentType, file));
+                                                          @RequestParam(required = false) Long processStageId,
+                                                          @RequestParam String originalFileName,
+                                                          @RequestParam(required = false) String contentType,
+                                                          @RequestParam("file") MultipartFile file) {
+        return ApiResponse.success(interviewService.uploadHrRecording(processId, processStageId, originalFileName, contentType, file));
     }
 
     @PostMapping("/hr/video-offer/{processId}")
@@ -361,11 +366,12 @@ public class InterviewController {
     @PostMapping("/interviewee/video-recording/{processId}")
     public ApiResponse<VideoSignalVO> uploadRecording(Authentication authentication,
                                                        @PathVariable Long processId,
+                                                       @RequestParam(required = false) Long processStageId,
                                                        @RequestParam String originalFileName,
                                                        @RequestParam(required = false) String contentType,
                                                        @RequestParam("file") MultipartFile file) {
         SessionUserVO current = currentUser(authentication);
-        return ApiResponse.success(interviewService.uploadIntervieweeRecording(processId, current.getId(), current.getDisplayName(), originalFileName, contentType, file));
+        return ApiResponse.success(interviewService.uploadIntervieweeRecording(processId, processStageId, current.getId(), current.getDisplayName(), originalFileName, contentType, file));
     }
 
     @PostMapping("/interviewee/ai-recording/{processId}")
@@ -491,5 +497,6 @@ public class InterviewController {
         SessionUserVO current = currentUser(authentication);
         request.setApproverUserId(current.getId());
         request.setApproverName(current.getDisplayName());
+        request.setApproverRoleCode(current.getRoleCode());
     }
 }

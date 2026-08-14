@@ -56,6 +56,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi, recruitmentApi } from '../services/api'
+import { writeSessionUser } from '../utils/session'
 
 const router = useRouter()
 const jobs = ref([])
@@ -84,7 +85,7 @@ async function loadSession() {
     form.fullName = user.displayName || ''
     form.mobilePhone = user.mobilePhone || ''
     form.email = user.email || ''
-    localStorage.setItem('session-user', JSON.stringify(user))
+    writeSessionUser(user)
   } catch (error) {
     fail(error)
     router.push('/login')
@@ -92,8 +93,17 @@ async function loadSession() {
 }
 async function submit() {
   try {
-    const applyResponse = await recruitmentApi.apply({ ...form })
-    let candidate = applyResponse.data
+    let candidate
+    try {
+      candidate = (await recruitmentApi.apply({ ...form })).data
+    } catch (error) {
+      if (!String(error.message || '').includes('重复投递') && !String(error.message || '').includes('已投递')) throw error
+      const existing = (await recruitmentApi.listMyCandidates({ page: 1, pageSize: 200 })).data
+        .find((item) => Number(item.jobId) === Number(form.jobId))
+      if (!existing) throw error
+      candidate = existing
+      ElMessage.info('已找到该岗位的报名记录，将继续补传简历')
+    }
     if (resumeFile.value) {
       const resumeResponse = await recruitmentApi.uploadResume(candidate.id, resumeFile.value)
       candidate = { ...candidate, resumeFileId: resumeResponse.data.id, resumeFileName: resumeResponse.data.originalFileName }

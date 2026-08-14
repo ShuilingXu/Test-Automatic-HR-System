@@ -74,7 +74,10 @@ public class DatabaseConfig {
             // simultaneous HR/candidate recording uploads from failing with SQLITE_BUSY.
             dataSource.setMaximumPoolSize(1);
             dataSource.setMinimumIdle(1);
-            dataSource.setConnectionInitSql("PRAGMA busy_timeout=10000");
+            // Use driver properties instead of a multi-statement initialization SQL,
+            // which is not consistently supported by SQLite JDBC implementations.
+            dataSource.addDataSourceProperty("busy_timeout", "10000");
+            dataSource.addDataSourceProperty("foreign_keys", "true");
         }
         return dataSource;
     }
@@ -105,7 +108,7 @@ public class DatabaseConfig {
         }
         return switch (type) {
             case SQLITE -> "jdbc:sqlite:autohr.db";
-            case MYSQL -> "jdbc:mysql://localhost:3306/autohr?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true";
+            case MYSQL -> "jdbc:mysql://localhost:3306/autohr?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=true";
             case PGSQL -> "jdbc:postgresql://localhost:5432/autohr";
         };
     }

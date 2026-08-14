@@ -4,6 +4,7 @@ import lombok.Data;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 @Data
 public class EmployeeVO {
@@ -26,6 +27,13 @@ public class EmployeeVO {
     private Integer employmentStatus;
     private String sourceChannel;
     private String notes;
+    private Long jobId;
+    private String jobTitle;
+    private BigDecimal baseSalary;
+    private Integer salaryConfirmed;
+    private BigDecimal overtimeRate;
+    private String dismissalReason;
+    private LocalDate dismissalDate;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

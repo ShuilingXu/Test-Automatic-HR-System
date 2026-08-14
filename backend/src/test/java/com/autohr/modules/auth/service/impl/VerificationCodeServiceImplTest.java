@@ -14,6 +14,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -71,7 +72,7 @@ class VerificationCodeServiceImplTest {
     void passwordResetHidesDeliveryFailureAfterCodeIsStored() {
         when(securityStore.replaceVerificationCode(eq("password-reset"), eq("email:person@example.com"),
                 anyString(), org.mockito.ArgumentMatchers.anyLong(), eq(60), eq(300))).thenReturn(true);
-        when(systemConfigService.loadConfig(org.mockito.ArgumentMatchers.<String[]>any())).thenReturn(Map.of());
+        when(systemConfigService.loadConfig(org.mockito.ArgumentMatchers.any(String[].class))).thenReturn(Map.of());
         VerificationCodeServiceImpl service = createService(new SyncTaskExecutor());
 
         assertDoesNotThrow(() -> service.sendPasswordResetCode(
@@ -96,6 +97,26 @@ class VerificationCodeServiceImplTest {
         verify(securityStore, never()).replaceVerificationCode(anyString(), anyString(), anyString(),
                 org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyInt(),
                 org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
+    void emailDeliveryRejectsConfigurationWithoutStartTls() {
+        when(securityStore.replaceVerificationCode(eq("register"), eq("email:person@example.com"),
+                anyString(), org.mockito.ArgumentMatchers.anyLong(), eq(60), eq(300))).thenReturn(true);
+        when(systemConfigService.loadConfig(org.mockito.ArgumentMatchers.any(String[].class))).thenReturn(Map.of(
+                "SMTP_HOST", "smtp.example.com",
+                "SMTP_PORT", "587",
+                "SMTP_USERNAME", "sender@example.com",
+                "SMTP_PASSWORD", "secret",
+                "SMTP_STARTTLS_ENABLED", "false"
+        ));
+        VerificationCodeServiceImpl service = createService(new SyncTaskExecutor());
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.sendRegisterCode(null, "person@example.com", "captcha-id", "captcha-code"));
+
+        assertTrue(error.getMessage().contains("STARTTLS"));
+        verify(securityStore).discardVerificationCode(eq("register"), eq("email:person@example.com"), anyString());
     }
 
     private VerificationCodeServiceImpl createService(TaskExecutor executor) {

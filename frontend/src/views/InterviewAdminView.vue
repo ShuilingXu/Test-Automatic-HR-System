@@ -84,7 +84,7 @@
         <template v-if="configTab !== 'models'">
           <div class="config-panel-head"><div><h3>{{ currentConfigGroup.title }}</h3><p>{{ currentConfigGroup.description }}</p></div></div>
           <el-form label-position="top" class="config-form-grid">
-            <el-form-item v-for="field in currentConfigGroup.fields" :key="field.key" :label="field.label">
+            <el-form-item v-for="field in currentConfigFields" :key="field.key" :label="field.label">
               <el-select v-if="field.options" v-model="systemConfig[field.key]" :placeholder="field.placeholder || '请选择'">
                 <el-option v-for="option in field.options" :key="option.value" :label="option.label" :value="option.value" />
               </el-select>
@@ -247,6 +247,11 @@
               <div class="video-box"><span>HR本地视频</span><video ref="hrLocalVideo" autoplay muted playsinline></video></div>
               <div class="video-box"><span>面试者远端视频</span><video ref="hrRemoteVideo" autoplay playsinline></video></div>
             </div>
+            <div v-if="hrRecording.pending || hrRecording.uploading || hrRecording.error || hrRecording.limitReached" class="recording-recovery">
+              <small>{{ hrRecording.uploading ? 'HR 录像上传中' : (hrRecording.error || hrRecording.notice || `有 ${formatRecordingSize(hrRecording.byteSize)} HR 录像等待上传`) }}</small>
+              <el-button v-if="hrRecording.pending" size="small" plain :loading="hrRecording.uploading" @click="retryHrRecordingUpload">重试上传</el-button>
+              <el-button v-else-if="hrRecording.error" size="small" plain @click="retryHrRecordingStart">重试录制</el-button>
+            </div>
             <div class="video-summary-box">
               <div class="summary-status-row">
                 <span>音频转写/会议概要状态：{{ summaryStatusLabel(selectedProcess.summaryStatus) }}</span>
@@ -332,16 +337,24 @@
               <p>切屏次数：{{ selectedProcess.antiCheatSwitchCount || 0 }} / {{ selectedProcess.antiCheatSwitchLimit || 5 }}</p>
             </div>
             <el-form v-if="canApproveAi || canApproveVideo || canApproveOnsite" label-position="top" class="onboarding-department-form">
+              <el-form-item v-if="isFinalApproval(selectedProcess)" label="入职岗位">
+                <el-select v-model="onboardingJobId" filterable placeholder="选择入职岗位">
+                  <el-option v-for="item in jobs" :key="item.id" :label="`${item.jobCode} · ${item.jobTitle}`" :value="item.id" />
+                </el-select>
+              </el-form-item>
               <el-form-item label="入职部门">
                 <el-select v-model="onboardingDepartmentId" filterable :disabled="Boolean(selectedProcess.jobDepartmentId)" placeholder="选择入职部门">
                   <el-option v-for="item in departments" :key="item.id" :label="item.departmentName" :value="item.id" />
                 </el-select>
               </el-form-item>
+              <el-form-item v-if="isFinalApproval(selectedProcess)" label="基本薪资（元/月）">
+                <el-input-number v-model="onboardingBaseSalary" :min="0.01" :precision="2" :step="500" />
+              </el-form-item>
             </el-form>
             <div class="action-button-grid">
               <el-button v-if="canApproveAi" type="primary" :loading="isProcessActionLoading(selectedProcess.id, 'approve-ai-1')" :disabled="processActionLoading" @click="approveAi(selectedProcess, 1)">AI审批通过</el-button>
               <el-button v-if="canApproveAi" type="danger" plain :loading="isProcessActionLoading(selectedProcess.id, 'approve-ai-0')" :disabled="processActionLoading" @click="approveAi(selectedProcess, 0)">AI审批不通过</el-button>
-              <el-button v-if="canStartVideo" @click="startHrVideoCall">开始视频面</el-button>
+              <el-button v-if="canStartVideo" :loading="startingHrVideo" :disabled="startingHrVideo" @click="startHrVideoCall">开始视频面</el-button>
               <el-button v-if="canStopVideo" @click="stopHrRecording">结束并上传录制</el-button>
               <el-button v-if="canApproveVideo" :loading="isProcessActionLoading(selectedProcess.id, 'approve-video-1')" :disabled="processActionLoading" @click="approveVideo(1)">{{ selectedProcess.stageName || '视频面试' }}通过</el-button>
               <el-button v-if="canApproveVideo" :loading="isProcessActionLoading(selectedProcess.id, 'approve-video-0')" :disabled="processActionLoading" @click="approveVideo(0)">{{ selectedProcess.stageName || '视频面试' }}不通过</el-button>
@@ -368,6 +381,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { authApi, hrApi, interviewApi, recruitmentApi, systemApi } from '../services/api'
 import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, playVideo, requestCameraAndMicrophone } from '../utils/media'
+import { appendRecordingChunk, beginRecordingSession, buildRecordingFile, deleteRecordingSession, formatRecordingSize, getRecordingSession, MAX_RECORDING_UPLOAD_BYTES, RECORDING_STOP_THRESHOLD_BYTES, RECORDING_WRITE_HIGH_WATER_BYTES, RECORDING_WRITE_LOW_WATER_BYTES, updateRecordingSession } from '../utils/recordingStore'
 import { readSessionUser } from '../utils/session'
 
 const sessionUser = ref(readSessionUser())
@@ -392,6 +406,8 @@ const selectedCandidate = ref(null)
 const videoActive = ref(false)
 const processRemark = ref('')
 const onboardingDepartmentId = ref(null)
+const onboardingJobId = ref(null)
+const onboardingBaseSalary = ref(null)
 const savingRemark = ref(false)
 const startingProcess = ref(false)
 const processAction = reactive({ processId: null, type: '' })
@@ -406,21 +422,30 @@ const retainOnBlankConfigKeys = new Set([
 
 const hrLocalVideo = ref(null)
 const hrRemoteVideo = ref(null)
+const startingHrVideo = ref(false)
+const hrRecording = reactive({ starting: false, uploading: false, pending: false, limitReached: false, byteSize: 0, notice: '', error: '' })
 let hrLocalStream = null
 let componentDisposed = false
 let hrPeer = null
 let hrPollTimer = null
 let hrRecorder = null
-let hrRecordedChunks = []
+let hrRecorderStopPromise = null
+let hrRecordingSessionKey = null
+let hrRecordingChunkWrites = Promise.resolve()
+let hrRecordingChunkWriteError = null
+let hrRecordingPendingWriteBytes = 0
 let addedIntervieweeIce = new Set()
 let hrRemoteStream = null
 let pendingIntervieweeIce = []
-let hrRecordingStopInProgress = false
+let hrRecordingUploadPromise = null
 let handledHrRecordingEndSignal = ''
 let hrRecordingEndTimer = null
 let hrVideoPollInProgress = false
+let hrVideoProcessStageId = null
 let processDetailLoadGeneration = 0
 let adminLoadGeneration = 0
+let videoSummaryRetryGeneration = 0
+let videoSummaryRetryDelay = null
 
 const kbForm = reactive({ id: null, knowledgeBaseName: '', techCategory: '', jobCategory: '', status: 1 })
 const itemForm = reactive({ id: null, knowledgeBaseId: null, knowledgePoint: '', knowledgeContent: '', status: 1 })
@@ -486,6 +511,9 @@ const configGroups = {
   ] },
 }
 const currentConfigGroup = computed(() => configGroups[configTab.value] || configGroups.notifications)
+const currentConfigFields = computed(() => currentConfigGroup.value.fields.filter((field) => (
+  field.key !== 'S3_INTERNAL_ENDPOINT' || systemConfig.S3_INTERNAL_ENDPOINT_ENABLED === 'true'
+)))
 const interviewerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'INTERVIEWER')?.apiKeyMasked || '未配置')
 const scorerKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'SCORER')?.apiKeyMasked || '未配置')
 const resumeReviewKeyLabel = computed(() => llmConfigs.value.find((item) => item.modelRole === 'RESUME_REVIEW')?.apiKeyMasked || '未配置，默认回退评分模型')
@@ -608,7 +636,6 @@ async function loadAll() {
 async function selectKnowledgeBase(row) { itemForm.knowledgeBaseId = row.id; knowledgeItems.value = (await interviewApi.listKnowledgeItems({ knowledgeBaseId: row.id })).data }
 async function openKnowledgeBase(row) { await router.push(`/interview/hr/knowledge-bases/${row.id}`) }
 function openWeight(row) { Object.assign(weightForm, row); router.push(`/interview/hr/weights/${row.id}`) }
-function openLlmConfig(row) { editLlmConfig(row) }
 function openProcess(row) { router.push(`/interview/hr/processes/${row.id}`) }
 async function saveKnowledgeBase() { try { await interviewApi.saveKnowledgeBase({ ...kbForm }); ElMessage.success('知识库已保存'); await loadAll() } catch (error) { fail(error) } }
 async function confirmDelete(message) { await ElMessageBox.confirm(message, '确认删除', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }) }
@@ -621,11 +648,35 @@ async function deleteKnowledgeItem(id) { try { await confirmDelete('删除后无
 async function saveWeight() { try { await interviewApi.saveJobKnowledgeWeight({ ...weightForm }); ElMessage.success('权重已保存'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { fail(error) } }
 async function deleteWeight(id) { try { await confirmDelete('删除后无法恢复该岗位知识库权重。'); await interviewApi.deleteJobKnowledgeWeight(id); ElMessage.success('权重已删除'); weights.value = (await interviewApi.listJobKnowledgeWeights({ jobId: weightForm.jobId })).data } catch (error) { if (error !== 'cancel' && error !== 'close') fail(error) } }
 async function saveRoleLlmConfig(form, role) { try { await interviewApi.saveLlmConfig({ ...form, modelRole: role }); ElMessage.success('LLM配置已保存'); form.apiKey = ''; await loadAll() } catch (error) { fail(error) } }
-async function deleteLlmConfig(id) { try { await confirmDelete('删除后无法恢复该模型配置。'); await interviewApi.deleteLlmConfig(id); ElMessage.success('LLM配置已删除'); await loadAll() } catch (error) { if (error !== 'cancel' && error !== 'close') fail(error) } }
 function systemConfigPayload() {
   return Object.fromEntries(Object.entries(systemConfig).filter(([key, value]) => !retainOnBlankConfigKeys.has(key) || String(value || '').trim()))
 }
-async function saveSystemConfig() { savingSystemConfig.value = true; try { await systemApi.saveConfig(systemConfigPayload()); ElMessage.success('系统配置已保存'); Object.assign(systemConfig, (await systemApi.getConfig()).data) } catch (error) { fail(error) } finally { savingSystemConfig.value = false } }
+async function saveSystemConfig() {
+  if (configTab.value === 'storage' && systemConfig.S3_ENABLED === 'true') {
+    const requiredFields = [
+      ['S3_ENDPOINT', '请填写外网 S3 Endpoint'],
+      ['S3_REGION', '请填写 S3 Region'],
+      ['S3_BUCKET', '请填写 S3 Bucket'],
+      ['S3_ACCESS_KEY_ID', '请填写 S3 Access Key ID'],
+    ]
+    const missing = requiredFields.find(([key]) => !String(systemConfig[key] || '').trim())
+    if (missing) { ElMessage.warning(missing[1]); return }
+    if (systemConfig.S3_INTERNAL_ENDPOINT_ENABLED === 'true' && !String(systemConfig.S3_INTERNAL_ENDPOINT || '').trim()) {
+      ElMessage.warning('启用内网上传后必须填写内网上传 Endpoint')
+      return
+    }
+  }
+  savingSystemConfig.value = true
+  try {
+    await systemApi.saveConfig(systemConfigPayload())
+    ElMessage.success('系统配置已保存')
+    Object.assign(systemConfig, (await systemApi.getConfig()).data)
+  } catch (error) {
+    fail(error)
+  } finally {
+    savingSystemConfig.value = false
+  }
+}
 function createTemplateForm() { return { id: null, version: null, templateName: '', description: '', status: 1, stages: [] } }
 function createTemplateStage() { return { key: `${Date.now()}-${Math.random()}`, stageName: '', stageType: 'AI', knowledgeBaseId: null } }
 function resetTemplateForm() { Object.assign(templateForm, createTemplateForm()) }
@@ -659,6 +710,7 @@ async function startProcess() {
   if (!processForm.recruitmentCandidateId) { ElMessage.warning('请先选择候选人投递记录'); return }
   if (!processForm.intervieweeUserId) { ElMessage.warning('未匹配到候选人账号'); return }
   if (!processForm.jobId) { ElMessage.warning('投递记录未绑定岗位'); return }
+  if (processForm.aiFollowUpThreshold > processForm.aiThresholdScore) { ElMessage.warning('低分追问阈值不能高于 AI 通过阈值'); return }
   if (processForm.aiMaxQuestionRounds < processForm.aiMinQuestionRounds) { ElMessage.warning('AI最多问答轮数不能小于最少问答轮数'); return }
   startingProcess.value = true
   try {
@@ -697,7 +749,11 @@ async function decisionPayload(process, approved) {
     if (!isProcessDetail.value) await router.push(`/interview/hr/processes/${process.id}`)
     return null
   }
-  return { approved, departmentId }
+  if (isFinalApproval(process) && (!onboardingJobId.value || Number(onboardingBaseSalary.value) <= 0)) {
+    ElMessage.warning('最终审批通过前请选择入职岗位并填写正数基本薪资')
+    return null
+  }
+  return { approved, departmentId, jobId: isFinalApproval(process) ? onboardingJobId.value : null, baseSalary: isFinalApproval(process) ? onboardingBaseSalary.value : null }
 }
 function isProcessActionLoading(processId, type) {
   return processAction.processId === processId && processAction.type === type
@@ -766,25 +822,52 @@ async function saveProcessRemark() {
   } catch (error) { fail(error) } finally { savingRemark.value = false }
 }
 
+function cancelVideoSummaryRetry() {
+  videoSummaryRetryGeneration += 1
+  if (videoSummaryRetryDelay) {
+    clearTimeout(videoSummaryRetryDelay.timer)
+    const resolve = videoSummaryRetryDelay.resolve
+    videoSummaryRetryDelay = null
+    resolve(false)
+  }
+  retryingVideoSummary.value = false
+}
+
+function waitForVideoSummaryRetry(generation, delay) {
+  if (componentDisposed || generation !== videoSummaryRetryGeneration) return Promise.resolve(false)
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (videoSummaryRetryDelay?.timer === timer) videoSummaryRetryDelay = null
+      resolve(!componentDisposed && generation === videoSummaryRetryGeneration)
+    }, delay)
+    videoSummaryRetryDelay = { timer, resolve }
+  })
+}
+
 async function retryVideoSummary() {
-  if (!selectedProcess.value || retryingVideoSummary.value) return
+  if (!selectedProcess.value || retryingVideoSummary.value || componentDisposed) return
+  const processId = selectedProcess.value.id
+  const generation = ++videoSummaryRetryGeneration
   retryingVideoSummary.value = true
   try {
-    selectedProcess.value = (await interviewApi.retryVideoSummary(selectedProcess.value.id)).data
+    const retryResponse = await interviewApi.retryVideoSummary(processId)
+    if (componentDisposed || generation !== videoSummaryRetryGeneration || selectedProcess.value?.id !== processId) return
+    selectedProcess.value = retryResponse.data
     ElMessage.success(selectedProcess.value.summaryStatus === 'PENDING_MERGE' ? '已开始重新合并录像并生成概要' : '已开始重新生成转写与会议概要')
     for (let attempt = 0; attempt < 90; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      const rows = (await interviewApi.listProcesses()).data
-      const latest = rows.find((item) => item.id === selectedProcess.value.id)
+      if (!await waitForVideoSummaryRetry(generation, 2000)) return
+      const latest = (await interviewApi.getProcess(processId)).data
+      if (componentDisposed || generation !== videoSummaryRetryGeneration || selectedProcess.value?.id !== processId) return
       if (latest) selectedProcess.value = latest
       if (!['PENDING_MERGE', 'PENDING', 'PROCESSING'].includes(latest?.summaryStatus)) break
     }
+    if (componentDisposed || generation !== videoSummaryRetryGeneration || selectedProcess.value?.id !== processId) return
     if (selectedProcess.value.summaryStatus === 'COMPLETED') ElMessage.success('转写与会议概要已生成')
     else if (selectedProcess.value.summaryStatus?.startsWith('FAILED')) ElMessage.error(selectedProcess.value.summaryStatus)
   } catch (error) {
-    fail(error)
+    if (!componentDisposed && generation === videoSummaryRetryGeneration) fail(error)
   } finally {
-    retryingVideoSummary.value = false
+    if (generation === videoSummaryRetryGeneration) retryingVideoSummary.value = false
   }
 }
 
@@ -800,11 +883,16 @@ async function copyVideoJoinLink() {
 }
 
 async function startHrVideoCall() {
-  if (!selectedProcess.value) return
+  if (!selectedProcess.value || startingHrVideo.value || componentDisposed) return
+  const processId = selectedProcess.value.id
+  startingHrVideo.value = true
   try {
     await disconnectHrVideo()
-    const sessionResponse = await interviewApi.createVideoSession(selectedProcess.value.id)
+    if (componentDisposed) return
+    const sessionResponse = await interviewApi.createVideoSession(processId)
+    if (componentDisposed || selectedProcess.value?.id !== processId) return
     selectedProcess.value.videoJoinLink = sessionResponse.data?.videoJoinLink || selectedProcess.value.videoJoinLink
+    hrVideoProcessStageId = sessionResponse.data?.processStageId || selectedProcess.value.processStageId || null
     const stream = await requestCameraAndMicrophone()
     if (componentDisposed) {
       stream.getTracks().forEach((track) => track.stop())
@@ -813,7 +901,12 @@ async function startHrVideoCall() {
     hrLocalStream = stream
     hrLocalVideo.value.srcObject = hrLocalStream
     playVideo(hrLocalVideo.value)
-    hrPeer = createPeerConnection(await loadIceServers())
+    const iceServers = await loadIceServers()
+    if (componentDisposed || selectedProcess.value?.id !== processId) {
+      await disconnectHrVideo({ uploadRecording: false })
+      return
+    }
+    hrPeer = createPeerConnection(iceServers)
     addedIntervieweeIce = new Set()
     pendingIntervieweeIce = []
     hrLocalStream.getTracks().forEach((track) => hrPeer.addTrack(track, hrLocalStream))
@@ -826,19 +919,21 @@ async function startHrVideoCall() {
     }
     hrPeer.onicecandidate = async (event) => {
       if (event.candidate) {
-        await interviewApi.addHrIce(selectedProcess.value.id, { iceCandidate: JSON.stringify(event.candidate) })
+        await interviewApi.addHrIce(processId, { iceCandidate: JSON.stringify(event.candidate) })
       }
     }
     const offer = await hrPeer.createOffer()
     await hrPeer.setLocalDescription(offer)
-    await interviewApi.publishVideoOffer(selectedProcess.value.id, { offerSdp: JSON.stringify(offer) })
-    await interviewApi.hrJoin(selectedProcess.value.id)
+    await interviewApi.publishVideoOffer(processId, { offerSdp: JSON.stringify(offer) })
+    await interviewApi.hrJoin(processId)
+    if (componentDisposed || selectedProcess.value?.id !== processId) return
     videoActive.value = true
     hrPollTimer = setInterval(async () => {
-      if (hrVideoPollInProgress) return
+      if (componentDisposed || !hrPeer || hrVideoPollInProgress) return
       hrVideoPollInProgress = true
       try {
-        const state = (await interviewApi.getHrVideoState(selectedProcess.value.id)).data
+        const state = (await interviewApi.getHrVideoState(processId)).data
+        if (componentDisposed || !hrPeer || selectedProcess.value?.id !== processId) return
         if (state.answerSdp && !hrPeer.currentRemoteDescription) {
           await hrPeer.setRemoteDescription(JSON.parse(state.answerSdp))
           await flushPendingIntervieweeIce()
@@ -853,7 +948,7 @@ async function startHrVideoCall() {
           }
         }
         if (state.sessionStatus === 'RECORDING') {
-          startHrRecordingIfNeeded()
+          void startHrRecordingIfNeeded(processId).catch((error) => { if (!componentDisposed) fail(error) })
         }
         if (shouldHandleHrRecordingEnd(state)) {
           handledHrRecordingEndSignal = hrRecordingEndSignalKey(state)
@@ -862,15 +957,17 @@ async function startHrVideoCall() {
           scheduleHrRecordingStop(state.recordingEndRequestedAt)
         }
       } catch (error) {
-        console.warn('同步HR视频状态失败', error)
+        if (!componentDisposed) console.warn('同步HR视频状态失败', error)
       } finally {
         hrVideoPollInProgress = false
       }
     }, 1000)
-    ElMessage.success('HR视频已就绪，等待面试者加入后同步开始录制')
+    if (!componentDisposed) ElMessage.success('HR视频已就绪，等待面试者加入后同步开始录制')
   } catch (error) {
     await disconnectHrVideo({ uploadRecording: false })
-    ElMessage.error(buildMediaErrorMessage(error))
+    if (!componentDisposed) ElMessage.error(buildMediaErrorMessage(error))
+  } finally {
+    startingHrVideo.value = false
   }
 }
 
@@ -898,50 +995,217 @@ function shouldHandleHrRecordingEnd(state) {
 
 function scheduleHrRecordingStop(endAt) {
   clearTimeout(hrRecordingEndTimer)
+  hrRecordingEndTimer = null
+  if (componentDisposed) return
   const delay = Math.max(new Date(endAt || Date.now()).getTime() - Date.now(), 0)
   hrRecordingEndTimer = setTimeout(async () => {
+    hrRecordingEndTimer = null
+    if (componentDisposed) return
     try {
       await stopAndUploadHrRecording()
+      if (componentDisposed) return
       await disconnectHrVideo({ uploadRecording: false })
+      if (componentDisposed) return
       await loadAll()
     } catch (error) {
-      fail(error)
+      if (!componentDisposed) fail(error)
     }
   }, delay)
 }
 
-function startHrRecordingIfNeeded() {
-  if (!hrLocalStream || (hrRecorder && hrRecorder.state !== 'inactive')) return
-  hrRecorder = new MediaRecorder(hrLocalStream)
-  hrRecordedChunks = []
-  hrRecorder.ondataavailable = (event) => { if (event.data.size > 0) hrRecordedChunks.push(event.data) }
-  hrRecorder.start(1000)
-  ElMessage.success('双方已进入视频面，录制已同步开始')
+async function startHrRecordingIfNeeded(processId) {
+  if (componentDisposed || hrRecording.starting || hrRecording.pending || hrRecording.limitReached || hrRecording.error || !hrLocalStream || (hrRecorder && hrRecorder.state !== 'inactive')) return
+  hrRecording.starting = true
+  try {
+    const key = hrVideoRecordingKey(processId)
+    const session = await beginRecordingSession(key, {
+      kind: 'hr-video',
+      processId,
+      processStageId: hrVideoProcessStageId,
+      fileName: `hr-${processId}.webm`,
+      contentType: 'video/webm',
+    })
+    if (session.byteSize > 0) {
+      setPendingHrRecording(session, '上次 HR 录像尚未上传，请先重试上传')
+      return
+    }
+    if (componentDisposed || !hrLocalStream || selectedProcess.value?.id !== processId) return
+    hrRecordingSessionKey = key
+    hrRecorder = createHrMediaRecorder(hrLocalStream)
+    hrRecorderStopPromise = null
+    hrRecordingChunkWrites = Promise.resolve()
+    hrRecordingChunkWriteError = null
+    hrRecordingPendingWriteBytes = 0
+    const currentRecorder = hrRecorder
+    hrRecorder.ondataavailable = (event) => queueHrRecordingChunk(event.data, currentRecorder)
+    hrRecorder.onstop = () => {
+      if (hrRecording.limitReached) void stopAndUploadHrRecording().catch((error) => { if (!componentDisposed) fail(error) })
+    }
+    hrRecorder.start(1000)
+    hrRecording.byteSize = 0
+    hrRecording.limitReached = false
+    hrRecording.notice = ''
+    hrRecording.error = ''
+    ElMessage.success('双方已进入视频面，录制已同步开始')
+  } catch (error) {
+    hrRecording.error = `无法启动可靠录像：${error.message}`
+    throw error
+  } finally {
+    hrRecording.starting = false
+  }
+}
+
+function createHrMediaRecorder(stream) {
+  const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type))
+  const options = { videoBitsPerSecond: 240_000, audioBitsPerSecond: 32_000 }
+  if (mimeType) options.mimeType = mimeType
+  try {
+    return new MediaRecorder(stream, options)
+  } catch {
+    return mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+  }
+}
+
+function retryHrRecordingStart() {
+  hrRecording.error = ''
+  const processId = selectedProcess.value?.id
+  if (processId) void startHrRecordingIfNeeded(processId).catch((error) => { if (!componentDisposed) fail(error) })
 }
 
 async function stopAndUploadHrRecording() {
-  if (hrRecordingStopInProgress) return
-  if ((!hrRecorder || hrRecorder.state === 'inactive') && hrRecordedChunks.length === 0) return
-  hrRecordingStopInProgress = true
+  if (hrRecordingUploadPromise) return hrRecordingUploadPromise
+  hrRecording.uploading = true
+  hrRecordingUploadPromise = (async () => {
+    try {
+      await stopHrRecorderToStore()
+      await uploadStoredHrRecording()
+    } catch (error) {
+      await markHrRecordingUploadFailed(error)
+      throw error
+    }
+  })()
   try {
-    if (hrRecorder && hrRecorder.state !== 'inactive') {
-      const currentRecorder = hrRecorder
-      await new Promise((resolve) => {
-        currentRecorder.onstop = resolve
-        currentRecorder.stop()
-      })
-      hrRecorder = null
-    }
-    const blob = new Blob(hrRecordedChunks, { type: 'video/webm' })
-    if (blob.size > 0) {
-      const file = new File([blob], `hr-${selectedProcess.value.id}.webm`, { type: 'video/webm' })
-      await interviewApi.uploadHrVideoRecording(selectedProcess.value.id, file)
-      hrRecordedChunks = []
-      ElMessage.success('HR录制已上传')
-    }
+    await hrRecordingUploadPromise
   } finally {
-    hrRecordingStopInProgress = false
+    hrRecordingUploadPromise = null
+    hrRecording.uploading = false
   }
+}
+
+function hrVideoRecordingKey(processId = selectedProcess.value?.id) {
+  return processId ? `hr-video:${processId}` : ''
+}
+
+function queueHrRecordingChunk(data, currentRecorder) {
+  if (!data?.size || !hrRecordingSessionKey) return
+  const key = hrRecordingSessionKey
+  hrRecordingPendingWriteBytes += data.size
+  if (hrRecordingPendingWriteBytes >= RECORDING_WRITE_HIGH_WATER_BYTES && currentRecorder.state === 'recording') currentRecorder.pause()
+  hrRecordingChunkWrites = hrRecordingChunkWrites.then(async () => {
+    try {
+      if (hrRecordingChunkWriteError) return
+      const result = await appendRecordingChunk(key, data)
+      hrRecording.byteSize = result.session?.byteSize || hrRecording.byteSize
+      if (result.limitReached) {
+        markHrRecordingLimitReached(result.session)
+        if (currentRecorder.state !== 'inactive') currentRecorder.stop()
+      }
+    } catch (error) {
+      hrRecordingChunkWriteError = error
+      hrRecording.error = `录像暂存失败：${error.message}`
+      if (currentRecorder.state !== 'inactive') currentRecorder.stop()
+    } finally {
+      hrRecordingPendingWriteBytes = Math.max(0, hrRecordingPendingWriteBytes - data.size)
+      if (!hrRecordingChunkWriteError && !hrRecording.limitReached && hrRecordingPendingWriteBytes <= RECORDING_WRITE_LOW_WATER_BYTES && currentRecorder.state === 'paused') currentRecorder.resume()
+    }
+  })
+}
+
+async function stopHrRecorderToStore() {
+  const key = hrRecordingSessionKey || hrVideoRecordingKey()
+  if (!key) return
+  if (hrRecorder && hrRecorder.state !== 'inactive') {
+    const currentRecorder = hrRecorder
+    hrRecorderStopPromise = new Promise((resolve) => {
+      const previousStop = currentRecorder.onstop
+      currentRecorder.onstop = (event) => { previousStop?.(event); resolve() }
+      currentRecorder.stop()
+    })
+  }
+  if (hrRecorderStopPromise) await hrRecorderStopPromise
+  hrRecorderStopPromise = null
+  hrRecorder = null
+  await hrRecordingChunkWrites
+  if (hrRecordingChunkWriteError) throw hrRecordingChunkWriteError
+  const session = await updateRecordingSession(key, { status: 'ready', error: '' })
+  if (session?.byteSize > 0) setPendingHrRecording(session)
+}
+
+async function uploadStoredHrRecording() {
+  const key = hrRecordingSessionKey || hrVideoRecordingKey()
+  if (!key) return
+  const stored = await buildRecordingFile(key)
+  if (!stored?.file.size) return
+  if (stored.file.size > MAX_RECORDING_UPLOAD_BYTES) {
+    throw new Error(`录像大小为 ${formatRecordingSize(stored.file.size)}，超过服务器 100 MB 限制，已保留在本机浏览器中`)
+  }
+  setPendingHrRecording(stored.session)
+  await updateRecordingSession(key, { status: 'uploading', error: '' })
+  await interviewApi.uploadHrVideoRecording(
+    stored.session.processId || selectedProcess.value?.id,
+    stored.file,
+    stored.session.processStageId || hrVideoProcessStageId,
+  )
+  await deleteRecordingSession(key)
+  hrRecording.pending = false
+  hrRecording.byteSize = 0
+  hrRecording.error = ''
+  if (hrRecording.limitReached) hrRecording.notice = hrRecordingLimitNotice(true)
+  hrRecordingSessionKey = null
+  if (!componentDisposed) ElMessage.success('HR录制已上传')
+}
+
+async function retryHrRecordingUpload() {
+  if (hrRecording.uploading) return
+  hrRecording.uploading = true
+  try {
+    await uploadStoredHrRecording()
+  } catch (error) {
+    await markHrRecordingUploadFailed(error)
+    if (!componentDisposed) fail(error)
+  } finally {
+    hrRecording.uploading = false
+  }
+}
+
+function setPendingHrRecording(session, error = session.error || '') {
+  hrRecording.pending = Boolean(session?.byteSize)
+  hrRecording.byteSize = session?.byteSize || 0
+  hrRecording.error = error
+  if (session?.limitReached) markHrRecordingLimitReached(session)
+  if (session?.key) hrRecordingSessionKey = session.key
+  if (session?.processStageId) hrVideoProcessStageId = session.processStageId
+}
+
+function markHrRecordingLimitReached(session) {
+  hrRecording.limitReached = true
+  hrRecording.pending = Boolean(session?.byteSize)
+  hrRecording.byteSize = session?.byteSize || hrRecording.byteSize
+  hrRecording.notice = hrRecordingLimitNotice(false)
+}
+
+function hrRecordingLimitNotice(uploaded) {
+  const limit = formatRecordingSize(RECORDING_STOP_THRESHOLD_BYTES)
+  return uploaded
+    ? `HR 录像达到 ${limit} 安全阈值后已自动停止并上传，停止后的内容未继续录制`
+    : `HR 录像已达到 ${limit} 安全阈值，可用部分已保存在本机；请完成上传，停止后的内容不会继续录制`
+}
+
+async function markHrRecordingUploadFailed(error) {
+  const key = hrRecordingSessionKey || hrVideoRecordingKey()
+  const message = error?.message || '录像上传失败'
+  const session = key ? await updateRecordingSession(key, { status: 'failed', error: message }).catch(() => null) : null
+  setPendingHrRecording(session || { key, byteSize: hrRecording.byteSize }, message)
 }
 
 async function disconnectHrVideo({ uploadRecording = true } = {}) {
@@ -956,10 +1220,9 @@ async function disconnectHrVideo({ uploadRecording = true } = {}) {
     hrPeer?.close()
     hrPeer = null
     hrRecorder = null
-    hrRecordedChunks = []
-    hrRecordingStopInProgress = false
     handledHrRecordingEndSignal = ''
     hrVideoPollInProgress = false
+    hrVideoProcessStageId = null
     hrLocalStream?.getTracks().forEach((track) => track.stop())
     hrLocalStream = null
     hrRemoteStream = null
@@ -999,20 +1262,62 @@ async function loadIceServers() {
   }
 }
 
+async function restorePendingHrRecording(processId) {
+  if (!processId || hrRecorder) return
+  try {
+    const session = await getRecordingSession(hrVideoRecordingKey(processId))
+    if (componentDisposed || selectedProcess.value?.id !== processId) return
+    hrRecording.limitReached = false
+    hrRecording.notice = ''
+    if (session?.byteSize > 0) {
+      setPendingHrRecording(session)
+    } else {
+      hrRecording.pending = false
+      hrRecording.byteSize = 0
+      hrRecording.error = ''
+      hrRecordingSessionKey = null
+    }
+  } catch (error) {
+    if (!componentDisposed && selectedProcess.value?.id === processId) hrRecording.error = error.message
+  }
+}
+
+async function preserveHrRecording() {
+  try {
+    await stopHrRecorderToStore()
+  } catch (error) {
+    await markHrRecordingUploadFailed(error)
+  }
+}
+
+function handleHrPageHide() {
+  void preserveHrRecording()
+}
+
 onBeforeUnmount(() => {
   componentDisposed = true
-  void disconnectHrVideo().catch(() => {})
+  cancelVideoSummaryRetry()
+  window.removeEventListener('pagehide', handleHrPageHide)
+  void preserveHrRecording()
+  void disconnectHrVideo({ uploadRecording: false }).catch(() => {})
 })
 
 async function syncRouteState() {
   const id = Number(route.params.id)
+  if (activeTab.value === 'weights') {
+    const weightResponse = await interviewApi.listJobKnowledgeWeights()
+    if (componentDisposed) return
+    weights.value = weightResponse.data
+    if (route.name === 'interview-weight-detail' && id) {
+      const row = weights.value.find((item) => item.id === id)
+      if (row) Object.assign(weightForm, row)
+    }
+    return
+  }
   if (!id) return
   if (route.name === 'interview-knowledge-base-detail') {
     const row = knowledgeBases.value.find((item) => item.id === id)
     if (row) await selectKnowledgeBase(row)
-  } else if (route.name === 'interview-weight-detail') {
-    const row = weights.value.find((item) => item.id === id)
-    if (row) Object.assign(weightForm, row)
   } else if (route.name === 'interview-llm-config-detail') {
     const row = llmConfigs.value.find((item) => item.id === id)
     if (row) editLlmConfig(row)
@@ -1023,18 +1328,25 @@ async function syncRouteState() {
 }
 
 watch(() => route.fullPath, () => {
-  syncRouteState()
+  cancelVideoSummaryRetry()
+  syncRouteState().catch((error) => { if (!componentDisposed) fail(error) })
 })
 
-watch(() => selectedProcess.value?.id, () => {
+watch(() => selectedProcess.value?.id, (processId) => {
   onboardingDepartmentId.value = selectedProcess.value?.jobDepartmentId || null
+  onboardingJobId.value = selectedProcess.value?.jobId || null
+  onboardingBaseSalary.value = null
+  if (processId) void restorePendingHrRecording(processId)
 })
 
 watch(() => selectedProcess.value?.jobDepartmentId, (departmentId) => {
   if (departmentId) onboardingDepartmentId.value = departmentId
 })
 
-onMounted(loadAll)
+onMounted(() => {
+  window.addEventListener('pagehide', handleHrPageHide)
+  void loadAll()
+})
 </script>
 
 <style scoped>
@@ -1104,6 +1416,9 @@ onMounted(loadAll)
 .video-box { background: var(--surface); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border); }
 .video-box span { display: block; margin-bottom: 8px; color: var(--text-muted); }
 .video-box video { width: 100%; min-height: 220px; background: #111; border-radius: var(--radius-md); }
+.recording-recovery { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin: -4px 0 18px; padding: 10px 12px; border: 1px solid #e4c987; border-radius: 6px; background: #fff9eb; color: #855b09; }
+.recording-recovery small { min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.recording-recovery :deep(.el-button) { flex: 0 0 auto; margin-left: 0; }
 .video-summary-box { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }
 .video-summary-box span { color: var(--primary); font-weight: 800; }
 .summary-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

@@ -1,6 +1,6 @@
 # Automatic HR System
 
-Automatic HR System 是一个自动化人力资源与智能面试管理系统，覆盖后台用户管理、组织架构、员工档案、招聘岗位、候选人报名、简历管理、AI 面试、视频面试、线下面审批和审计日志等流程。
+Automatic HR System 是一个自动化人力资源与智能面试管理系统，覆盖后台用户管理、组织架构、员工档案、工资核算、人事统计、招聘岗位、候选人报名、简历管理、AI 面试、视频面试、线下面审批和审计日志等流程。
 
 ## 技术栈
 
@@ -12,6 +12,7 @@ Automatic HR System 是一个自动化人力资源与智能面试管理系统，
 - Spring Security
 - Spring Validation
 - MyBatis-Plus 3.5.6
+- Apache POI（员工与工资 Excel 导入导出）
 - JWT：`jjwt 0.12.5`
 - 数据库驱动：SQLite、MySQL、PostgreSQL
 - 连接池：HikariCP
@@ -21,9 +22,11 @@ Automatic HR System 是一个自动化人力资源与智能面试管理系统，
 ### 前端
 
 - Vue 3.4
-- Vite 5
+- Vite 7
 - Vue Router 4
 - Element Plus 2.7
+- ECharts 6
+- ExcelJS
 - Axios
 - ESLint
 - Prettier
@@ -47,7 +50,7 @@ Automatic HR System 是一个自动化人力资源与智能面试管理系统，
 │   │   ├── config/               # 安全、数据库、MyBatis 配置
 │   │   └── modules/
 │   │       ├── auth/             # 登录、注册、用户、审计日志
-│   │       ├── hr/               # 部门、员工、系统挂接、仪表盘
+│   │       ├── hr/               # 部门、员工、工资、统计、Excel、仪表盘
 │   │       ├── recruitment/      # 招聘岗位、候选人、简历
 │   │       └── interview/        # 知识库、LLM、AI 面试、视频面试、审批
 │   └── src/main/resources/
@@ -69,7 +72,7 @@ Automatic HR System 是一个自动化人力资源与智能面试管理系统，
 
 - JDK 17+
 - Maven 3.8+
-- Node.js 18+
+- Node.js 20.19+
 - npm 9+
 
 ### 启动后端
@@ -157,6 +160,9 @@ npm.cmd run build
 | `/` | 首页 | 公开 |
 | `/login` | 登录/注册入口 | 公开 |
 | `/admin` | 管理控制台 | `IT_ADMIN`、`HR_ADMIN`、`HR_USER` |
+| `/admin/dashboard` | 可配置人事仪表盘 | `IT_ADMIN`、`HR_ADMIN`、`HR_USER` |
+| `/admin/payroll` | 月度工资核算 | `IT_ADMIN`、`HR_ADMIN`、`HR_USER` |
+| `/admin/statistics` | 人事统计分析 | `IT_ADMIN`、`HR_ADMIN`、`HR_USER` |
 | `/interview/hr` | 面试后台 | `IT_ADMIN`、`HR_ADMIN`、`HR_USER` |
 | `/user` | 面试者个人中心 | `INTERVIEWEE` |
 | `/candidate/register` | 岗位报名 | `INTERVIEWEE` |
@@ -176,6 +182,14 @@ npm.cmd run build
 2. 进入 `/admin`。
 3. 在控制台中维护部门、员工和系统挂接信息。
 4. 相关功能对应后端 `/api/hr/**` 接口。
+
+#### 仪表盘、统计与工资
+
+- `/admin/dashboard` 汇总员工、部门、开放岗位、本月入离职和平均税前工资，并允许每个后台用户保存自己的卡片与图表配置。
+- `/admin/statistics` 按月展示薪资、招聘、离职和部门分布统计。
+- `/admin/employees` 支持下载 Excel 模板并批量导入员工；导入结果会逐行返回成功数、失败数和错误原因。
+- `/admin/payroll` 维护月度绩效、加班、社保与专项附加扣除，生成累计预扣法工资结果，并支持 Excel 批量导入和个税申报格式导出。
+- 工资结果可以锁定，锁定后禁止改写相关月度输入；只有 `HR_ADMIN` 或 `IT_ADMIN` 可以解锁。导入、生成、锁定、解锁、删除和导出操作都会写入审计日志。
 
 ### 3. 创建招聘岗位
 
@@ -216,7 +230,7 @@ npm.cmd run build
 4. 填写模型名称、Base URL、API Key、提示词模板和评分规则。
 5. `INTERVIEWER` 用于生成追问和面试官评价，`SCORER` 用于评分。
 
-如果未正确配置 LLM，AI 面试相关功能可能无法正常生成问题或评分。
+API Key 使用 AES-GCM 加密后落库；`CONFIG_ENCRYPTION_KEY` 未配置时复用 `JWT_SECRET` 派生密钥，因此上线后必须稳定保存所选密钥。LLM Endpoint 默认仅允许可解析到公网地址的 `http/https` URL，以阻止回环和内网 SSRF；仅当模型确实位于可信 VPC 时设置 `LLM_ALLOW_PRIVATE_ADDRESSES=true`。如果未正确配置 LLM，AI 面试相关功能可能无法正常生成问题或评分。
 
 ### 8. 发起面试流程
 
@@ -334,7 +348,7 @@ stop-coturn.bat
 ./stop-coturn.sh
 ```
 
-本地 Docker 配置会映射 `3478/tcp`、`3478/udp`、`5349/tcp`、`5349/udp` 和 `49160-49200/udp` 中继端口。Windows 或防火墙环境下需允许 Docker/WSL 访问这些端口。生产环境应使用公网 IP/域名、长随机共享密钥和短期凭据，并按需配置 TLS。
+本地 Docker 配置会映射 `3478/tcp`、`3478/udp` 和 `49160-49200/udp` 中继端口。`TURN_EXTERNAL_IP` 必须填写客户端可访问的主机地址；容器内网地址默认在启动时探测，固定容器网络时可用 `TURN_DOCKER_PRIVATE_IP` 覆盖。该本地配置未提供证书，因此不映射 `5349` TLS 端口。Windows 或防火墙环境下需允许 Docker/WSL 访问已映射端口；生产环境如需 TURN TLS，必须另行配置证书后再开放 TLS 端口。
 
 ### 13. 线下面试审批
 
@@ -369,7 +383,7 @@ spring:
       - optional:file:../.env[.properties]
 ```
 
-`.env` 使用 Java Properties 语法，由 Spring Boot 和系统配置服务统一解析；systemd 不再重复解析该文件。通过系统配置页面保存时会自动转义空格、反斜杠、`=`、`:`、`#` 和 `!`，因此密码、Token 和 Endpoint 中的特殊字符可在重启后原样生效。手工编辑时如需字面反斜杠，请写成 `\\`。
+`.env` 使用 Java Properties 语法，由 Spring Boot 和系统配置服务统一解析；生产 systemd 单元还通过 `EnvironmentFile=/opt/auto-hr/.env` 将同一文件导入进程。真实进程环境变量的优先级高于 `.env` 文件，适合由容器或 systemd 临时覆盖配置。通过系统配置页面保存时会自动转义空格、反斜杠、`=`、`:`、`#` 和 `!`，因此密码、Token 和 Endpoint 中的特殊字符可在重启后原样生效。手工编辑时如需字面反斜杠，请写成 `\\`。
 
 常用变量：
 
@@ -382,12 +396,14 @@ spring:
 | `SQLITE_FALLBACK_URL` | `jdbc:sqlite:autohr-dev.db` | SQLite 默认或回退连接 |
 | `MIGRATION_ENABLED` | `true` | 是否执行表结构迁移 |
 | `JWT_SECRET` | 无（必填） | JWT 签名密钥，必须使用长度不少于 32 个字符的随机值 |
+| `CONFIG_ENCRYPTION_KEY` | `JWT_SECRET` | LLM API Key 等配置密文的独立加密密钥；设置后必须稳定保管 |
 | `JWT_EXPIRATION` | `86400000` | Token 有效期，单位毫秒 |
 | `REDIS_HOST` | `127.0.0.1` | 验证码、验证状态和限流使用的 Redis 地址 |
 | `REDIS_PORT` | `6379` | Redis 端口 |
 | `REDIS_PASSWORD` | 空 | Redis 密码，只保存在服务器 `.env` 中 |
 | `REDIS_SSL_ENABLED` | `false` | 是否使用 Redis TLS |
 | `AUTH_TRUST_FORWARDED_HEADERS` | `false` | 仅当可信反向代理覆盖 `X-Forwarded-For` 时启用 |
+| `LLM_ALLOW_PRIVATE_ADDRESSES` | `false` | 仅可信 VPC/内网模型 Endpoint 需要开启 |
 
 ### SQLite 开发配置示例
 
@@ -407,7 +423,7 @@ JWT_SECRET=generate-a-unique-secret-with-at-least-32-characters
 
 ```properties
 DB_TYPE=mysql
-DB_URL=jdbc:mysql://localhost:3306/autohr?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+DB_URL=jdbc:mysql://localhost:3306/autohr?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=true
 DB_USERNAME=root
 DB_PASSWORD=your_password
 JWT_SECRET=replace-with-a-secure-secret-at-least-32-chars
@@ -509,6 +525,8 @@ python3 scripts/migrate-sqlite-to-postgres.py autohr.db --dsn "$POSTGRES_DSN" --
 
 ### 一键发行包与 systemd
 
+仓库根目录的 `deploy-ubuntu.sh` 仅用于单机或可信局域网验证：它启动 Vite 开发服务器，不配置 TLS，也不配置公网反向代理，默认只监听 `127.0.0.1`。局域网测试必须同时指定私网监听地址和允许访问的网段，例如 `APP_BIND_ADDRESS=192.168.1.20 APP_ALLOWED_CIDR=192.168.1.0/24 bash deploy-ubuntu.sh`。脚本会安装并限制本机 Redis、检查 `.env` 中 PostgreSQL 服务和凭据是否可达；PostgreSQL 服务端需要预先创建。公网生产必须使用下面的发行包、systemd 与 OpenResty/Nginx 方案。
+
 GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。每次 `main` 构建都会创建或更新 `build-<运行编号>` GitHub 预发布版；推送 `v*` 标签会创建正式 Release，Release 发布不依赖部署 Secrets，不会因未配置服务器而跳过。若在仓库 Secrets 配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_WEB_ROOT` 和可选的 `DEPLOY_PORT`，`main` 推送会自动发布到服务器；`DEPLOY_WEB_ROOT` 应为 OpenResty/Nginx 的站点静态目录，例如 1Panel OpenResty 的 `/opt/1panel/www/sites/hr.zroevn.cn/index`。首次部署还必须配置 `DEPLOY_INITIAL_ENV`，其内容为完整的 `.env` 文件，至少包含 `JWT_SECRET`、`DB_TYPE`、`DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD` 和 `INTERVIEW_TURN_SHARED_SECRET`；已有服务器上的 `.env` 不会被覆盖。未配置部署 Secrets 时只跳过远端部署，构建产物和 GitHub 预发布版仍会正常生成。
 
 自动部署会先把新后端写入同文件系统的暂存 JAR，等待旧 systemd 进程完全停止后再原子替换，避免运行中的 JVM 读取到被覆盖的归档。`auto-hr.service` 通过 `EnvironmentFile=/opt/auto-hr/.env` 导入部署配置；该文件权限应保持为 `0600`。新版本无法启动或 60 秒内未通过健康检查时，流水线会恢复上一版 JAR 并重新启动服务，同时将本次部署标记为失败。
@@ -519,15 +537,14 @@ GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端
 bash scripts/package-release.sh
 ```
 
-解压后保留已有 `.env` 与 `uploads/`，将 `auto-hr.service` 安装到 `/etc/systemd/system/auto-hr.service`，并执行：
+发行包内含可重复执行的 systemd 安装脚本。准备好不含占位值的生产 `.env` 后执行：
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now auto-hr
+sudo ./install-systemd.sh /path/to/production.env
 sudo systemctl status auto-hr
 ```
 
-默认服务监听 `127.0.0.1` 所在主机的 `8081` 端口，适合由 OpenResty/Nginx 反向代理；服务以生产 profile 启动、开机自启，并在异常退出时自动重启。
+安装脚本会创建低权限 `autohr` 系统用户，保留 `/opt/auto-hr/uploads` 与日志目录，将 `.env` 设为 `0600`，安装并启动 `auto-hr.service`，然后等待 60 秒健康检查。首次安装必须传入生产 `.env`；后续升级不传参数时会沿用 `/opt/auto-hr/.env`。默认服务监听 `127.0.0.1:8081`，适合由 OpenResty/Nginx 终止 TLS 并反向代理；服务以生产 profile 启动、开机自启，并在异常退出时自动重启。若由 OpenResty 直接托管静态文件，可将包内 `frontend/` 同步到站点目录，并把 `/api` 反代到 `127.0.0.1:8081`。
 
 ## 面试相关配置
 
@@ -544,7 +561,8 @@ sudo systemctl status auto-hr
 | 模块 | 前缀 | 说明 |
 | --- | --- | --- |
 | 认证与用户 | `/api/auth` | 登录、注册、当前用户、用户管理、审计日志 |
-| HR 管理 | `/api/hr` | 仪表盘、部门、员工、系统挂接 |
+| HR 管理 | `/api/hr` | 仪表盘、统计、部门、员工、员工 Excel 导入 |
+| 工资管理 | `/api/hr/payroll` | 月度输入、累计预扣计算、锁定、Excel 导入导出 |
 | 招聘管理 | `/api/recruitment` | 岗位、候选人、简历上传与下载 |
 | 面试管理 | `/api/interview` | 知识库、岗位权重、LLM、AI 面试、视频面试、审批 |
 
@@ -560,6 +578,8 @@ mvn package
 ```
 
 ### 前端
+
+统计图表使用 ECharts；浏览器端 xlsx 模板生成选择 ExcelJS。ExcelJS 能直接设置工号、身份证号和手机号列的文本格式，并提供稳定的单元格样式与列序控制，更适合本项目对导入模板格式的要求。
 
 ```bash
 cd frontend
@@ -587,6 +607,7 @@ npm run format
 - Process templates use a version field for optimistic concurrency. A stale save or delete is rejected and the editor must refresh before trying again. A completed final interview changes the candidate state to `OFFER_PENDING`.
 - PostgreSQL and MySQL deployments add restrictive foreign keys for user, employee, candidate, process, stage, AI-record, and video-session relationships. Migration first checks for orphaned rows and stops if any are found. The sole audited legacy exception is PostgreSQL `hr_employee.source_candidate_id`: before its foreign key is added, invalid nullable references are archived to `database_migration_orphan_archive`, cleared in one transaction, and retained for five days. The archive supports an optional JSON snapshot for auditable manual data repair. No other orphaned relationship is repaired automatically. SQLite keeps its existing schema because adding foreign keys to existing SQLite tables requires a table rebuild.
 - LLM debug logging is disabled by default. When explicitly enabled, only provider/model metadata, lengths, and SHA-256 digests are written under `logs/`; daily metadata logs older than three days are removed. Prompt, answer, and provider-response text are not persisted.
+- LLM API keys are encrypted at rest. On startup, legacy plaintext values are automatically rewritten as ciphertext. Rotating `CONFIG_ENCRYPTION_KEY` requires re-saving the LLM secrets with the old key available first.
 - Every main-branch build publishes a prerelease package. The workflow retains the latest five prereleases across all release pages and permanently retains formal `v*` releases.
 
 ## S3 兼容对象存储
