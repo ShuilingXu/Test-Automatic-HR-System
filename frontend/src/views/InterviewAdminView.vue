@@ -276,7 +276,7 @@
               <h3>AI问答与面试官评价</h3>
               <el-button v-if="selectedProcess.aiRecordingPath || selectedProcess.aiRecordingFileName" text class="video-link" @click="openAiRecording">查看AI问答视频</el-button>
             </div>
-            <div v-if="aiRecordGroups.length" class="ai-review-scroll">
+            <div v-if="aiRecordGroups.length" class="ai-review-content">
               <div class="ai-stage-review-list">
                 <section v-for="group in aiRecordGroups" :key="group.key" class="ai-stage-review">
                   <div class="ai-stage-heading">
@@ -286,20 +286,36 @@
                     </div>
                     <span class="ai-stage-count">{{ group.items.length }} 题</span>
                   </div>
-                  <div v-if="group.items.length" class="question-number-grid">
-                    <button v-for="item in group.items" :key="item.id" class="question-number" :class="{ answered: item.answerContent }">Q{{ item.sequenceNo }}</button>
-                  </div>
+                  <ol v-if="group.items.length" class="ai-question-list">
+                    <li v-for="item in group.items" :key="item.id" class="ai-question-review">
+                      <div class="ai-question-meta">
+                        <span class="question-number" :class="{ answered: item.answerContent }">Q{{ item.sequenceNo }}</span>
+                        <div>
+                          <span>知识点</span>
+                          <strong>{{ item.knowledgePoint || '未标注' }}</strong>
+                        </div>
+                        <div class="ai-question-score">
+                          <span>评分</span>
+                          <strong>{{ item.averageScore ?? '-' }}</strong>
+                        </div>
+                      </div>
+                      <div class="ai-question-copy">
+                        <span>AI 提问</span>
+                        <p>{{ item.questionContent || '暂无提问内容' }}</p>
+                      </div>
+                      <div class="ai-response-grid">
+                        <div>
+                          <span>候选人回答</span>
+                          <p>{{ item.answerContent || '暂无回答' }}</p>
+                        </div>
+                        <div>
+                          <span>AI 面试官评价</span>
+                          <p class="ai-interviewer-feedback">{{ item.interviewerComment || '暂无评价' }}</p>
+                        </div>
+                      </div>
+                    </li>
+                  </ol>
                   <p v-else class="empty-stage-review">本轮尚未生成题目。</p>
-                  <el-table v-if="group.items.length" :data="group.items" stripe class="data-table compact-ai-table">
-                    <el-table-column prop="sequenceNo" label="题号" width="70" />
-                    <el-table-column prop="knowledgePoint" label="知识点" min-width="120" />
-                    <el-table-column prop="questionContent" label="提问" min-width="220" />
-                    <el-table-column prop="answerContent" label="回答" min-width="220" />
-                    <el-table-column prop="averageScore" label="均分" width="80" />
-                    <el-table-column label="AI面试官评价" min-width="240">
-                      <template #default="scope"><p class="ai-interviewer-feedback">{{ scope.row.interviewerComment || '暂无评价' }}</p></template>
-                    </el-table-column>
-                  </el-table>
                 </section>
               </div>
             </div>
@@ -1008,8 +1024,7 @@ onMounted(loadAll)
 .resume-ai-box p { margin: 8px 0 0; line-height: 1.7; }
 .panel-title-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .panel-title-row span { color: var(--primary); font-weight: 700; }
-.question-number-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-.question-number { border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 7px 12px; font-weight: 700; }
+.question-number { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink); border-radius: 50%; font-weight: 700; }
 .question-number.answered { background: var(--primary); color: #ffffff; border-color: var(--primary); }
 .ai-stage-review-list { display: grid; min-width: 0; max-width: 100%; gap: 24px; margin-top: 18px; }
 .ai-stage-review { min-width: 0; max-width: 100%; padding-top: 18px; border-top: 1px solid var(--border); }
@@ -1020,11 +1035,19 @@ onMounted(loadAll)
 .ai-stage-count { color: var(--text-muted); font-size: 13px; }
 .empty-stage-review { margin: 14px 0 0; color: var(--text-muted); }
 .ai-question-panel, .action-panel { grid-column: 1 / -1; }
-.ai-question-panel { display: grid; gap: 16px; overflow: hidden; }
-.ai-review-scroll { min-width: 0; max-width: 100%; max-height: min(58vh, 720px); padding-right: 8px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
-.compact-ai-table { min-width: 960px; margin-top: 8px; }
-.compact-ai-table :deep(.el-table__body-wrapper) { overflow-x: auto; }
-.compact-ai-table :deep(.cell) { overflow-wrap: anywhere; }
+.ai-question-panel { display: grid; min-width: 0; gap: 16px; overflow: hidden; }
+.ai-review-content { min-width: 0; width: 100%; max-width: 100%; overflow: hidden; }
+.ai-question-list { display: grid; min-width: 0; gap: 0; margin: 12px 0 0; padding: 0; list-style: none; }
+.ai-question-review { min-width: 0; padding: 20px 0; border-top: 1px solid var(--border); }
+.ai-question-review:first-child { border-top: 0; }
+.ai-question-meta { display: grid; min-width: 0; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.ai-question-meta span:not(.question-number), .ai-question-copy > span, .ai-response-grid span { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+.ai-question-meta strong { display: block; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
+.ai-question-score { min-width: 52px; text-align: right; }
+.ai-question-copy { min-width: 0; margin: 16px 0; padding-left: 54px; }
+.ai-question-copy p, .ai-response-grid p { min-width: 0; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.7; }
+.ai-response-grid { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-left: 54px; padding-top: 16px; border-top: 1px dashed var(--border); }
+.ai-response-grid > div { min-width: 0; }
 .ai-interviewer-feedback { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.6; color: var(--ink-soft); }
 .process-stats { display: grid; gap: 4px; margin-bottom: 12px; }
 .process-stats p { margin: 0; color: var(--ink-soft); }
@@ -1062,5 +1085,6 @@ onMounted(loadAll)
 .config-panel-head { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin: 6px 0 18px; }.config-panel-head p { margin: 7px 0 0; color: var(--text-muted); line-height: 1.6; }.config-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-soft); }.model-editor { max-width: 880px; }.key-state { color: var(--text-muted); font-size: 13px; }.model-editor .action-row { margin-top: 18px; }
 @media (max-width: 900px) { .topline, .detail-headline { flex-direction: column; } .form-grid, .video-grid, .llm-config-grid, .preview-grid, .process-workbench, .candidate-info-grid { grid-template-columns: 1fr; } }
 @media (max-width: 900px) { .template-stage-row { grid-template-columns: 32px 1fr; }.stage-type-switch, .template-stage-row > .el-select, .human-stage-note, .stage-row-actions { grid-column: 2; }.stage-row-actions { flex-wrap: wrap; } }
+@media (max-width: 700px) { .ai-response-grid { grid-template-columns: 1fr; } .ai-question-copy { padding-left: 0; } .ai-response-grid { margin-left: 0; } }
 @media (max-width: 700px) { .config-form-grid { grid-template-columns: 1fr; } .config-heading, .config-panel-head { flex-direction: column; } }
 </style>
