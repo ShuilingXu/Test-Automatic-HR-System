@@ -85,5 +85,6 @@ jobs:
             sudo cp -a /opt/auto-hr/frontend/. "$DEPLOY_WEB_ROOT"/
             sudo install -m 0644 /opt/auto-hr/auto-hr.service /etc/systemd/system/auto-hr.service
             sudo systemctl daemon-reload
-            sudo systemctl enable --now auto-hr
+            sudo systemctl enable auto-hr
+            sudo systemctl restart auto-hr
           REMOTE
