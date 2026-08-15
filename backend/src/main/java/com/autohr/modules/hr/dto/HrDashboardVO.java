@@ -17,4 +17,5 @@ public class HrDashboardVO {
     private Long currentMonthHireCount;
     private Long currentMonthDismissalCount;
     private BigDecimal averageGrossSalary;
+    private HrStatisticsVO statistics;
 }

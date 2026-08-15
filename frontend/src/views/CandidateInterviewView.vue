@@ -444,7 +444,10 @@ function syncHeartbeat() {
     try {
       const response = await interviewApi.heartbeat(sessionForm.processId)
       if (!componentDisposed && response.data) {
+        const previousSummary = processSummary.value
         processSummary.value = response.data
+        notifyAiFinishedIfNeeded()
+        uploadVideoRecordingAfterTerminalHeartbeat(previousSummary, response.data)
         syncHeartbeat()
       }
     } catch (error) {
@@ -933,6 +936,16 @@ async function joinVideo() {
   } finally {
     joiningVideo.value = false
   }
+}
+
+function uploadVideoRecordingAfterTerminalHeartbeat(previousSummary, summary) {
+  const videoStageEnded = previousSummary?.currentStage === 'VIDEO' && (
+    summary.overallStatus !== 'IN_PROGRESS'
+    || summary.currentStage !== 'VIDEO'
+    || summary.stageStatus !== 'IN_PROGRESS'
+  )
+  if (!videoStageEnded || (!recorder && !videoRecording.pending)) return
+  void stopAndUploadRecording().catch((error) => { if (!componentDisposed) fail(error) })
 }
 async function stopRecording() {
   try {

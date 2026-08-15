@@ -473,7 +473,7 @@ const systemConfig = reactive({
   SMTP_SSL_ENABLED: '',
   SMTP_STARTTLS_ENABLED: '',
   ALIYUN_STT_ACCESS_KEY_ID: '', ALIYUN_STT_ACCESS_KEY_SECRET: '', ALIYUN_STT_APP_KEY: '', ALIYUN_STT_ENDPOINT: '',
-  S3_ENABLED: '', S3_ENDPOINT: '', S3_INTERNAL_ENDPOINT_ENABLED: '', S3_INTERNAL_ENDPOINT: '', S3_REGION: '', S3_BUCKET: '', S3_ACCESS_KEY_ID: '', S3_SECRET_ACCESS_KEY: '', S3_SESSION_TOKEN: '', S3_PREFIX: '', S3_PATH_STYLE_ACCESS: '',
+  S3_ENABLED: '', S3_ENDPOINT: '', S3_INTERNAL_ENDPOINT_ENABLED: '', S3_INTERNAL_ENDPOINT: '', S3_REGION: '', S3_BUCKET: '', S3_ACCESS_KEY_ID: '', S3_SECRET_ACCESS_KEY: '', S3_SESSION_TOKEN: '', S3_PREFIX: '', S3_PATH_STYLE_ACCESS: '', S3_ALLOW_HTTP_ENDPOINTS: '', S3_ALLOW_PRIVATE_ENDPOINTS: '',
   DB_TYPE: '', DB_URL: '', DB_USERNAME: '', DB_PASSWORD: '', JWT_SECRET: '',
   INTERVIEW_VIDEO_FFMPEG_PATH: '', INTERVIEW_VIDEO_VIDEO_CODEC: '', INTERVIEW_VIDEO_AUDIO_CODEC: '',
   INTERVIEW_STUN_URLS: '', INTERVIEW_TURN_URLS: '', INTERVIEW_TURN_SHARED_SECRET: '', INTERVIEW_TURN_CREDENTIAL_TTL_SECONDS: '',
@@ -497,8 +497,8 @@ const configGroups = {
   notifications: { title: '通知服务', description: '短信验证码和注册邮件使用的独立服务凭据。', fields: [
     { key: 'ALIYUN_SMS_ACCESS_KEY_ID', label: '阿里云短信 AccessKey ID' }, { key: 'ALIYUN_SMS_ACCESS_KEY_SECRET', label: '阿里云短信 AccessKey Secret', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_SMS_ENDPOINT', label: '阿里云短信 Endpoint', placeholder: 'dysmsapi.aliyuncs.com' }, { key: 'ALIYUN_SMS_SIGN_NAME', label: '短信签名' }, { key: 'ALIYUN_SMS_TEMPLATE_CODE', label: '短信模板 Code' }, { key: 'SMTP_HOST', label: 'SMTP 服务器', placeholder: 'smtp.example.com' }, { key: 'SMTP_PORT', label: 'SMTP 端口', placeholder: '587' }, { key: 'SMTP_USERNAME', label: 'SMTP 用户名' }, { key: 'SMTP_PASSWORD', label: 'SMTP 密码', secret: true, placeholder: '留空则不覆盖' }, { key: 'SMTP_FROM', label: '发件人' }, { key: 'SMTP_SSL_ENABLED', label: 'SSL 启用', options: booleanOptions }, { key: 'SMTP_STARTTLS_ENABLED', label: 'STARTTLS 启用', options: booleanOptions },
   ] },
-  storage: { title: 'S3 兼容对象存储', description: '外网 Endpoint 始终供浏览器访问已归档文件。启用内网上传后，服务端上传只走内网 Endpoint；关闭后上传和访问均使用外网 Endpoint。归档或访问失败会回退到本地文件。', fields: [
-    { key: 'S3_ENABLED', label: '启用归档', options: booleanOptions }, { key: 'S3_ENDPOINT', label: '外网 S3 Endpoint', placeholder: 'https://s3.example.com' }, { key: 'S3_INTERNAL_ENDPOINT_ENABLED', label: '使用内网上传 Endpoint', options: booleanOptions }, { key: 'S3_INTERNAL_ENDPOINT', label: '内网上传 Endpoint', placeholder: 'http://s3.internal.example.com' }, { key: 'S3_REGION', label: 'Region', placeholder: 'us-east-1' }, { key: 'S3_BUCKET', label: 'Bucket' }, { key: 'S3_ACCESS_KEY_ID', label: 'Access Key ID' }, { key: 'S3_SECRET_ACCESS_KEY', label: 'Secret Access Key', secret: true, placeholder: '留空则不覆盖' }, { key: 'S3_SESSION_TOKEN', label: 'Session Token（可选）', secret: true, placeholder: '临时凭据时填写' }, { key: 'S3_PREFIX', label: '对象前缀', placeholder: 'autohr' }, { key: 'S3_PATH_STYLE_ACCESS', label: 'Path Style Access', options: booleanOptions },
+  storage: { title: 'S3 兼容对象存储', description: '外网 Endpoint 供浏览器访问，内网 Endpoint 仅供服务端上传。默认只允许公网 HTTPS；可信 MinIO 或 VPC 地址需显式开启对应兼容开关。归档失败会回退到本地文件。', fields: [
+    { key: 'S3_ENABLED', label: '启用归档', options: booleanOptions }, { key: 'S3_ENDPOINT', label: '外网 S3 Endpoint', placeholder: 'https://s3.example.com' }, { key: 'S3_INTERNAL_ENDPOINT_ENABLED', label: '使用内网上传 Endpoint', options: booleanOptions }, { key: 'S3_INTERNAL_ENDPOINT', label: '内网上传 Endpoint', placeholder: 'https://s3.internal.example.com' }, { key: 'S3_ALLOW_HTTP_ENDPOINTS', label: '允许 HTTP Endpoint（不安全）', options: booleanOptions }, { key: 'S3_ALLOW_PRIVATE_ENDPOINTS', label: '允许私网/环回 Endpoint', options: booleanOptions }, { key: 'S3_REGION', label: 'Region', placeholder: 'us-east-1' }, { key: 'S3_BUCKET', label: 'Bucket' }, { key: 'S3_ACCESS_KEY_ID', label: 'Access Key ID' }, { key: 'S3_SECRET_ACCESS_KEY', label: 'Secret Access Key', secret: true, placeholder: '留空则不覆盖' }, { key: 'S3_SESSION_TOKEN', label: 'Session Token（可选）', secret: true, placeholder: '临时凭据时填写' }, { key: 'S3_PREFIX', label: '对象前缀', placeholder: 'autohr' }, { key: 'S3_PATH_STYLE_ACCESS', label: 'Path Style Access', options: booleanOptions },
   ] },
   media: { title: '面试媒体', description: '视频编码、WebRTC 网络和阿里云语音转文字使用的独立参数。', fields: [
     { key: 'INTERVIEW_VIDEO_FFMPEG_PATH', label: 'FFmpeg 路径', placeholder: 'ffmpeg' }, { key: 'INTERVIEW_VIDEO_VIDEO_CODEC', label: '视频编码器' }, { key: 'INTERVIEW_VIDEO_AUDIO_CODEC', label: '音频编码器' }, { key: 'INTERVIEW_STUN_URLS', label: 'STUN 地址' }, { key: 'INTERVIEW_TURN_URLS', label: 'TURN 地址' }, { key: 'INTERVIEW_TURN_SHARED_SECRET', label: 'TURN 共享密钥', secret: true, placeholder: '留空则不覆盖' }, { key: 'INTERVIEW_TURN_CREDENTIAL_TTL_SECONDS', label: 'TURN 临时凭据有效期（秒）', placeholder: '3600' }, { key: 'ALIYUN_STT_ACCESS_KEY_ID', label: '阿里云语音 AccessKey ID' }, { key: 'ALIYUN_STT_ACCESS_KEY_SECRET', label: '阿里云语音 AccessKey Secret', secret: true, placeholder: '留空则不覆盖' }, { key: 'ALIYUN_STT_APP_KEY', label: '阿里云语音 AppKey' }, { key: 'ALIYUN_STT_ENDPOINT', label: '阿里云语音 Endpoint', placeholder: 'wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1' }, { key: 'TURN_HOST', label: 'TURN 主机' }, { key: 'TURN_EXTERNAL_IP', label: 'TURN 外部 IP' }, { key: 'TURN_PRIVATE_IP', label: 'TURN 内部 IP' }, { key: 'TURN_REALM', label: 'TURN Realm' }, { key: 'TURN_MIN_PORT', label: 'TURN 最小端口' }, { key: 'TURN_MAX_PORT', label: 'TURN 最大端口' },
@@ -595,6 +595,9 @@ async function loadAll() {
       if (generation !== adminLoadGeneration) return
       llmConfigs.value = llmConfigsResponse.data
       Object.assign(systemConfig, systemConfigResponse.data)
+      for (const key of ['S3_ALLOW_HTTP_ENDPOINTS', 'S3_ALLOW_PRIVATE_ENDPOINTS']) {
+        if (!['true', 'false'].includes(systemConfig[key])) systemConfig[key] = 'false'
+      }
       syncLlmForms()
     } else {
       llmConfigs.value = []

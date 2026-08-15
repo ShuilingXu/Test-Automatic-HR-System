@@ -187,9 +187,12 @@ npm.cmd run build
 
 - `/admin/dashboard` 汇总员工、部门、开放岗位、本月入离职和平均税前工资，并允许每个后台用户保存自己的卡片与图表配置。
 - `/admin/statistics` 按月展示薪资、招聘、离职和部门分布统计。
+- 仪表盘响应内嵌当月完整统计结果，前端不会再额外请求一次统计接口；停用部门、空名称部门及无员工部门不参与部门均值。
 - `/admin/employees` 支持下载 Excel 模板并批量导入员工；导入结果会逐行返回成功数、失败数和错误原因。
 - `/admin/payroll` 维护月度绩效、加班、社保与专项附加扣除，生成累计预扣法工资结果，并支持 Excel 批量导入和个税申报格式导出。
+- 新建或调薪时可显式指定 `effectiveMonth`；未指定时使用员工 `hire_date` 所在月。回算早于首条调薪流水的历史月份时使用最早流水的调整前薪资，再回退员工当前基础薪资。
 - 工资结果可以锁定，锁定后禁止改写相关月度输入；只有 `HR_ADMIN` 或 `IT_ADMIN` 可以解锁。导入、生成、锁定、解锁、删除和导出操作都会写入审计日志。
+- PostgreSQL、SQLite 和 MySQL 均使用原子 upsert 生成工资单；冲突更新带 `locked=0` 守卫，并发生成或生成期间锁定不会覆盖已锁定结果。
 
 ### 3. 创建招聘岗位
 
@@ -262,7 +265,7 @@ API Key 使用 AES-GCM 加密后落库；`CONFIG_ENCRYPTION_KEY` 未配置时复
 
 1. 面试者 AI 面试页面会监听切屏等事件。
 2. 前端通过 `/api/interview/interviewee/anti-cheat-event` 上报防作弊事件。
-3. 面试进行期间，前端每 30 秒调用独立的 `/api/interview/interviewee/heartbeat/{processId}` 上报在线状态；心跳不会增加切屏次数。
+3. 面试进行期间，前端每 30 秒调用独立的 `/api/interview/interviewee/heartbeat/{processId}` 上报在线状态；心跳不会增加切屏次数，服务端对同一流程设置 20 秒最小写入间隔以避免高频数据库更新。
 4. 系统累计切屏次数。
 5. 达到阈值后，流程会转入 HR 人工审批。
 
@@ -624,10 +627,16 @@ npm run format
 在系统配置的“对象存储”页签或 `.env` 中配置 `S3_ENABLED`、外网
 `S3_ENDPOINT`、`S3_REGION`、`S3_BUCKET`、`S3_ACCESS_KEY_ID`、
 `S3_SECRET_ACCESS_KEY`、`S3_SESSION_TOKEN`、`S3_PREFIX` 和
-`S3_PATH_STYLE_ACCESS`。开启 `S3_INTERNAL_ENDPOINT_ENABLED` 后还必须配置
+`S3_PATH_STYLE_ACCESS`。安全兼容开关为 `S3_ALLOW_HTTP_ENDPOINTS` 和
+`S3_ALLOW_PRIVATE_ENDPOINTS`。开启 `S3_INTERNAL_ENDPOINT_ENABLED` 后还必须配置
 `S3_INTERNAL_ENDPOINT`：服务端上传通过该内网/VPC 地址发送，浏览器访问始终签发
-到外网 `S3_ENDPOINT`；关闭该开关时上传和访问均使用外网 Endpoint。归档对象不可用
-时下载自动回退至本地文件。该身份需要对指定 Bucket 与前缀拥有
-`s3:PutObject`、`s3:GetObject` 和 `s3:HeadObject` 权限。短信、语音转写和 S3 均使用独立凭据。
+到外网 `S3_ENDPOINT`；关闭该开关时上传和访问均使用外网 Endpoint。Endpoint 默认
+必须使用 HTTPS 且不能解析到私网、环回或链路本地地址。可信 MinIO/VPC 部署可显式
+开启 `S3_ALLOW_PRIVATE_ENDPOINTS`；只有无法提供 TLS 的可信 Endpoint 才应同时开启
+`S3_ALLOW_HTTP_ENDPOINTS`，因为 HTTP 会以明文传输对象存储凭据和数据。仅开启内网
+上传不会自动放行 HTTP 或私网地址。归档对象不可用时下载自动回退至本地文件。该身份
+需要对指定 Bucket 与前缀拥有 `s3:PutObject`、`s3:GetObject`、`s3:HeadObject` 和
+`s3:DeleteObject` 权限；候选人删除或替换简历后会尽力删除旧 S3 对象，本地回退文件
+同步清理。短信、语音转写和 S3 均使用独立凭据。
 
 归档文件下载先由已登录用户通过 Bearer 请求获取五分钟有效的预签名 URL，再由浏览器直接打开该 URL；浏览器不会将 JWT 发送到对象存储。对象尚未归档或对象存储不可用时，前端必须回退到原有的同源、带 Bearer 的文件下载接口。

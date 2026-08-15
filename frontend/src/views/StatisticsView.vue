@@ -5,7 +5,14 @@
       <div><p class="page-eyebrow">Analytics</p><h1>员工统计</h1></div>
       <el-date-picker v-model="month" type="month" value-format="YYYY-MM" @change="load" />
     </header>
-    <el-tabs v-model="tab" @tab-change="draw">
+    <el-alert v-if="loadError" class="load-error" type="error" :closable="false" show-icon>
+      <template #title>统计数据加载失败</template>
+      <template #default>
+        <span>{{ loadError }}</span>
+        <el-button text type="primary" @click="load">重试</el-button>
+      </template>
+    </el-alert>
+    <el-tabs v-show="!loadError" v-model="tab" @tab-change="draw">
       <el-tab-pane v-for="section in sections" :key="section.key" :label="section.label" :name="section.key">
         <div class="summary-grid">
           <article v-for="metric in summaries(section.key)" :key="metric.label">
@@ -41,6 +48,7 @@ import { currentMonth } from '../utils/date'
 const month = ref(currentMonth())
 const tab = ref('salary')
 const data = ref(null)
+const loadError = ref('')
 const charts = {}
 const nodes = {}
 const sections = [
@@ -132,18 +140,26 @@ function load() {
     try {
       const response = await hrApi.statistics(month.value, controller.signal)
       if (!disposed && controller === activeController) {
+        loadError.value = ''
         data.value = response.data
         draw()
       }
     } catch (error) {
-      if (error.code !== 'ERR_CANCELED' && error.name !== 'CanceledError') console.error(error)
+      if (!disposed && controller === activeController && error.code !== 'ERR_CANCELED' && error.name !== 'CanceledError') {
+        loadError.value = error.message || '请稍后重试'
+      }
     }
   }, 250)
 }
 function money(value) { return `¥${Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` }
 function percent(value) { return value === null || value === undefined ? '—' : `${Number(value).toFixed(2)}%` }
 function formatValue(value, column) { if (column.money) return money(value); if (column.percent) return percent(value); return value ?? '—' }
-function resizeCharts() { Object.values(charts).forEach((chart) => chart.resize()) }
+function resizeCharts() {
+  Object.values(charts).forEach((chart) => {
+    const node = chart.getDom()
+    if (node?.offsetParent !== null && node.clientWidth > 0 && node.clientHeight > 0) chart.resize()
+  })
+}
 
 window.addEventListener('resize', resizeCharts)
 load()
@@ -160,6 +176,9 @@ onBeforeUnmount(() => {
 .statistics { max-width: 1440px; margin: auto; padding: 30px; }
 .statistics header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
 .statistics h1 { margin: 4px 0; }
+.load-error { margin-bottom: 18px; }
+.load-error :deep(.el-alert__content) { min-width: 0; }
+.load-error :deep(.el-alert__description) { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; }
 .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 12px; margin: 8px 0 18px; }
 .summary-grid article { padding: 14px 0; border-bottom: 2px solid #d8e4e1; }
 .summary-grid span { display: block; color: var(--text-muted); }

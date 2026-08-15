@@ -266,16 +266,20 @@ public class HrStatisticsServiceImpl implements HrStatisticsService {
 
     private void populateDepartments(HrStatisticsVO result, YearMonth month,
                                      List<Map<String, Object>> employees, Map<Long, BigDecimal> currentGross) {
-        List<Map<String, Object>> departments = jdbc.queryForList("SELECT id,department_name FROM hr_department");
+        List<Map<String, Object>> departments = jdbc.queryForList(
+                "SELECT id,department_name FROM hr_department "
+                        + "WHERE status=1 AND department_name IS NOT NULL AND TRIM(department_name)<>''");
         long employeeTotal = 0;
         long hireTotal = 0;
         long dismissalTotal = 0;
-        int populatedDepartments = 0;
+        BigDecimal departmentGrossTotal = ZERO;
+        long departmentGrossCount = 0;
         for (Map<String, Object> department : departments) {
             Long departmentId = number(department.get("id"));
             List<Map<String, Object>> departmentEmployees = employees.stream()
                     .filter(employee -> Objects.equals(numberOrNull(employee.get("department_id")), departmentId))
                     .toList();
+            if (departmentEmployees.isEmpty()) continue;
             long employeeCount = departmentEmployees.size();
             long hireCount = departmentEmployees.stream().filter(employee -> {
                 LocalDate hireDate = date(employee.get("hire_date"));
@@ -288,8 +292,6 @@ public class HrStatisticsServiceImpl implements HrStatisticsService {
             employeeTotal += employeeCount;
             hireTotal += hireCount;
             dismissalTotal += dismissalCount;
-            if (employeeCount > 0) populatedDepartments++;
-
             BigDecimal salaryTotal = ZERO;
             long salaryCount = 0;
             for (Map<String, Object> employee : departmentEmployees) {
@@ -299,6 +301,8 @@ public class HrStatisticsServiceImpl implements HrStatisticsService {
                     salaryCount++;
                 }
             }
+            departmentGrossTotal = departmentGrossTotal.add(salaryTotal);
+            departmentGrossCount += salaryCount;
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("departmentId", departmentId);
             item.put("departmentName", department.get("department_name"));
@@ -306,12 +310,12 @@ public class HrStatisticsServiceImpl implements HrStatisticsService {
                     : money(salaryTotal.divide(BigDecimal.valueOf(salaryCount), 8, RoundingMode.HALF_UP)));
             result.getDepartment().getAverageSalaries().add(item);
         }
-        int count = populatedDepartments;
+        int count = result.getDepartment().getAverageSalaries().size();
         result.getDepartment().setAverageEmployeeCount(average(employeeTotal, count));
         result.getDepartment().setAverageHireCount(average(hireTotal, count));
         result.getDepartment().setAverageDismissalCount(average(dismissalTotal, count));
-        result.getDepartment().setAverageGrossSalary(currentGross.isEmpty() ? ZERO
-                : money(sum(currentGross).divide(BigDecimal.valueOf(currentGross.size()), 8, RoundingMode.HALF_UP)));
+        result.getDepartment().setAverageGrossSalary(departmentGrossCount == 0 ? ZERO
+                : money(departmentGrossTotal.divide(BigDecimal.valueOf(departmentGrossCount), 8, RoundingMode.HALF_UP)));
     }
 
     private BigDecimal sum(Map<Long, BigDecimal> values) {

@@ -16,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFCell;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.openxmlformats.schemas.spreadsheetml.x2006.main.STCellType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -203,38 +204,40 @@ public class PayrollServiceImpl implements PayrollService {
         return new MonthAmounts(base, performance, hours, overtimePay, money(base.add(performance).add(overtimePay)), social, special);
     }
 
-    private void upsertPayroll(PayrollVO p) {
+    void upsertPayroll(PayrollVO p) {
         Object[] args = {p.getEmployeeId(),p.getSalaryMonth(),p.getBaseSalary(),p.getPerformance(),p.getOvertimeHours(),
                 p.getOvertimePay(),p.getGrossIncome(),p.getSocialInsuranceTotal(),p.getSpecialDeductionTotal(),
                 p.getTaxableIncomeMonth(),p.getCumulativeIncome(),p.getCumulativeDeductionBase(),
                 p.getCumulativeSocialInsurance(),p.getCumulativeSpecialDeduction(),p.getCumulativeTaxableIncome(),
                 p.getCumulativeTaxWithheld(),p.getCurrentTaxWithheld(),p.getNetPay()};
-        String update = "base_salary=EXCLUDED.base_salary,performance=EXCLUDED.performance,overtime_hours=EXCLUDED.overtime_hours,"
-                + "overtime_pay=EXCLUDED.overtime_pay,gross_income=EXCLUDED.gross_income,social_insurance_total=EXCLUDED.social_insurance_total,"
-                + "special_deduction_total=EXCLUDED.special_deduction_total,taxable_income_month=EXCLUDED.taxable_income_month,"
-                + "cumulative_income=EXCLUDED.cumulative_income,cumulative_deduction_base=EXCLUDED.cumulative_deduction_base,"
-                + "cumulative_social_insurance=EXCLUDED.cumulative_social_insurance,cumulative_special_deduction=EXCLUDED.cumulative_special_deduction,"
-                + "cumulative_taxable_income=EXCLUDED.cumulative_taxable_income,cumulative_tax_withheld=EXCLUDED.cumulative_tax_withheld,"
-                + "current_tax_withheld=EXCLUDED.current_tax_withheld,net_pay=EXCLUDED.net_pay,calculated_at=CURRENT_TIMESTAMP";
-        String sql;
         com.autohr.config.database.DatabaseType databaseType = activeDatabase == null
                 ? com.autohr.config.database.DatabaseType.SQLITE : activeDatabase.type();
-        if (databaseType == com.autohr.config.database.DatabaseType.MYSQL) {
-            String mysqlUpdate = "base_salary=VALUES(base_salary),performance=VALUES(performance),overtime_hours=VALUES(overtime_hours),"
-                    + "overtime_pay=VALUES(overtime_pay),gross_income=VALUES(gross_income),social_insurance_total=VALUES(social_insurance_total),"
-                    + "special_deduction_total=VALUES(special_deduction_total),taxable_income_month=VALUES(taxable_income_month),"
-                    + "cumulative_income=VALUES(cumulative_income),cumulative_deduction_base=VALUES(cumulative_deduction_base),"
-                    + "cumulative_social_insurance=VALUES(cumulative_social_insurance),cumulative_special_deduction=VALUES(cumulative_special_deduction),"
-                    + "cumulative_taxable_income=VALUES(cumulative_taxable_income),cumulative_tax_withheld=VALUES(cumulative_tax_withheld),"
-                    + "current_tax_withheld=VALUES(current_tax_withheld),net_pay=VALUES(net_pay),calculated_at=CURRENT_TIMESTAMP";
-            sql = "INSERT INTO hr_payroll_month (employee_id,salary_month,base_salary,performance,overtime_hours,overtime_pay,gross_income,social_insurance_total,special_deduction_total,taxable_income_month,cumulative_income,cumulative_deduction_base,cumulative_social_insurance,cumulative_special_deduction,cumulative_taxable_income,cumulative_tax_withheld,current_tax_withheld,net_pay,locked) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0) ON DUPLICATE KEY UPDATE " + mysqlUpdate;
-        } else {
-            sql = "INSERT INTO hr_payroll_month (employee_id,salary_month,base_salary,performance,overtime_hours,overtime_pay,gross_income,social_insurance_total,special_deduction_total,taxable_income_month,cumulative_income,cumulative_deduction_base,cumulative_social_insurance,cumulative_special_deduction,cumulative_taxable_income,cumulative_tax_withheld,current_tax_withheld,net_pay,locked) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0) ON CONFLICT (employee_id,salary_month) DO UPDATE SET " + update + " WHERE hr_payroll_month.locked=0";
-        }
+        String sql = payrollUpsertSql(databaseType);
         int affected = jdbc.update(sql, args);
-        if (affected == 0 && isLocked(p.getEmployeeId(), p.getSalaryMonth())) {
+        if ((affected == 0 || databaseType == DatabaseType.MYSQL)
+                && isLocked(p.getEmployeeId(), p.getSalaryMonth())) {
             throw new BusinessException("Payroll is locked for this month");
         }
+    }
+
+    static String payrollUpsertSql(DatabaseType databaseType) {
+        String insert = "INSERT INTO hr_payroll_month (employee_id,salary_month,base_salary,performance,overtime_hours,overtime_pay,gross_income,social_insurance_total,special_deduction_total,taxable_income_month,cumulative_income,cumulative_deduction_base,cumulative_social_insurance,cumulative_special_deduction,cumulative_taxable_income,cumulative_tax_withheld,current_tax_withheld,net_pay,locked) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0) ";
+        String[] columns = {"base_salary", "performance", "overtime_hours", "overtime_pay", "gross_income",
+                "social_insurance_total", "special_deduction_total", "taxable_income_month", "cumulative_income",
+                "cumulative_deduction_base", "cumulative_social_insurance", "cumulative_special_deduction",
+                "cumulative_taxable_income", "cumulative_tax_withheld", "current_tax_withheld", "net_pay"};
+        if (databaseType == DatabaseType.MYSQL) {
+            String assignments = Arrays.stream(columns)
+                    .map(column -> column + "=IF(locked=0,VALUES(" + column + ")," + column + ")")
+                    .collect(java.util.stream.Collectors.joining(","));
+            return insert + "ON DUPLICATE KEY UPDATE " + assignments
+                    + ",calculated_at=IF(locked=0,CURRENT_TIMESTAMP,calculated_at)";
+        }
+        String assignments = Arrays.stream(columns)
+                .map(column -> column + "=EXCLUDED." + column)
+                .collect(java.util.stream.Collectors.joining(","));
+        return insert + "ON CONFLICT (employee_id,salary_month) DO UPDATE SET " + assignments
+                + ",calculated_at=CURRENT_TIMESTAMP WHERE hr_payroll_month.locked=0";
     }
 
     private void assertWritable(Long employeeId, String month) { PayrollMutationGuard.requireWritable(isLocked(employeeId, month)); }
@@ -476,8 +479,12 @@ public class PayrollServiceImpl implements PayrollService {
 
     private void setMoney(Cell cell, BigDecimal value, CellStyle style) {
         BigDecimal normalized = money(value);
-        if (normalized.precision() <= 15) cell.setCellValue(normalized.doubleValue());
-        else cell.setCellValue(normalized.toPlainString());
         cell.setCellStyle(style);
+        if (cell instanceof XSSFCell xssfCell) {
+            xssfCell.getCTCell().setT(STCellType.N);
+            xssfCell.getCTCell().setV(normalized.toPlainString());
+        } else {
+            cell.setCellValue(normalized.toPlainString());
+        }
     }
 }

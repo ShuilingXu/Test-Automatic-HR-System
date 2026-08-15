@@ -44,6 +44,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -107,10 +108,55 @@ class InterviewServiceImplTest {
         assertTrue(process.getLastHeartbeatAt() != null);
         verify(processMapper).update(
                 ArgumentMatchers.<InterviewProcess>isNull(),
-                ArgumentMatchers.<Wrapper<InterviewProcess>>argThat(wrapper ->
-                        ((LambdaUpdateWrapper<?>) wrapper).getSqlSet().contains("last_heartbeat_at")));
+                ArgumentMatchers.<Wrapper<InterviewProcess>>argThat(wrapper -> {
+                    LambdaUpdateWrapper<?> update = (LambdaUpdateWrapper<?>) wrapper;
+                    return update.getSqlSet().contains("last_heartbeat_at")
+                            && update.getSqlSegment().contains("last_heartbeat_at");
+                }));
         verify(authRedisSecurityStore, never()).claimRateLimitedEvent(any(), any(), any(),
                 ArgumentMatchers.anyInt(), ArgumentMatchers.anyInt(), ArgumentMatchers.anyInt(), any());
+    }
+
+    @Test
+    void heartbeatReturnsLatestTerminalStateWhenCasUpdateDoesNotMatch() {
+        InterviewProcess active = new InterviewProcess();
+        active.setId(42L);
+        active.setIntervieweeUserId(9L);
+        active.setOverallStatus("IN_PROGRESS");
+        active.setLastHeartbeatAt(LocalDateTime.now().minusMinutes(1));
+        InterviewProcess completed = new InterviewProcess();
+        completed.setId(42L);
+        completed.setIntervieweeUserId(9L);
+        completed.setOverallStatus("COMPLETED");
+        when(processMapper.selectById(42L)).thenReturn(active, completed);
+        when(processMapper.update(
+                ArgumentMatchers.<InterviewProcess>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewProcess>>any())).thenReturn(0);
+
+        assertEquals("COMPLETED", service.heartbeat(42L, 9L).getOverallStatus());
+
+        verify(processMapper, times(2)).selectById(42L);
+    }
+
+    @Test
+    void heartbeatInsideMinimumIntervalSkipsUpdateAndReturnsLatestState() {
+        InterviewProcess active = new InterviewProcess();
+        active.setId(42L);
+        active.setIntervieweeUserId(9L);
+        active.setOverallStatus("IN_PROGRESS");
+        active.setLastHeartbeatAt(LocalDateTime.now());
+        InterviewProcess completed = new InterviewProcess();
+        completed.setId(42L);
+        completed.setIntervieweeUserId(9L);
+        completed.setOverallStatus("COMPLETED");
+        when(processMapper.selectById(42L)).thenReturn(active, completed);
+
+        assertEquals("COMPLETED", service.heartbeat(42L, 9L).getOverallStatus());
+
+        verify(processMapper, never()).update(
+                ArgumentMatchers.<InterviewProcess>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewProcess>>any());
+        verify(processMapper, times(2)).selectById(42L);
     }
 
     @Test

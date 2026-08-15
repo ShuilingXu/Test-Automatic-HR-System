@@ -72,6 +72,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -299,6 +300,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         requireCandidate(id);
         List<InterviewProcess> processes = interviewProcessMapper.selectList(new LambdaQueryWrapper<InterviewProcess>()
                 .eq(InterviewProcess::getRecruitmentCandidateId, id));
+        RecordingArtifacts recordingArtifacts = collectRecordingArtifacts(processes);
         for (InterviewProcess process : processes) {
             interviewAiRecordMapper.delete(new LambdaQueryWrapper<InterviewAiRecord>().eq(InterviewAiRecord::getProcessId, process.getId()));
             interviewVideoSessionMapper.delete(new LambdaQueryWrapper<InterviewVideoSession>().eq(InterviewVideoSession::getProcessId, process.getId()));
@@ -316,7 +318,10 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 .eq(RecruitmentResumeFile::getCandidateId, id));
         resumeFileMapper.delete(new LambdaQueryWrapper<RecruitmentResumeFile>().eq(RecruitmentResumeFile::getCandidateId, id));
         candidateMapper.deleteById(id);
-        runAfterCommit(() -> resumeFiles.forEach(this::deleteLocalResumeFile));
+        runAfterCommit(() -> {
+            resumeFiles.forEach(this::deleteResumeFileCopies);
+            deleteRecordingArtifacts(recordingArtifacts);
+        });
     }
 
     @Override
@@ -367,7 +372,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                     .ne(RecruitmentResumeFile::getId, resumeFile.getId()));
             auditLogService.log(owner.getId(), displayName(owner), owner.getRoleCode(), "RECRUITMENT", "UPLOAD_RESUME", "RECRUITMENT_RESUME", String.valueOf(resumeFile.getId()), originalName);
             runAfterCommit(() -> CompletableFuture.runAsync(() -> evaluateCandidateResumeSafely(candidateId, resumeFile.getId())));
-            runAfterCommit(() -> previousResumeFiles.forEach(this::deleteLocalResumeFile));
+            runAfterCommit(() -> previousResumeFiles.forEach(this::deleteResumeFileCopies));
             return toResumeFileVO(resumeFileMapper.selectById(resumeFile.getId()));
         } catch (IOException ex) {
             throw new BusinessException("简历上传失败: " + ex.getMessage());
@@ -696,7 +701,7 @@ public class RecruitmentServiceImpl implements RecruitmentService {
         });
     }
 
-    private void deleteLocalResumeFile(RecruitmentResumeFile resumeFile) {
+    private void deleteResumeFileCopies(RecruitmentResumeFile resumeFile) {
         if (resumeFile != null && StrUtil.isNotBlank(resumeFile.getFilePath())) {
             try {
                 deleteLocalResumePath(Paths.get(resumeFile.getFilePath()));
@@ -704,6 +709,70 @@ public class RecruitmentServiceImpl implements RecruitmentService {
                 // A malformed historic path must not make a successful deletion fail.
             }
         }
+        if (resumeFile != null && StrUtil.isNotBlank(resumeFile.getStoredFileName())) {
+            s3ObjectStorageService.deleteObjectIfEnabled("resumes/" + resumeFile.getStoredFileName());
+        }
+    }
+
+    private RecordingArtifacts collectRecordingArtifacts(List<InterviewProcess> processes) {
+        Set<String> localPaths = new LinkedHashSet<>();
+        Set<String> objectNames = new LinkedHashSet<>();
+        for (InterviewProcess process : processes) {
+            addRecordingArtifact(localPaths, objectNames,
+                    process.getAiRecordingPath(), process.getAiRecordingFileName());
+            List<InterviewProcessStage> stages = interviewProcessStageMapper.selectList(
+                    new LambdaQueryWrapper<InterviewProcessStage>()
+                            .eq(InterviewProcessStage::getProcessId, process.getId()));
+            for (InterviewProcessStage stage : stages) {
+                addRecordingArtifact(localPaths, objectNames,
+                        stage.getAiRecordingPath(), stage.getAiRecordingFileName());
+            }
+            List<InterviewVideoSession> sessions = interviewVideoSessionMapper.selectList(
+                    new LambdaQueryWrapper<InterviewVideoSession>()
+                            .eq(InterviewVideoSession::getProcessId, process.getId()));
+            for (InterviewVideoSession session : sessions) {
+                addRecordingArtifact(localPaths, objectNames,
+                        session.getRecordingPath(), session.getRecordingFileName());
+                addRecordingArtifact(localPaths, objectNames,
+                        session.getHrRecordingPath(), session.getHrRecordingFileName());
+                addRecordingArtifact(localPaths, objectNames,
+                        session.getIntervieweeRecordingPath(), session.getIntervieweeRecordingFileName());
+                addRecordingArtifact(localPaths, objectNames,
+                        session.getMergedRecordingPath(), session.getMergedRecordingFileName());
+                addRecordingArtifact(localPaths, objectNames,
+                        session.getAudioPath(), session.getAudioFileName());
+            }
+        }
+        return new RecordingArtifacts(localPaths, objectNames);
+    }
+
+    private void addRecordingArtifact(Set<String> localPaths, Set<String> objectNames,
+                                      String localPath, String fileName) {
+        if (StrUtil.isNotBlank(localPath)) {
+            localPaths.add(localPath);
+        }
+        if (StrUtil.isNotBlank(fileName)) {
+            objectNames.add("interview-recordings/" + fileName);
+        }
+    }
+
+    private void deleteRecordingArtifacts(RecordingArtifacts artifacts) {
+        artifacts.localPaths().forEach(this::deleteLocalRecordingPath);
+        s3ObjectStorageService.deleteObjectsIfEnabled(artifacts.objectNames());
+    }
+
+    private void deleteLocalRecordingPath(String path) {
+        try {
+            Path normalizedPath = Paths.get(path).normalize().toAbsolutePath();
+            if (normalizedPath.startsWith(UploadPaths.RECORDING_DIR)) {
+                Files.deleteIfExists(normalizedPath);
+            }
+        } catch (IOException | RuntimeException ignored) {
+            // Recording cleanup is best effort and cannot roll back a committed deletion.
+        }
+    }
+
+    private record RecordingArtifacts(Set<String> localPaths, Set<String> objectNames) {
     }
 
     private void deleteLocalResumePath(Path path) {

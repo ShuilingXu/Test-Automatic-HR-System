@@ -10,6 +10,8 @@ import com.autohr.common.exception.BusinessException;
 import jakarta.validation.Validation;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.xssf.usermodel.XSSFCell;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,6 +21,11 @@ import java.math.BigDecimal;
 import java.io.ByteArrayInputStream;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -137,6 +144,7 @@ class PayrollPersistenceIntegrationTest {
         insertEmployee(jdbc, 1, "E001", "2026-01-01", 1, null, "10000.00");
         jdbc.update("INSERT INTO hr_salary_history (employee_id,effective_month,base_salary_before,base_salary_after) VALUES (1,'2026-01',0,10000)");
         service(jdbc).generate(request(1L, "2026-08"));
+        jdbc.update("UPDATE hr_payroll_month SET gross_income=9999999999.99 WHERE employee_id=1 AND salary_month='2026-08'");
 
         byte[] bytes = service(jdbc).exportPayroll("2026-08", null);
 
@@ -149,7 +157,8 @@ class PayrollPersistenceIntegrationTest {
             assertEquals("E001", workbook.getSheetAt(0).getRow(1).getCell(0).getStringCellValue());
             assertEquals("员工1", workbook.getSheetAt(0).getRow(1).getCell(1).getStringCellValue());
             assertEquals("110101199001010001", workbook.getSheetAt(0).getRow(1).getCell(3).getStringCellValue());
-            assertEquals(10000D, workbook.getSheetAt(0).getRow(1).getCell(4).getNumericCellValue());
+            assertEquals(CellType.NUMERIC, workbook.getSheetAt(0).getRow(1).getCell(4).getCellType());
+            assertEquals("9999999999.99", ((XSSFCell) workbook.getSheetAt(0).getRow(1).getCell(4)).getCTCell().getV());
             assertEquals(0D, workbook.getSheetAt(0).getRow(1).getCell(5).getNumericCellValue());
         }
     }
@@ -164,6 +173,32 @@ class PayrollPersistenceIntegrationTest {
         PayrollVO payroll = service(jdbc).generate(request(1L, "2026-05")).get(0);
 
         assertEquals(new BigDecimal("10000.00"), payroll.getBaseSalary());
+    }
+
+    @Test
+    void concurrentGenerationKeepsOnePayrollRow() throws Exception {
+        JdbcTemplate jdbc = migratedDatabase("concurrent-generation.db");
+        insertDepartmentAndJob(jdbc);
+        insertEmployee(jdbc, 1, "E001", "2026-01-01", 1, null, "10000.00");
+        jdbc.update("INSERT INTO hr_salary_history (employee_id,effective_month,base_salary_before,base_salary_after) VALUES (1,'2026-01',0,10000)");
+        PayrollServiceImpl payrollService = service(jdbc);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<List<PayrollVO>> first = executor.submit(() -> generateAfterBarrier(payrollService, ready, start));
+            Future<List<PayrollVO>> second = executor.submit(() -> generateAfterBarrier(payrollService, ready, start));
+            org.junit.jupiter.api.Assertions.assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+            assertEquals(1, first.get(10, TimeUnit.SECONDS).size());
+            assertEquals(1, second.get(10, TimeUnit.SECONDS).size());
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertEquals(1L, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM hr_payroll_month WHERE employee_id=1 AND salary_month='2026-08'",
+                Long.class));
     }
 
     @Test
@@ -196,6 +231,20 @@ class PayrollPersistenceIntegrationTest {
         request.setEmployeeId(employeeId);
         request.setSalaryMonth(month);
         return request;
+    }
+
+    private List<PayrollVO> generateAfterBarrier(PayrollServiceImpl service, CountDownLatch ready,
+                                                  CountDownLatch start) {
+        ready.countDown();
+        try {
+            if (!start.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("concurrent generation barrier timed out");
+            }
+            return service.generate(request(1L, "2026-08"));
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(ex);
+        }
     }
 
     private void insertDepartmentAndJob(JdbcTemplate jdbc) {

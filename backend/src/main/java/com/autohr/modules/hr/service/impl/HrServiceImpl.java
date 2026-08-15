@@ -10,6 +10,7 @@ import com.autohr.modules.hr.dto.DepartmentVO;
 import com.autohr.modules.hr.dto.EmployeeSaveRequest;
 import com.autohr.modules.hr.dto.EmployeeVO;
 import com.autohr.modules.hr.dto.HrDashboardVO;
+import com.autohr.modules.hr.dto.HrStatisticsVO;
 import com.autohr.modules.hr.dto.IntegrationBindingSaveRequest;
 import com.autohr.modules.hr.dto.IntegrationBindingVO;
 import com.autohr.modules.hr.entity.Department;
@@ -127,6 +128,7 @@ public class HrServiceImpl implements HrService {
         RecruitmentJob job = requireJob(request.getJobId());
         BigDecimal previousSalary = employee.getBaseSalary() == null ? BigDecimal.ZERO : employee.getBaseSalary();
         String existingCode = employee.getEmployeeCode();
+        LocalDate existingHireDate = employee.getHireDate();
         BeanUtils.copyProperties(request, employee);
         employee.setPositionName(job.getJobTitle());
         employee.setBaseSalary(request.getBaseSalary().setScale(2, java.math.RoundingMode.HALF_UP));
@@ -136,7 +138,8 @@ public class HrServiceImpl implements HrService {
         if (StrUtil.isBlank(employee.getEmployeeCode())) {
             employee.setEmployeeCode(resolvedId == null ? buildEmployeeCode() : existingCode);
         }
-        employee.setHireDate(Objects.requireNonNullElse(request.getHireDate(), LocalDate.now(BUSINESS_ZONE)));
+        employee.setHireDate(Objects.requireNonNullElse(request.getHireDate(),
+                resolvedId == null ? LocalDate.now(BUSINESS_ZONE) : existingHireDate));
         employee.setEmploymentStatus(Objects.requireNonNullElse(request.getEmploymentStatus(), EmploymentStatus.ACTIVE.getCode()));
         if (resolvedId == null) {
             employeeMapper.insert(employee);
@@ -145,7 +148,7 @@ public class HrServiceImpl implements HrService {
         }
         if (resolvedId == null || previousSalary.compareTo(employee.getBaseSalary()) != 0) {
             saveSalaryHistory(employee.getId(), previousSalary, employee.getBaseSalary(), request.getSalaryChangeReason(),
-                    request.getEffectiveMonth(), operatorUserId);
+                    request.getEffectiveMonth(), employee.getHireDate(), operatorUserId);
         }
         return toEmployeeVO(requireEmployee(employee.getId()), loadDepartmentMap(), loadEmployeeMap(), false);
     }
@@ -263,7 +266,9 @@ public class HrServiceImpl implements HrService {
         dashboard.setOpenJobCount(jdbc.queryForObject("SELECT COUNT(*) FROM recruitment_job WHERE status=1 AND (close_date IS NULL OR close_date>=?)", Long.class, LocalDate.now(BUSINESS_ZONE)));
         dashboard.setCurrentMonthHireCount(jdbc.queryForObject("SELECT COUNT(*) FROM hr_employee WHERE hire_date>=? AND hire_date<=?", Long.class, currentMonth.atDay(1), currentMonth.atEndOfMonth()));
         dashboard.setCurrentMonthDismissalCount(jdbc.queryForObject("SELECT COUNT(*) FROM hr_employee WHERE dismissal_date>=? AND dismissal_date<=?", Long.class, currentMonth.atDay(1), currentMonth.atEndOfMonth()));
-        dashboard.setAverageGrossSalary(hrStatisticsService.statistics(currentMonth.toString()).getSalary().getAverageGross());
+        HrStatisticsVO statistics = hrStatisticsService.statistics(currentMonth.toString());
+        dashboard.setAverageGrossSalary(statistics.getSalary().getAverageGross());
+        dashboard.setStatistics(statistics);
         return dashboard;
     }
 
@@ -354,9 +359,10 @@ public class HrServiceImpl implements HrService {
     }
 
     private void saveSalaryHistory(Long employeeId, BigDecimal before, BigDecimal after, String reason,
-                                   String effectiveMonth, Long operatorUserId) {
+                                   String effectiveMonth, LocalDate hireDate, Long operatorUserId) {
         String month = StrUtil.isBlank(effectiveMonth)
-                ? YearMonth.now(BUSINESS_ZONE).toString() : effectiveMonth;
+                ? YearMonth.from(Objects.requireNonNull(hireDate, "Employee hire date is required")).toString()
+                : effectiveMonth;
         try {
             YearMonth.parse(month);
         } catch (RuntimeException ex) {
@@ -369,9 +375,9 @@ public class HrServiceImpl implements HrService {
         if (history == null) {
             history = new SalaryHistory();
             history.setEmployeeId(employeeId);
-            history.setEffectiveMonth(month);
             history.setCreatedAt(java.time.LocalDateTime.now());
         }
+        history.setEffectiveMonth(month);
         history.setBaseSalaryBefore(before);
         history.setBaseSalaryAfter(after);
         history.setReason(StrUtil.blankToDefault(reason, "薪资录入"));

@@ -123,6 +123,8 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 @Slf4j
 public class InterviewServiceImpl implements InterviewService {
+
+    private static final long HEARTBEAT_MIN_INTERVAL_SECONDS = 20;
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
 
     private static final Pattern SDP_ICE_UFRAG_PATTERN = Pattern.compile("(?m)^a=ice-ufrag:([^\\r\\n]+)");
@@ -651,10 +653,18 @@ public class InterviewServiceImpl implements InterviewService {
         InterviewProcess process = requireIntervieweeProcess(processId, intervieweeUserId);
         if (StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")) {
             LocalDateTime heartbeatAt = LocalDateTime.now();
+            LocalDateTime heartbeatCutoff = heartbeatAt.minusSeconds(HEARTBEAT_MIN_INTERVAL_SECONDS);
+            if (process.getLastHeartbeatAt() != null
+                    && process.getLastHeartbeatAt().isAfter(heartbeatCutoff)) {
+                return toIntervieweeProcessVO(requireProcess(processId));
+            }
             int updated = processMapper.update(null, new LambdaUpdateWrapper<InterviewProcess>()
                     .eq(InterviewProcess::getId, processId)
                     .eq(InterviewProcess::getIntervieweeUserId, intervieweeUserId)
                     .eq(InterviewProcess::getOverallStatus, "IN_PROGRESS")
+                    .and(wrapper -> wrapper.isNull(InterviewProcess::getLastHeartbeatAt)
+                            .or()
+                            .le(InterviewProcess::getLastHeartbeatAt, heartbeatCutoff))
                     .set(InterviewProcess::getLastHeartbeatAt, heartbeatAt));
             if (updated != 1) {
                 process = requireProcess(processId);

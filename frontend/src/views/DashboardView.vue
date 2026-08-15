@@ -33,7 +33,6 @@ import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import AdminNav from '../components/AdminNav.vue'
 import { hrApi } from '../services/api'
-import { currentMonth } from '../utils/date'
 
 const dashboard = ref({})
 const stats = ref(null)
@@ -58,7 +57,7 @@ const cards = computed(() => [
   { id: 'openJobCount', label: '开放岗位数', value: dashboard.value.openJobCount || 0 },
   { id: 'newHireCount', label: '本月新入职', value: dashboard.value.currentMonthHireCount || 0 },
   { id: 'dismissalCount', label: '本月辞退', value: dashboard.value.currentMonthDismissalCount || 0 },
-  { id: 'averageGross', label: '全员平均税前薪资', value: money(stats.value?.salary?.averageGross) },
+  { id: 'averageGross', label: '全员平均税前薪资', value: money(stats.value?.salary?.averageGross ?? dashboard.value.averageGrossSalary) },
   { id: 'grossTotal', label: '全员税前薪资总额', value: money(stats.value?.salary?.grossTotal) },
   { id: 'salaryGrowth', label: '薪资总额环比', value: percent(stats.value?.salary?.monthOverMonth) },
   { id: 'candidateCount', label: '投递人员数', value: stats.value?.recruitment?.candidateCount || 0 },
@@ -121,11 +120,11 @@ watch(configVisible, (visible) => {
   }
 })
 async function load() {
-  const [dashboardResponse, statisticsResponse, configResponse] = await Promise.all([
-    hrApi.getDashboard(), hrApi.statistics(currentMonth()), hrApi.getDashboardConfig(),
+  const [dashboardResponse, configResponse] = await Promise.all([
+    hrApi.getDashboard(), hrApi.getDashboardConfig(),
   ])
   dashboard.value = dashboardResponse.data
-  stats.value = statisticsResponse.data
+  stats.value = dashboardResponse.data.statistics
   try { applyStoredConfig(JSON.parse(configResponse.data.configJson)) } catch { applyStoredConfig(defaultConfig) }
   draw()
 }

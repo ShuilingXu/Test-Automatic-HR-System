@@ -2,6 +2,7 @@ package com.autohr.modules.system.controller;
 
 import com.autohr.common.api.ApiResponse;
 import com.autohr.common.exception.BusinessException;
+import com.autohr.common.file.S3EndpointValidator;
 import com.autohr.modules.system.service.SystemConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,7 +14,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
-import java.net.URI;
 
 @RestController
 @RequestMapping("/api/system")
@@ -24,7 +24,7 @@ public class SystemConfigController {
             "ALIYUN_SMS_ACCESS_KEY_ID", "ALIYUN_SMS_ACCESS_KEY_SECRET", "ALIYUN_SMS_ENDPOINT", "ALIYUN_SMS_SIGN_NAME", "ALIYUN_SMS_TEMPLATE_CODE",
             "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM", "SMTP_SSL_ENABLED", "SMTP_STARTTLS_ENABLED",
             "ALIYUN_STT_ACCESS_KEY_ID", "ALIYUN_STT_ACCESS_KEY_SECRET", "ALIYUN_STT_APP_KEY", "ALIYUN_STT_ENDPOINT",
-            "S3_ENABLED", "S3_ENDPOINT", "S3_INTERNAL_ENDPOINT_ENABLED", "S3_INTERNAL_ENDPOINT", "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_SESSION_TOKEN", "S3_PREFIX", "S3_PATH_STYLE_ACCESS",
+            "S3_ENABLED", "S3_ENDPOINT", "S3_INTERNAL_ENDPOINT_ENABLED", "S3_INTERNAL_ENDPOINT", "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_SESSION_TOKEN", "S3_PREFIX", "S3_PATH_STYLE_ACCESS", "S3_ALLOW_HTTP_ENDPOINTS", "S3_ALLOW_PRIVATE_ENDPOINTS",
             "DB_TYPE", "DB_URL", "DB_USERNAME", "DB_PASSWORD", "JWT_SECRET",
             "INTERVIEW_VIDEO_FFMPEG_PATH", "INTERVIEW_VIDEO_VIDEO_CODEC", "INTERVIEW_VIDEO_AUDIO_CODEC",
             "INTERVIEW_STUN_URLS", "INTERVIEW_TURN_URLS", "INTERVIEW_TURN_SHARED_SECRET", "INTERVIEW_TURN_CREDENTIAL_TTL_SECONDS",
@@ -87,10 +87,12 @@ public class SystemConfigController {
         requireValue(config, "S3_BUCKET", "S3 bucket is required when object storage is enabled");
         requireValue(config, "S3_ACCESS_KEY_ID", "S3 access key is required when object storage is enabled");
         requireValue(config, "S3_SECRET_ACCESS_KEY", "S3 secret key is required when object storage is enabled");
-        validateHttpEndpoint(config.get("S3_ENDPOINT"), "S3 external endpoint");
+        boolean allowHttpEndpoints = Boolean.parseBoolean(config.get("S3_ALLOW_HTTP_ENDPOINTS"));
+        boolean allowPrivateEndpoints = Boolean.parseBoolean(config.get("S3_ALLOW_PRIVATE_ENDPOINTS"));
+        validateS3Endpoint(config.get("S3_ENDPOINT"), "S3 external endpoint", allowHttpEndpoints, allowPrivateEndpoints);
         if (Boolean.parseBoolean(config.get("S3_INTERNAL_ENDPOINT_ENABLED"))) {
             requireValue(config, "S3_INTERNAL_ENDPOINT", "S3 internal endpoint is required when internal upload is enabled");
-            validateHttpEndpoint(config.get("S3_INTERNAL_ENDPOINT"), "S3 internal endpoint");
+            validateS3Endpoint(config.get("S3_INTERNAL_ENDPOINT"), "S3 internal endpoint", allowHttpEndpoints, allowPrivateEndpoints);
         }
     }
 
@@ -100,17 +102,11 @@ public class SystemConfigController {
         }
     }
 
-    private void validateHttpEndpoint(String value, String label) {
-        try {
-            URI endpoint = URI.create(value.trim());
-            if (endpoint.getHost() == null
-                    || !("http".equalsIgnoreCase(endpoint.getScheme()) || "https".equalsIgnoreCase(endpoint.getScheme()))
-                    || endpoint.getRawUserInfo() != null
-                    || endpoint.getRawFragment() != null) {
-                throw new IllegalArgumentException("unsupported endpoint");
-            }
-        } catch (IllegalArgumentException ex) {
-            throw new BusinessException(label + " must be an absolute HTTP or HTTPS URL");
+    private void validateS3Endpoint(String value, String label, boolean allowHttpEndpoints,
+                                    boolean allowPrivateEndpoints) {
+        if (!S3EndpointValidator.isAllowed(value, allowHttpEndpoints, allowPrivateEndpoints)) {
+            throw new BusinessException(label
+                    + " must be an allowed absolute URL (HTTPS and public address by default; use the explicit S3 security switches for trusted MinIO/VPC endpoints)");
         }
     }
 }

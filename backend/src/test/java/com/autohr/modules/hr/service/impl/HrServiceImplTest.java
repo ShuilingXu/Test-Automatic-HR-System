@@ -22,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -94,7 +95,7 @@ class HrServiceImplTest {
     }
 
     @Test
-    void salaryChangeToZeroUpdatesTheCurrentMonthHistoryAndConfirmsTheSalary() {
+    void salaryChangeToZeroDefaultsHistoryToTheHireMonthAndConfirmsTheSalary() {
         Department department = department(7L);
         Employee employee = new Employee();
         employee.setId(42L);
@@ -102,6 +103,7 @@ class HrServiceImplTest {
         employee.setFullName("Test User");
         employee.setDepartmentId(7L);
         employee.setJobId(3L);
+        employee.setHireDate(LocalDate.of(2024, 3, 18));
         employee.setBaseSalary(new BigDecimal("10000.00"));
         employee.setSalaryConfirmed(0);
         SalaryHistory history = new SalaryHistory();
@@ -125,6 +127,8 @@ class HrServiceImplTest {
         assertEquals(1, employee.getSalaryConfirmed());
         assertEquals(new BigDecimal("10000.00"), history.getBaseSalaryBefore());
         assertEquals(new BigDecimal("0.00"), history.getBaseSalaryAfter());
+        assertEquals("2024-03", history.getEffectiveMonth());
+        assertEquals(LocalDate.of(2024, 3, 18), employee.getHireDate());
         assertEquals("协商调整", history.getReason());
         assertEquals(99L, history.getOperatorUserId());
         verify(salaryHistoryMapper).updateById(history);

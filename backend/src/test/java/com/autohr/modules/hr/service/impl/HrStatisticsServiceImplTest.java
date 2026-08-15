@@ -92,6 +92,26 @@ class HrStatisticsServiceImplTest {
         assertEquals(2L, statistics.getDismissal().getReasons().get(0).get("value"));
     }
 
+    @Test
+    void departmentAveragesExcludeDisabledAndEmptyDepartments() throws Exception {
+        JdbcTemplate jdbc = migratedDatabase("department-filter.db");
+        jdbc.update("INSERT INTO hr_department (department_code,department_name,description,status) VALUES ('D1','Active','Active',1)");
+        jdbc.update("INSERT INTO hr_department (department_code,department_name,description,status) VALUES ('D2','Disabled','Disabled',0)");
+        jdbc.update("INSERT INTO hr_department (department_code,department_name,description,status) VALUES ('D3','Empty','Empty',1)");
+        jdbc.update("INSERT INTO recruitment_job (job_code,job_title,department_name,requirements,responsibilities,publish_date) VALUES ('J1','Engineer','Active','Requirements','Responsibilities','2026-01-01')");
+        insertEmployee(jdbc, "E001", "Active Employee", "110101199001010011", "13800000001", 1, new BigDecimal("10000.00"));
+        insertEmployee(jdbc, "E002", "Disabled Employee", "110101199001010022", "13800000002", 1, new BigDecimal("90000.00"));
+        jdbc.update("UPDATE hr_employee SET department_id=2 WHERE employee_code='E002'");
+        jdbc.update("INSERT INTO hr_salary_history (employee_id,effective_month,base_salary_before,base_salary_after) VALUES (1,'2026-01',0,10000),(2,'2026-01',0,90000)");
+
+        HrStatisticsVO statistics = new HrStatisticsServiceImpl(jdbc).statistics("2026-08");
+
+        assertEquals(1, statistics.getDepartment().getAverageSalaries().size());
+        assertEquals("Active", statistics.getDepartment().getAverageSalaries().get(0).get("departmentName"));
+        assertEquals(new BigDecimal("1.00"), statistics.getDepartment().getAverageEmployeeCount());
+        assertEquals(new BigDecimal("10000.00"), statistics.getDepartment().getAverageGrossSalary());
+    }
+
     private JdbcTemplate migratedDatabase(String fileName) throws Exception {
         String url = "jdbc:sqlite:" + tempDirectory.resolve(fileName).toString().replace('\\', '/');
         DriverManagerDataSource dataSource = new DriverManagerDataSource(url);
