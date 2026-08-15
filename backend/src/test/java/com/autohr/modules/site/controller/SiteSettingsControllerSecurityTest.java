@@ -78,7 +78,7 @@ class SiteSettingsControllerSecurityTest {
     @Test
     void anonymousUsersCannotReadAdminSettings() throws Exception {
         mockMvc.perform(get("/api/site-settings/admin"))
-                .andExpect(status().is4xxClientError());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
