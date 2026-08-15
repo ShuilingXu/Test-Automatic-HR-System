@@ -24,6 +24,8 @@ public class SiteSettingsService {
 
     private final ObjectMapper objectMapper;
     private final Path settingsPath;
+    /** The settings file changes only through this service, so a volatile snapshot is sufficient. */
+    private volatile SiteSettings cachedSettings;
 
     @Autowired
     public SiteSettingsService(ObjectMapper objectMapper,
@@ -37,12 +39,18 @@ public class SiteSettingsService {
     }
 
     public synchronized SiteSettings get() {
+        SiteSettings snapshot = cachedSettings;
+        if (snapshot != null) {
+            return snapshot;
+        }
         if (!Files.exists(settingsPath)) {
-            return DEFAULT_SETTINGS;
+            cachedSettings = DEFAULT_SETTINGS;
+            return cachedSettings;
         }
         try {
-            return normalize(objectMapper.readValue(
+            cachedSettings = normalize(objectMapper.readValue(
                     Files.readString(settingsPath, StandardCharsets.UTF_8), SiteSettings.class));
+            return cachedSettings;
         } catch (IOException ex) {
             throw new IllegalStateException("Failed to read site settings", ex);
         }
@@ -67,6 +75,7 @@ public class SiteSettingsService {
             } catch (AtomicMoveNotSupportedException ex) {
                 Files.move(temporaryPath, absolutePath, StandardCopyOption.REPLACE_EXISTING);
             }
+            cachedSettings = settings;
             return settings;
         } catch (IOException ex) {
             throw new IllegalStateException("Failed to save site settings", ex);

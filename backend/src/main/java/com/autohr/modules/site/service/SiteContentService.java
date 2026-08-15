@@ -11,21 +11,30 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Small file-backed store for the public information pages. Content is independent from .env. */
 @Service
 public class SiteContentService {
 
+    private static final Set<String> ALLOWED_FIELDS = Set.of(
+            "id", "type", "title", "summary", "content", "cover", "published", "publishedAt");
+
     private final ObjectMapper objectMapper;
     private final Path contentPath;
+    /** Cached snapshots avoid disk I/O for every public page request. */
+    private volatile List<Map<String, Object>> cachedItems;
 
     @Autowired
     public SiteContentService(ObjectMapper objectMapper,
@@ -50,6 +59,7 @@ public class SiteContentService {
     public synchronized Map<String, Object> save(Map<String, Object> incoming) {
         List<Map<String, Object>> items = read();
         Map<String, Object> updates = incoming == null ? Map.of() : incoming;
+        validateAllowedFields(updates);
         long id = number(updates.get("id"));
         long requestedId = id;
         Map<String, Object> existingItem = id == 0 ? null : items.stream()
@@ -88,6 +98,15 @@ public class SiteContentService {
     }
 
     private List<Map<String, Object>> read() {
+        List<Map<String, Object>> snapshot = cachedItems;
+        if (snapshot == null) {
+            snapshot = immutableSnapshot(loadFromDisk());
+            cachedItems = snapshot;
+        }
+        return mutableCopy(snapshot);
+    }
+
+    private List<Map<String, Object>> loadFromDisk() {
         if (!Files.exists(contentPath)) {
             return defaultContent();
         }
@@ -99,16 +118,66 @@ public class SiteContentService {
     }
 
     private void write(List<Map<String, Object>> items) {
+        Path absolutePath = contentPath.toAbsolutePath();
+        Path parent = absolutePath.getParent();
+        Path temporaryDirectory = parent == null ? Paths.get(".").toAbsolutePath() : parent;
+        Path temporaryPath = null;
         try {
-            Files.writeString(contentPath, objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(items), StandardCharsets.UTF_8);
+            Files.createDirectories(temporaryDirectory);
+            temporaryPath = Files.createTempFile(temporaryDirectory, ".site-content-", ".tmp");
+            Files.writeString(temporaryPath,
+                    objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(items),
+                    StandardCharsets.UTF_8);
+            try {
+                Files.move(temporaryPath, absolutePath,
+                        StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException ex) {
+                Files.move(temporaryPath, absolutePath, StandardCopyOption.REPLACE_EXISTING);
+            }
+            // Invalidate only after the new file is safely committed.
+            cachedItems = null;
         } catch (IOException ex) {
             throw new IllegalStateException("保存站点内容失败", ex);
+        } finally {
+            if (temporaryPath != null) {
+                try {
+                    Files.deleteIfExists(temporaryPath);
+                } catch (IOException ignored) {
+                    // Runtime cleanup can remove an abandoned temporary file later.
+                }
+            }
         }
+    }
+
+    private List<Map<String, Object>> immutableSnapshot(List<Map<String, Object>> items) {
+        List<Map<String, Object>> snapshot = new ArrayList<>();
+        for (Map<String, Object> item : items) {
+            snapshot.add(Collections.unmodifiableMap(new LinkedHashMap<>(item)));
+        }
+        return Collections.unmodifiableList(snapshot);
+    }
+
+    private List<Map<String, Object>> mutableCopy(List<Map<String, Object>> items) {
+        List<Map<String, Object>> copy = new ArrayList<>();
+        for (Map<String, Object> item : items) {
+            copy.add(new LinkedHashMap<>(item));
+        }
+        return copy;
     }
 
     private long number(Object value) {
         if (value instanceof Number number) return number.longValue();
         try { return Long.parseLong(String.valueOf(value)); } catch (Exception ignored) { return 0; }
+    }
+
+    private void validateAllowedFields(Map<String, Object> updates) {
+        List<String> unknown = updates.keySet().stream()
+                .filter(name -> !ALLOWED_FIELDS.contains(name))
+                .sorted()
+                .toList();
+        if (!unknown.isEmpty()) {
+            throw new BusinessException("Unsupported site content fields: " + String.join(", ", unknown));
+        }
     }
 
     private List<Map<String, Object>> defaultContent() {

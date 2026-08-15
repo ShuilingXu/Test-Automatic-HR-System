@@ -1,6 +1,13 @@
 server:
   port: 8080
 
+# File-backed branding and public content. Override these paths in each deployment so
+# changing the JVM working directory cannot silently change or lose site data.
+site-settings:
+  path: ${SITE_SETTINGS_PATH:.site-settings.json}
+site-content:
+  path: ${SITE_CONTENT_PATH:.site-content.json}
+
 spring:
   config:
     import:
@@ -46,6 +53,16 @@ security:
   config-encryption-key: ${CONFIG_ENCRYPTION_KEY:${JWT_SECRET}}
 
 auth:
+  session-cookie:
+    name: ${AUTH_SESSION_COOKIE_NAME:AUTOHR_SESSION}
+    secure: ${AUTH_SESSION_COOKIE_SECURE:true}
+    same-site: ${AUTH_SESSION_COOKIE_SAME_SITE:Lax}
+    max-age-ms: ${AUTH_SESSION_COOKIE_MAX_AGE_MS:${JWT_EXPIRATION:7200000}}
+  csrf-cookie:
+    name: ${AUTH_CSRF_COOKIE_NAME:AUTOHR_CSRF}
+    header: ${AUTH_CSRF_HEADER:X-CSRF-Token}
+    secure: ${AUTH_CSRF_COOKIE_SECURE:${AUTH_SESSION_COOKIE_SECURE:true}}
+    same-site: ${AUTH_CSRF_COOKIE_SAME_SITE:${AUTH_SESSION_COOKIE_SAME_SITE:Lax}}
   security:
     redis-key-prefix: ${AUTH_REDIS_KEY_PREFIX:autohr:auth}
     trust-forwarded-headers: ${AUTH_TRUST_FORWARDED_HEADERS:false}

@@ -5,6 +5,9 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
 const request = axios.create({
   baseURL: apiBaseUrl,
   timeout: 10000,
+  withCredentials: true,
+  xsrfCookieName: 'AUTOHR_CSRF',
+  xsrfHeaderName: 'X-CSRF-Token',
 })
 
 request.interceptors.request.use((config) => {
@@ -299,7 +302,6 @@ export const interviewApi = {
   updateProcessRemark(processId, payload) { return request.post(`/interview/hr/processes/${processId}/remark`, payload) },
   submitAiAnswer(payload) { return request.post('/interview/interviewee/ai-answer', payload, { timeout: 120000 }) },
   async submitAiAnswerStream(payload, onEvent, options = {}) {
-    const token = readSessionToken()
     const streamUrl = `${apiBaseUrl.replace(/\/$/, '')}/interview/interviewee/ai-answer/stream`
     const abortController = new AbortController()
     const abortFromCaller = () => abortController.abort()
@@ -336,8 +338,9 @@ export const interviewApi = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...csrfHeaders(),
         },
+        credentials: 'include',
         body: JSON.stringify(payload),
         signal: abortController.signal,
       })
@@ -367,4 +370,12 @@ export const interviewApi = {
       reader?.releaseLock()
     }
   },
+}
+
+function csrfHeaders() {
+  const cookie = typeof document === 'undefined'
+    ? ''
+    : document.cookie.split('; ').find((item) => item.startsWith('AUTOHR_CSRF='))
+  const token = cookie ? decodeURIComponent(cookie.slice('AUTOHR_CSRF='.length)) : ''
+  return token ? { 'X-CSRF-Token': token } : {}
 }

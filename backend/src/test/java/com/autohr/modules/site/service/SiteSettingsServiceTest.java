@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -63,5 +65,19 @@ class SiteSettingsServiceTest {
         SiteSettings backslashPath = service.save(new SiteSettings(
                 "/\\external.example/logo.png", "Example", "Subtitle", "Footer"));
         assertEquals("", backslashPath.logoUrl());
+    }
+
+    @Test
+    void retainsTheLastKnownSettingsSnapshotUntilThisServiceSavesAgain() throws Exception {
+        Path file = tempDirectory.resolve("site-settings.json");
+        SiteSettingsService service = new SiteSettingsService(new ObjectMapper(), file);
+        service.save(new SiteSettings("", "Cached HR", "Cached subtitle", "Cached footer"));
+
+        Files.writeString(file,
+                "{\"logoUrl\":\"\",\"siteTitle\":\"External write\",\"siteSubtitle\":\"External\",\"footerHtml\":\"External\"}",
+                StandardCharsets.UTF_8);
+
+        assertEquals("Cached HR", service.get().siteTitle());
+        assertEquals("External write", new SiteSettingsService(new ObjectMapper(), file).get().siteTitle());
     }
 }

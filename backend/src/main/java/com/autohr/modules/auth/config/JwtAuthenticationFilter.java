@@ -24,11 +24,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final SysUserMapper sysUserMapper;
+    private final AuthCookieService authCookieService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
         String header = request.getHeader("Authorization");
-        String token = null;
+        String token = authCookieService.read(request);
         if (header != null && header.startsWith("Bearer ")) {
             token = header.substring(7);
         }

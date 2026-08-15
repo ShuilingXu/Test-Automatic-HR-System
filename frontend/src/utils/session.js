@@ -7,20 +7,10 @@ function isSessionUser(value) {
 }
 
 export function readSessionToken() {
-  const token = window.localStorage.getItem(TOKEN_KEY)
-  if (token) {
-    window.localStorage.removeItem(LEGACY_TOKEN_KEY)
-    return token
-  }
-  const legacyToken = window.localStorage.getItem(LEGACY_TOKEN_KEY)
-  if (!legacyToken) return null
-  try {
-    window.localStorage.setItem(TOKEN_KEY, legacyToken)
-    window.localStorage.removeItem(LEGACY_TOKEN_KEY)
-  } catch {
-    // Keep the existing login usable when browser storage cannot be updated.
-  }
-  return legacyToken
+  // The access token is HttpOnly and is attached by the browser cookie jar.
+  // Keep this helper for the streaming API and old callers, but never read or
+  // migrate a bearer token from script-readable storage.
+  return null
 }
 
 export function readSessionUser() {
@@ -47,11 +37,11 @@ export function writeSessionUser(user) {
 }
 
 export function writeSession(token, user) {
-  if (typeof token !== 'string' || !token.trim() || !isSessionUser(user)) {
+  if (!isSessionUser(user)) {
     clearSession()
     return
   }
-  window.localStorage.setItem(TOKEN_KEY, token)
+  window.localStorage.removeItem(TOKEN_KEY)
   window.localStorage.removeItem(LEGACY_TOKEN_KEY)
   writeSessionUser(user)
 }

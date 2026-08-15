@@ -19,8 +19,10 @@ import com.autohr.modules.auth.service.AuthRateLimitService;
 import com.autohr.modules.auth.service.AuditLogService;
 import com.autohr.modules.auth.service.CaptchaService;
 import com.autohr.modules.auth.service.VerificationCodeService;
+import com.autohr.modules.auth.config.AuthCookieService;
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -44,6 +46,7 @@ public class AuthController {
     private final VerificationCodeService verificationCodeService;
     private final CaptchaService captchaService;
     private final AuthRateLimitService authRateLimitService;
+    private final AuthCookieService authCookieService;
 
     @GetMapping("/captcha")
     public ApiResponse<CaptchaVO> captcha(HttpServletRequest request) {
@@ -52,9 +55,13 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ApiResponse<LoginResponse> login(HttpServletRequest httpRequest, @Valid @RequestBody LoginRequest request) {
+    public ApiResponse<LoginResponse> login(HttpServletRequest httpRequest, HttpServletResponse response,
+                                            @Valid @RequestBody LoginRequest request) {
         authRateLimitService.checkLogin(httpRequest, request.getUsername());
-        return ApiResponse.success(authService.login(request));
+        LoginResponse login = authService.login(request);
+        authCookieService.write(response, login.getToken());
+        login.setToken(null);
+        return ApiResponse.success(login);
     }
 
     @PostMapping("/register")
@@ -91,15 +98,21 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ApiResponse<Void> logout(Authentication authentication) {
-        authService.logout(authentication.getName());
+    public ApiResponse<Void> logout(Authentication authentication, HttpServletResponse response) {
+        if (authentication != null) {
+            authService.logout(authentication.getName());
+        }
+        authCookieService.clear(response);
         return ApiResponse.success("logged out", null);
     }
 
     @PostMapping("/change-password")
-    public ApiResponse<LoginResponse> changePassword(Authentication authentication,
+    public ApiResponse<LoginResponse> changePassword(Authentication authentication, HttpServletResponse response,
                                                      @Valid @RequestBody PasswordChangeRequest request) {
-        return ApiResponse.success(authService.changePassword(authentication.getName(), request));
+        LoginResponse login = authService.changePassword(authentication.getName(), request);
+        authCookieService.write(response, login.getToken());
+        login.setToken(null);
+        return ApiResponse.success(login);
     }
 
     @PostMapping("/profile")

@@ -18,6 +18,8 @@ import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
+import jakarta.servlet.http.Cookie;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
@@ -83,6 +85,8 @@ class SiteSettingsControllerSecurityTest {
     @WithMockUser(authorities = "ROLE_HR_ADMIN")
     void hrAdministratorsCannotChangeSiteSettings() throws Exception {
         mockMvc.perform(post("/api/site-settings/admin")
+                        .cookie(new Cookie("AUTOHR_CSRF", "test-csrf-token"))
+                        .header("X-CSRF-Token", "test-csrf-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"logoUrl\":\"\",\"siteTitle\":\"Example HR\","
                                 + "\"siteSubtitle\":\"People operations\",\"footerHtml\":\"Footer\"}"))
@@ -96,6 +100,8 @@ class SiteSettingsControllerSecurityTest {
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/site-settings/admin")
+                        .cookie(new Cookie("AUTOHR_CSRF", "test-csrf-token"))
+                        .header("X-CSRF-Token", "test-csrf-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"logoUrl\":\"\",\"siteTitle\":\"Example HR\","
                                 + "\"siteSubtitle\":\"People operations\",\"footerHtml\":\"Footer\"}"))

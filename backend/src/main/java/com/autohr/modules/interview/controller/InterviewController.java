@@ -129,14 +129,25 @@ public class InterviewController {
     }
 
     @PostMapping("/hr/knowledge-items")
-    public ApiResponse<InterviewVO> saveKnowledgeItem(@Valid @RequestBody KnowledgeItemSaveRequest request) {
-        return ApiResponse.success(interviewService.saveKnowledgeItem(request));
+    @Transactional
+    public ApiResponse<InterviewVO> saveKnowledgeItem(Authentication authentication,
+                                                       @Valid @RequestBody KnowledgeItemSaveRequest request) {
+        InterviewVO saved = interviewService.saveKnowledgeItem(request);
+        audit(authentication, request.getId() == null ? "CREATE_KNOWLEDGE_ITEM" : "UPDATE_KNOWLEDGE_ITEM",
+                "KNOWLEDGE_ITEM", saved.getId(),
+                "knowledgeBaseId=" + saved.getKnowledgeBaseId() + ", point=" + saved.getKnowledgePoint());
+        return ApiResponse.success(saved);
     }
 
     @PostMapping("/hr/knowledge-items/import-csv")
-    public ApiResponse<Map<String, Integer>> importKnowledgeItems(@RequestParam Long knowledgeBaseId,
+    @Transactional
+    public ApiResponse<Map<String, Integer>> importKnowledgeItems(Authentication authentication,
+                                                                  @RequestParam Long knowledgeBaseId,
                                                                   @RequestParam("file") MultipartFile file) {
-        return ApiResponse.success(Map.of("imported", interviewService.importKnowledgeItems(knowledgeBaseId, file)));
+        int imported = interviewService.importKnowledgeItems(knowledgeBaseId, file);
+        audit(authentication, "IMPORT_KNOWLEDGE_ITEMS", "KNOWLEDGE_BASE", knowledgeBaseId,
+                "imported=" + imported);
+        return ApiResponse.success(Map.of("imported", imported));
     }
 
     @GetMapping("/hr/knowledge-items")
@@ -149,14 +160,23 @@ public class InterviewController {
     }
 
     @PostMapping("/hr/knowledge-items/{id}/delete")
-    public ApiResponse<Void> deleteKnowledgeItem(@PathVariable Long id) {
+    @Transactional
+    public ApiResponse<Void> deleteKnowledgeItem(Authentication authentication, @PathVariable Long id) {
         interviewService.deleteKnowledgeItem(id);
+        audit(authentication, "DELETE_KNOWLEDGE_ITEM", "KNOWLEDGE_ITEM", id, "删除知识条目");
         return ApiResponse.success("deleted", null);
     }
 
     @PostMapping("/hr/job-knowledge-weights")
-    public ApiResponse<InterviewVO> saveJobKnowledgeWeight(@Valid @RequestBody JobKnowledgeWeightSaveRequest request) {
-        return ApiResponse.success(interviewService.saveJobKnowledgeWeight(request));
+    @Transactional
+    public ApiResponse<InterviewVO> saveJobKnowledgeWeight(Authentication authentication,
+                                                            @Valid @RequestBody JobKnowledgeWeightSaveRequest request) {
+        InterviewVO saved = interviewService.saveJobKnowledgeWeight(request);
+        audit(authentication, request.getId() == null ? "CREATE_JOB_KNOWLEDGE_WEIGHT" : "UPDATE_JOB_KNOWLEDGE_WEIGHT",
+                "JOB_KNOWLEDGE_WEIGHT", saved.getId(),
+                "jobId=" + saved.getJobId() + ", knowledgeBaseId=" + saved.getKnowledgeBaseId()
+                        + ", weight=" + saved.getWeight());
+        return ApiResponse.success(saved);
     }
 
     @GetMapping("/hr/job-knowledge-weights")
@@ -168,8 +188,10 @@ public class InterviewController {
     }
 
     @PostMapping("/hr/job-knowledge-weights/{id}/delete")
-    public ApiResponse<Void> deleteJobKnowledgeWeight(@PathVariable Long id) {
+    @Transactional
+    public ApiResponse<Void> deleteJobKnowledgeWeight(Authentication authentication, @PathVariable Long id) {
         interviewService.deleteJobKnowledgeWeight(id);
+        audit(authentication, "DELETE_JOB_KNOWLEDGE_WEIGHT", "JOB_KNOWLEDGE_WEIGHT", id, "删除岗位知识权重");
         return ApiResponse.success("deleted", null);
     }
 

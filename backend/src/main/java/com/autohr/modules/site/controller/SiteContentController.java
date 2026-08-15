@@ -3,7 +3,10 @@ package com.autohr.modules.site.controller;
 import com.autohr.common.api.ApiResponse;
 import com.autohr.common.api.PageQuery;
 import com.autohr.common.api.PageResponse;
+import com.autohr.common.exception.BusinessException;
+import com.autohr.modules.site.dto.SiteContentSaveRequest;
 import com.autohr.modules.site.service.SiteContentService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -38,8 +41,12 @@ public class SiteContentController {
     }
 
     @PostMapping("/admin")
-    public ApiResponse<Map<String, Object>> save(@RequestBody Map<String, Object> content) {
-        return ApiResponse.success(siteContentService.save(content));
+    public ApiResponse<Map<String, Object>> save(@Valid @RequestBody SiteContentSaveRequest content) {
+        if (!content.getUnknownFields().isEmpty()) {
+            throw new BusinessException("Unsupported site content fields: "
+                    + String.join(", ", content.getUnknownFields()));
+        }
+        return ApiResponse.success(siteContentService.save(content.toUpdates()));
     }
 
     @DeleteMapping("/admin/{id}")

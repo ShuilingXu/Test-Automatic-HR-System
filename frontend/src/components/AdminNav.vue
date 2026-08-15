@@ -44,7 +44,10 @@ const visibleItems = computed(() => {
       { label: '内容管理', to: '/admin/content' },
     )
   }
-  items.push({ label: '面试流程', to: '/interview/hr/processes' })
+  items.push(
+    { label: '面试流程', to: '/interview/hr/processes' },
+    { label: '流程模板', to: '/interview/hr/templates' },
+  )
   return items
 })
 

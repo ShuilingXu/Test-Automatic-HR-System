@@ -1,6 +1,7 @@
 package com.autohr.config;
 
 import com.autohr.modules.auth.config.JwtAuthenticationFilter;
+import com.autohr.modules.auth.config.CsrfCookieFilter;
 import com.autohr.modules.auth.config.PasswordChangeRequiredFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -25,11 +26,14 @@ public class SecurityConfig {
             + "connect-src 'self' https: wss:; worker-src 'self' blob:; child-src 'self' blob:";
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final CsrfCookieFilter csrfCookieFilter;
     private final PasswordChangeRequiredFilter passwordChangeRequiredFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http.csrf(csrf -> csrf.disable())
+        // API requests use the double-submit token enforced by CsrfCookieFilter.
+        // Keep Spring Security's default CSRF protection enabled for non-API endpoints.
+        http.csrf(csrf -> csrf.ignoringRequestMatchers("/api/**"))
                 .headers(headers -> headers.contentSecurityPolicy(csp -> csp.policyDirectives(CONTENT_SECURITY_POLICY)))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
@@ -53,12 +57,14 @@ public class SecurityConfig {
                         .requestMatchers("/api/recruitment/admin/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "ROLE_HR_USER", "IT_ADMIN", "HR_ADMIN", "HR_USER")
                         .requestMatchers("/api/interview/it/**").hasAnyAuthority("ROLE_IT_ADMIN", "IT_ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/interview/hr/process-templates/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "ROLE_HR_USER", "IT_ADMIN", "HR_ADMIN", "HR_USER")
-                        .requestMatchers("/api/interview/hr/process-templates/**").hasAnyAuthority("ROLE_HR_ADMIN", "HR_ADMIN")
+                        .requestMatchers("/api/interview/hr/process-templates/**")
+                        .hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "IT_ADMIN", "HR_ADMIN")
                         .requestMatchers("/api/interview/hr/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "ROLE_HR_USER", "IT_ADMIN", "HR_ADMIN", "HR_USER")
                         .requestMatchers("/api/interview/interviewee/**").hasAnyAuthority("ROLE_INTERVIEWEE", "INTERVIEWEE")
                         .requestMatchers("/api/auth/me", "/api/auth/profile", "/api/auth/logout", "/api/auth/change-password").authenticated()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(csrfCookieFilter, JwtAuthenticationFilter.class)
                 .addFilterAfter(passwordChangeRequiredFilter, JwtAuthenticationFilter.class);
         return http.build();
     }
