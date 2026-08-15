@@ -2,6 +2,13 @@
   <AdminNav />
   <main class="dashboard">
     <header><div><p class="page-eyebrow">Overview</p><h1>仪表盘</h1></div><el-button @click="configVisible = true">配置卡片</el-button></header>
+    <el-alert v-if="loadError" class="load-error" type="error" :closable="false" show-icon>
+      <template #title>仪表盘加载失败</template>
+      <template #default>
+        <span>{{ loadError }}</span>
+        <el-button text type="primary" :loading="dashboardLoading" @click="load">重试</el-button>
+      </template>
+    </el-alert>
     <div class="cards">
       <article v-for="card in selectedCards" :key="card.id"><span>{{ card.label }}</span><strong>{{ card.value }}</strong></article>
     </div>
@@ -36,6 +43,8 @@ import { hrApi } from '../services/api'
 
 const dashboard = ref({})
 const stats = ref(null)
+const dashboardLoading = ref(false)
+const loadError = ref('')
 const configVisible = ref(false)
 const chartNodes = {}
 const chartInstances = {}
@@ -120,13 +129,22 @@ watch(configVisible, (visible) => {
   }
 })
 async function load() {
-  const [dashboardResponse, configResponse] = await Promise.all([
-    hrApi.getDashboard(), hrApi.getDashboardConfig(),
-  ])
-  dashboard.value = dashboardResponse.data
-  stats.value = dashboardResponse.data.statistics
-  try { applyStoredConfig(JSON.parse(configResponse.data.configJson)) } catch { applyStoredConfig(defaultConfig) }
-  draw()
+  if (dashboardLoading.value) return
+  dashboardLoading.value = true
+  try {
+    const [dashboardResponse, configResponse] = await Promise.all([
+      hrApi.getDashboard(), hrApi.getDashboardConfig(),
+    ])
+    dashboard.value = dashboardResponse.data
+    stats.value = dashboardResponse.data.statistics
+    loadError.value = ''
+    try { applyStoredConfig(JSON.parse(configResponse.data.configJson)) } catch { applyStoredConfig(defaultConfig) }
+    draw()
+  } catch (error) {
+    loadError.value = error.message || '请稍后重试'
+  } finally {
+    dashboardLoading.value = false
+  }
 }
 async function save() {
   try {
@@ -143,7 +161,12 @@ async function save() {
 function money(value) { return `¥${Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` }
 function percent(value) { return value === null || value === undefined ? '—' : `${Number(value).toFixed(2)}%` }
 function chartTypeLabel(type) { return type === 'pie' ? '饼图' : type === 'table' ? '表格' : '柱状图' }
-function resizeCharts() { Object.values(chartInstances).forEach((chart) => chart.resize()) }
+function resizeCharts() {
+  Object.values(chartInstances).forEach((chart) => {
+    const node = chart.getDom()
+    if (node?.offsetParent !== null && node.clientWidth > 0 && node.clientHeight > 0) chart.resize()
+  })
+}
 
 window.addEventListener('resize', resizeCharts)
 onMounted(load)
@@ -154,6 +177,9 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resizeCharts); Obje
 .dashboard { max-width: 1440px; margin: auto; padding: 30px; }
 .dashboard header, .section-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 .dashboard h1 { margin: 4px 0; }
+.load-error { margin-top: 24px; }
+.load-error :deep(.el-alert__content) { min-width: 0; }
+.load-error :deep(.el-alert__description) { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; }
 .cards { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 14px; margin: 24px 0 30px; }
 .cards article { padding: 16px 0; border-bottom: 2px solid #d8e4e1; }
 .cards span { display: block; color: var(--text-muted); }

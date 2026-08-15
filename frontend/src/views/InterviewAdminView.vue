@@ -748,15 +748,18 @@ async function decisionPayload(process, approved) {
   if (!approved) return { approved }
   const departmentId = process.jobDepartmentId || onboardingDepartmentId.value || null
   if (isFinalApproval(process) && !departmentId) {
-    ElMessage.warning('最终审批通过前请选择入职部门')
-    if (!isProcessDetail.value) await router.push(`/interview/hr/processes/${process.id}`)
+    await promptForFinalApprovalDetails(process, '最终审批通过前请选择入职部门')
     return null
   }
   if (isFinalApproval(process) && (!onboardingJobId.value || Number(onboardingBaseSalary.value) <= 0)) {
-    ElMessage.warning('最终审批通过前请选择入职岗位并填写正数基本薪资')
+    await promptForFinalApprovalDetails(process, '最终审批通过前请选择入职岗位并填写正数基本薪资')
     return null
   }
   return { approved, departmentId, jobId: isFinalApproval(process) ? onboardingJobId.value : null, baseSalary: isFinalApproval(process) ? onboardingBaseSalary.value : null }
+}
+async function promptForFinalApprovalDetails(process, message) {
+  ElMessage.warning(message)
+  if (!isProcessDetail.value) await router.push(`/interview/hr/processes/${process.id}`)
 }
 function isProcessActionLoading(processId, type) {
   return processAction.processId === processId && processAction.type === type

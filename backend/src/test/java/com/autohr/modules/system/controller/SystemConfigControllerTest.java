@@ -28,7 +28,7 @@ class SystemConfigControllerTest {
         SystemConfigController controller = new SystemConfigController(systemConfigService);
         Map<String, String> updates = new LinkedHashMap<>();
         updates.put("S3_ENABLED", "true");
-        updates.put("S3_ENDPOINT", "https://s3.example.com");
+        updates.put("S3_ENDPOINT", "https://1.1.1.1");
         updates.put("S3_INTERNAL_ENDPOINT_ENABLED", "true");
         updates.put("S3_INTERNAL_ENDPOINT", "");
         updates.put("S3_REGION", "us-east-1");
@@ -47,7 +47,7 @@ class SystemConfigControllerTest {
         SystemConfigController controller = new SystemConfigController(systemConfigService);
         Map<String, String> updates = new LinkedHashMap<>();
         updates.put("S3_ENABLED", "true");
-        updates.put("S3_ENDPOINT", "https://user:secret@s3.example.com/#credential");
+        updates.put("S3_ENDPOINT", "https://user:secret@1.1.1.1/#credential");
         updates.put("S3_REGION", "us-east-1");
         updates.put("S3_BUCKET", "autohr");
         updates.put("S3_ACCESS_KEY_ID", "access-key");

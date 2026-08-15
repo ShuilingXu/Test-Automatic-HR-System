@@ -2,9 +2,9 @@ package com.autohr.common.file;
 
 import com.autohr.modules.system.service.SystemConfigService;
 import jakarta.annotation.PreDestroy;
-import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
@@ -33,11 +33,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 
 @Service
-@RequiredArgsConstructor
 public class S3ObjectStorageService {
 
     private static final Logger log = LoggerFactory.getLogger(S3ObjectStorageService.class);
@@ -47,13 +46,44 @@ public class S3ObjectStorageService {
             "S3_INTERNAL_ENDPOINT_ENABLED", "S3_INTERNAL_ENDPOINT", "S3_ALLOW_HTTP_ENDPOINTS",
             "S3_ALLOW_PRIVATE_ENDPOINTS"
     };
+    private static final long ENDPOINT_VALIDATION_TTL_NANOS = Duration.ofMinutes(1).toNanos();
+    private static final long DNS_RETRY_TTL_NANOS = Duration.ofSeconds(10).toNanos();
 
     private final SystemConfigService systemConfigService;
     private final ThreadPoolTaskExecutor s3ArchiveExecutor;
-    private final ReentrantReadWriteLock clientLock = new ReentrantReadWriteLock();
-    private volatile UploadClientBundle uploadClientBundle;
-    private volatile ExternalClientBundle externalClientBundle;
+    private final S3ClientFactory s3ClientFactory;
+    private final S3PresignerFactory s3PresignerFactory;
+    private final S3EndpointValidator.AddressResolver addressResolver;
+    private final LongSupplier nanoClock;
+    private final Object clientMonitor = new Object();
+    private final Object endpointValidationMonitor = new Object();
+    private volatile ManagedResource<UploadClientBundle> uploadClientResource;
+    private volatile ManagedResource<ExternalClientBundle> externalClientResource;
+    private volatile EndpointValidationSnapshot uploadEndpointValidation;
+    private volatile EndpointValidationSnapshot externalEndpointValidation;
     private volatile boolean closed;
+
+    @Autowired
+    public S3ObjectStorageService(SystemConfigService systemConfigService,
+                                  ThreadPoolTaskExecutor s3ArchiveExecutor) {
+        this(systemConfigService, s3ArchiveExecutor, S3ObjectStorageService::buildClient,
+                S3ObjectStorageService::buildPresigner, java.net.InetAddress::getAllByName,
+                System::nanoTime);
+    }
+
+    S3ObjectStorageService(SystemConfigService systemConfigService,
+                           ThreadPoolTaskExecutor s3ArchiveExecutor,
+                           S3ClientFactory s3ClientFactory,
+                           S3PresignerFactory s3PresignerFactory,
+                           S3EndpointValidator.AddressResolver addressResolver,
+                           LongSupplier nanoClock) {
+        this.systemConfigService = systemConfigService;
+        this.s3ArchiveExecutor = s3ArchiveExecutor;
+        this.s3ClientFactory = s3ClientFactory;
+        this.s3PresignerFactory = s3PresignerFactory;
+        this.addressResolver = addressResolver;
+        this.nanoClock = nanoClock;
+    }
 
     /**
      * Archives a local file to an S3-compatible object store. Local storage remains
@@ -89,7 +119,7 @@ public class S3ObjectStorageService {
             log.warn("Skipping S3 archive because the local file is unavailable: {}", localFile);
             return;
         }
-        if (!settings.isUploadUsable()) {
+        if (!isUploadUsable(settings)) {
             log.warn("Skipping S3 archive because the object storage configuration is incomplete or unsafe");
             return;
         }
@@ -148,7 +178,7 @@ public class S3ObjectStorageService {
 
     private void deleteObjects(List<String> objectNames) {
         StorageSettings settings = loadSettings();
-        if (!settings.enabled() || !settings.isUploadUsable()) {
+        if (!settings.enabled() || !isUploadUsable(settings)) {
             return;
         }
         try {
@@ -179,7 +209,7 @@ public class S3ObjectStorageService {
      */
     public Optional<URI> presignExternalDownloadIfAvailable(String objectName) {
         StorageSettings settings = loadSettings();
-        if (!settings.enabled() || !settings.isExternalUsable()) {
+        if (!settings.enabled() || !isExternalUsable(settings)) {
             return Optional.empty();
         }
         try {
@@ -229,82 +259,110 @@ public class S3ObjectStorageService {
                 Boolean.parseBoolean(config.get("S3_ALLOW_PRIVATE_ENDPOINTS")));
     }
 
-    private <T> T withUploadClient(StorageSettings settings, Function<S3Client, T> action) {
-        ClientKey requiredKey = settings.uploadClientKey();
-        while (true) {
-            clientLock.readLock().lock();
-            try {
-                if (closed) {
-                    throw new IllegalStateException("S3 object storage service is shutting down");
-                }
-                UploadClientBundle current = uploadClientBundle;
-                if (current != null && current.key().equals(requiredKey)) {
-                    return action.apply(current.client());
-                }
-            } finally {
-                clientLock.readLock().unlock();
+    private boolean isUploadUsable(StorageSettings settings) {
+        return settings.hasCredentials()
+                && !settings.uploadEndpoint().isEmpty()
+                && isEndpointAllowed(settings.uploadEndpoint(), settings.allowHttpEndpoints(),
+                        settings.allowPrivateEndpoints(), true);
+    }
+
+    private boolean isExternalUsable(StorageSettings settings) {
+        return settings.hasCredentials()
+                && !settings.externalEndpoint().isEmpty()
+                && isEndpointAllowed(settings.externalEndpoint(), settings.allowHttpEndpoints(),
+                        settings.allowPrivateEndpoints(), false);
+    }
+
+    private boolean isEndpointAllowed(String endpoint, boolean allowHttp, boolean allowPrivate,
+                                      boolean uploadEndpoint) {
+        EndpointValidationKey key = new EndpointValidationKey(endpoint, allowHttp, allowPrivate);
+        long now = nanoClock.getAsLong();
+        EndpointValidationSnapshot current = uploadEndpoint ? uploadEndpointValidation : externalEndpointValidation;
+        if (current != null && current.key().equals(key) && now < current.expiresAtNanos()) {
+            return current.allowed();
+        }
+        synchronized (endpointValidationMonitor) {
+            current = uploadEndpoint ? uploadEndpointValidation : externalEndpointValidation;
+            now = nanoClock.getAsLong();
+            if (current != null && current.key().equals(key) && now < current.expiresAtNanos()) {
+                return current.allowed();
             }
-            refreshUploadClient(requiredKey);
+            S3EndpointValidator.ValidationResult result = S3EndpointValidator.validate(
+                    endpoint, allowHttp, allowPrivate, addressResolver);
+            boolean useStaleSuccess = result.failure() == S3EndpointValidator.ValidationFailure.DNS_FAILURE
+                    && current != null
+                    && current.key().equals(key)
+                    && current.allowed();
+            long validationTtl = result.failure() == S3EndpointValidator.ValidationFailure.DNS_FAILURE
+                    ? DNS_RETRY_TTL_NANOS
+                    : ENDPOINT_VALIDATION_TTL_NANOS;
+            EndpointValidationSnapshot replacement = new EndpointValidationSnapshot(
+                    key,
+                    result.allowed() || useStaleSuccess,
+                    now + validationTtl);
+            if (uploadEndpoint) {
+                uploadEndpointValidation = replacement;
+            } else {
+                externalEndpointValidation = replacement;
+            }
+            if (useStaleSuccess) {
+                log.warn("S3 endpoint DNS lookup failed temporarily; retaining the previously validated endpoint for 10 seconds: {}",
+                        endpoint);
+            }
+            return replacement.allowed();
+        }
+    }
+
+    private <T> T withUploadClient(StorageSettings settings, Function<S3Client, T> action) {
+        try (ResourceLease<UploadClientBundle> lease = acquireUploadClient(settings.uploadClientKey())) {
+            return action.apply(lease.resource().client());
         }
     }
 
     private <T> T withExternalClients(StorageSettings settings, Function<ExternalClientBundle, T> action) {
-        ClientKey requiredKey = settings.externalClientKey();
-        while (true) {
-            clientLock.readLock().lock();
-            try {
-                if (closed) {
-                    throw new IllegalStateException("S3 object storage service is shutting down");
-                }
-                ExternalClientBundle current = externalClientBundle;
-                if (current != null && current.key().equals(requiredKey)) {
-                    return action.apply(current);
-                }
-            } finally {
-                clientLock.readLock().unlock();
-            }
-            refreshExternalClients(requiredKey);
+        try (ResourceLease<ExternalClientBundle> lease = acquireExternalClients(settings.externalClientKey())) {
+            return action.apply(lease.resource());
         }
     }
 
-    private void refreshUploadClient(ClientKey requiredKey) {
-        clientLock.writeLock().lock();
-        try {
+    private ResourceLease<UploadClientBundle> acquireUploadClient(ClientKey requiredKey) {
+        ManagedResource<UploadClientBundle> previous = null;
+        ResourceLease<UploadClientBundle> lease;
+        synchronized (clientMonitor) {
             if (closed) {
                 throw new IllegalStateException("S3 object storage service is shutting down");
             }
-            if (uploadClientBundle != null && uploadClientBundle.key().equals(requiredKey)) {
-                return;
+            ManagedResource<UploadClientBundle> current = uploadClientResource;
+            if (current == null || !current.key().equals(requiredKey)) {
+                UploadClientBundle replacement = new UploadClientBundle(createClient(requiredKey));
+                previous = current;
+                current = new ManagedResource<>(requiredKey, replacement);
+                uploadClientResource = current;
             }
-            UploadClientBundle replacement = new UploadClientBundle(requiredKey, createClient(requiredKey));
-            UploadClientBundle previous = uploadClientBundle;
-            uploadClientBundle = replacement;
-            if (previous != null) {
-                previous.close();
-            }
-        } finally {
-            clientLock.writeLock().unlock();
+            lease = current.acquire();
         }
+        retire(previous);
+        return lease;
     }
 
-    private void refreshExternalClients(ClientKey requiredKey) {
-        clientLock.writeLock().lock();
-        try {
+    private ResourceLease<ExternalClientBundle> acquireExternalClients(ClientKey requiredKey) {
+        ManagedResource<ExternalClientBundle> previous = null;
+        ResourceLease<ExternalClientBundle> lease;
+        synchronized (clientMonitor) {
             if (closed) {
                 throw new IllegalStateException("S3 object storage service is shutting down");
             }
-            if (externalClientBundle != null && externalClientBundle.key().equals(requiredKey)) {
-                return;
+            ManagedResource<ExternalClientBundle> current = externalClientResource;
+            if (current == null || !current.key().equals(requiredKey)) {
+                ExternalClientBundle replacement = createExternalClientBundle(requiredKey);
+                previous = current;
+                current = new ManagedResource<>(requiredKey, replacement);
+                externalClientResource = current;
             }
-            ExternalClientBundle replacement = createExternalClientBundle(requiredKey);
-            ExternalClientBundle previous = externalClientBundle;
-            externalClientBundle = replacement;
-            if (previous != null) {
-                previous.close();
-            }
-        } finally {
-            clientLock.writeLock().unlock();
+            lease = current.acquire();
         }
+        retire(previous);
+        return lease;
     }
 
     private ExternalClientBundle createExternalClientBundle(ClientKey key) {
@@ -312,9 +370,9 @@ public class S3ObjectStorageService {
         S3Presigner presigner = null;
         try {
             externalClient = createClient(key);
-            presigner = createPresigner(key.endpoint(), key.region(), key.accessKeyId(),
+            presigner = s3PresignerFactory.create(key.endpoint(), key.region(), key.accessKeyId(),
                     key.secretAccessKey(), key.sessionToken(), key.pathStyleAccess());
-            return new ExternalClientBundle(key, externalClient, presigner);
+            return new ExternalClientBundle(externalClient, presigner);
         } catch (RuntimeException ex) {
             closeQuietly(presigner);
             closeQuietly(externalClient);
@@ -323,12 +381,12 @@ public class S3ObjectStorageService {
     }
 
     private S3Client createClient(ClientKey key) {
-        return createClient(key.endpoint(), key.region(), key.accessKeyId(), key.secretAccessKey(),
+        return s3ClientFactory.create(key.endpoint(), key.region(), key.accessKeyId(), key.secretAccessKey(),
                 key.sessionToken(), key.pathStyleAccess());
     }
 
-    private S3Client createClient(String endpoint, String region, String accessKeyId, String secretAccessKey,
-                                  String sessionToken, boolean pathStyleAccess) {
+    private static S3Client buildClient(String endpoint, String region, String accessKeyId, String secretAccessKey,
+                                        String sessionToken, boolean pathStyleAccess) {
         var credentials = sessionToken.isEmpty()
                 ? AwsBasicCredentials.create(accessKeyId, secretAccessKey)
                 : AwsSessionCredentials.create(accessKeyId, secretAccessKey, sessionToken);
@@ -343,8 +401,8 @@ public class S3ObjectStorageService {
                 .build();
     }
 
-    private S3Presigner createPresigner(String endpoint, String region, String accessKeyId, String secretAccessKey,
-                                        String sessionToken, boolean pathStyleAccess) {
+    private static S3Presigner buildPresigner(String endpoint, String region, String accessKeyId, String secretAccessKey,
+                                              String sessionToken, boolean pathStyleAccess) {
         var credentials = sessionToken.isEmpty()
                 ? AwsBasicCredentials.create(accessKeyId, secretAccessKey)
                 : AwsSessionCredentials.create(accessKeyId, secretAccessKey, sessionToken);
@@ -358,19 +416,22 @@ public class S3ObjectStorageService {
 
     @PreDestroy
     void closeClients() {
-        clientLock.writeLock().lock();
-        try {
+        ManagedResource<UploadClientBundle> upload;
+        ManagedResource<ExternalClientBundle> external;
+        synchronized (clientMonitor) {
             closed = true;
-            if (uploadClientBundle != null) {
-                uploadClientBundle.close();
-                uploadClientBundle = null;
-            }
-            if (externalClientBundle != null) {
-                externalClientBundle.close();
-                externalClientBundle = null;
-            }
-        } finally {
-            clientLock.writeLock().unlock();
+            upload = uploadClientResource;
+            external = externalClientResource;
+            uploadClientResource = null;
+            externalClientResource = null;
+        }
+        retire(upload);
+        retire(external);
+    }
+
+    private void retire(ManagedResource<?> resource) {
+        if (resource != null) {
+            resource.retire();
         }
     }
 
@@ -429,19 +490,6 @@ public class S3ObjectStorageService {
                     && !secretAccessKey.isEmpty();
         }
 
-        private boolean isUploadUsable() {
-            return hasCredentials()
-                    && !uploadEndpoint.isEmpty()
-                    && S3EndpointValidator.isAllowed(uploadEndpoint, allowHttpEndpoints, allowPrivateEndpoints);
-        }
-
-        private boolean isExternalUsable() {
-            return hasCredentials()
-                    && !externalEndpoint.isEmpty()
-                    && !bucket.isEmpty()
-                    && S3EndpointValidator.isAllowed(externalEndpoint, allowHttpEndpoints, allowPrivateEndpoints);
-        }
-
         private ClientKey uploadClientKey() {
             return new ClientKey(uploadEndpoint, region, accessKeyId, secretAccessKey,
                     sessionToken, pathStyleAccess);
@@ -458,19 +506,103 @@ public class S3ObjectStorageService {
                              boolean pathStyleAccess) {
     }
 
-    private record UploadClientBundle(ClientKey key, S3Client client) implements AutoCloseable {
+    private record EndpointValidationKey(String endpoint, boolean allowHttp, boolean allowPrivate) {
+    }
+
+    private record EndpointValidationSnapshot(EndpointValidationKey key, boolean allowed, long expiresAtNanos) {
+    }
+
+    private record UploadClientBundle(S3Client client) implements AutoCloseable {
         @Override
         public void close() {
             closeQuietly(client);
         }
     }
 
-    private record ExternalClientBundle(ClientKey key, S3Client externalClient,
+    private record ExternalClientBundle(S3Client externalClient,
                                         S3Presigner presigner) implements AutoCloseable {
         @Override
         public void close() {
             closeQuietly(presigner);
             closeQuietly(externalClient);
         }
+    }
+
+    private static final class ManagedResource<T extends AutoCloseable> {
+        private final ClientKey key;
+        private final T resource;
+        private int leases;
+        private boolean retired;
+
+        private ManagedResource(ClientKey key, T resource) {
+            this.key = key;
+            this.resource = resource;
+        }
+
+        private ClientKey key() {
+            return key;
+        }
+
+        private synchronized ResourceLease<T> acquire() {
+            if (retired) {
+                throw new IllegalStateException("S3 client has been retired");
+            }
+            leases++;
+            return new ResourceLease<>(this, resource);
+        }
+
+        private synchronized void retire() {
+            retired = true;
+            closeIfUnused();
+        }
+
+        private synchronized void release() {
+            if (leases <= 0) {
+                return;
+            }
+            leases--;
+            closeIfUnused();
+        }
+
+        private void closeIfUnused() {
+            if (retired && leases == 0) {
+                closeQuietly(resource);
+            }
+        }
+    }
+
+    private static final class ResourceLease<T extends AutoCloseable> implements AutoCloseable {
+        private ManagedResource<T> owner;
+        private final T resource;
+
+        private ResourceLease(ManagedResource<T> owner, T resource) {
+            this.owner = owner;
+            this.resource = resource;
+        }
+
+        private T resource() {
+            return resource;
+        }
+
+        @Override
+        public void close() {
+            ManagedResource<T> currentOwner = owner;
+            if (currentOwner != null) {
+                owner = null;
+                currentOwner.release();
+            }
+        }
+    }
+
+    @FunctionalInterface
+    interface S3ClientFactory {
+        S3Client create(String endpoint, String region, String accessKeyId, String secretAccessKey,
+                        String sessionToken, boolean pathStyleAccess);
+    }
+
+    @FunctionalInterface
+    interface S3PresignerFactory {
+        S3Presigner create(String endpoint, String region, String accessKeyId, String secretAccessKey,
+                           String sessionToken, boolean pathStyleAccess);
     }
 }

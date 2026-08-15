@@ -127,6 +127,7 @@
 
       <div v-else class="loading-state">正在加载面试流程...</div>
       <p v-if="refreshState.retryCount > 0" class="retry-message">状态同步失败，正在进行第 {{ refreshState.retryCount }} 次重试：{{ refreshState.lastError }}</p>
+      <p v-else-if="heartbeatState.failed" class="retry-message">实时状态同步暂时中断，系统将继续自动重试：{{ heartbeatState.message }}</p>
     </main>
   </div>
 </template>
@@ -147,6 +148,7 @@ const aiRecords = ref([])
 const processSummary = ref(null)
 const currentQuestion = ref(null)
 const refreshState = reactive({ loading: false, retryCount: 0, lastError: '' })
+const heartbeatState = reactive({ failed: false, message: '' })
 const aiSubmitState = reactive({ submitting: false, message: '' })
 const aiStreamText = ref('')
 const aiPendingRefresh = reactive({ active: false, attempts: 0, questionId: null })
@@ -446,12 +448,18 @@ function syncHeartbeat() {
       if (!componentDisposed && response.data) {
         const previousSummary = processSummary.value
         processSummary.value = response.data
+        heartbeatState.failed = false
+        heartbeatState.message = ''
         notifyAiFinishedIfNeeded()
         uploadVideoRecordingAfterTerminalHeartbeat(previousSummary, response.data)
+        syncAiAutoRefresh()
         syncHeartbeat()
       }
     } catch (error) {
-      if (!componentDisposed) console.warn('面试心跳上报失败', error)
+      if (!componentDisposed) {
+        heartbeatState.failed = true
+        heartbeatState.message = error.message || '请检查网络连接'
+      }
     } finally {
       heartbeatInFlight = false
     }

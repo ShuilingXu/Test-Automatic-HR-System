@@ -138,15 +138,23 @@ public class HrServiceImpl implements HrService {
         if (StrUtil.isBlank(employee.getEmployeeCode())) {
             employee.setEmployeeCode(resolvedId == null ? buildEmployeeCode() : existingCode);
         }
-        employee.setHireDate(Objects.requireNonNullElse(request.getHireDate(),
-                resolvedId == null ? LocalDate.now(BUSINESS_ZONE) : existingHireDate));
+        LocalDate resolvedHireDate = request.getHireDate();
+        if (resolvedHireDate == null) {
+            resolvedHireDate = resolvedId == null ? LocalDate.now(BUSINESS_ZONE) : existingHireDate;
+        }
+        employee.setHireDate(resolvedHireDate);
         employee.setEmploymentStatus(Objects.requireNonNullElse(request.getEmploymentStatus(), EmploymentStatus.ACTIVE.getCode()));
+        boolean salaryHistoryRequired = resolvedId == null
+                || previousSalary.compareTo(employee.getBaseSalary()) != 0;
+        if (salaryHistoryRequired) {
+            resolveSalaryEffectiveMonth(request.getEffectiveMonth(), employee.getHireDate());
+        }
         if (resolvedId == null) {
             employeeMapper.insert(employee);
         } else {
             employeeMapper.updateById(employee);
         }
-        if (resolvedId == null || previousSalary.compareTo(employee.getBaseSalary()) != 0) {
+        if (salaryHistoryRequired) {
             saveSalaryHistory(employee.getId(), previousSalary, employee.getBaseSalary(), request.getSalaryChangeReason(),
                     request.getEffectiveMonth(), employee.getHireDate(), operatorUserId);
         }
@@ -360,14 +368,7 @@ public class HrServiceImpl implements HrService {
 
     private void saveSalaryHistory(Long employeeId, BigDecimal before, BigDecimal after, String reason,
                                    String effectiveMonth, LocalDate hireDate, Long operatorUserId) {
-        String month = StrUtil.isBlank(effectiveMonth)
-                ? YearMonth.from(Objects.requireNonNull(hireDate, "Employee hire date is required")).toString()
-                : effectiveMonth;
-        try {
-            YearMonth.parse(month);
-        } catch (RuntimeException ex) {
-            throw new BusinessException("Effective month must be yyyy-MM");
-        }
+        String month = resolveSalaryEffectiveMonth(effectiveMonth, hireDate);
         SalaryHistory history = salaryHistoryMapper.selectOne(new LambdaQueryWrapper<SalaryHistory>()
                 .eq(SalaryHistory::getEmployeeId, employeeId)
                 .eq(SalaryHistory::getEffectiveMonth, month)
@@ -388,6 +389,19 @@ public class HrServiceImpl implements HrService {
         } else {
             salaryHistoryMapper.updateById(history);
         }
+    }
+
+    private String resolveSalaryEffectiveMonth(String effectiveMonth, LocalDate hireDate) {
+        if (StrUtil.isBlank(effectiveMonth) && hireDate == null) {
+            throw new BusinessException("Employee hire date is required when effective month is blank");
+        }
+        String month = StrUtil.isBlank(effectiveMonth) ? YearMonth.from(hireDate).toString() : effectiveMonth;
+        try {
+            YearMonth.parse(month);
+        } catch (RuntimeException ex) {
+            throw new BusinessException("Effective month must be yyyy-MM");
+        }
+        return month;
     }
 
     private IntegrationBinding requireBinding(Long id) {

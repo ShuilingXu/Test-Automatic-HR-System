@@ -45,7 +45,7 @@ class HrStatisticsServiceImplTest {
         jdbc.update("INSERT INTO recruitment_job (job_code,job_title,department_name,requirements,responsibilities,publish_date) VALUES ('J1','工程师','研发部','要求','职责','2026-01-01')");
         insertEmployee(jdbc, "E001", "员工一", "110101199001010011", "13800000001", 1, new BigDecimal("15000.00"));
         jdbc.update("UPDATE hr_employee SET hire_date='2026-06-01' WHERE employee_code='E001'");
-        insertEmployee(jdbc, "E002", "鍛樺伐浜?", "110101199001010022", "13800000002", 1, new BigDecimal("15000.00"));
+        insertEmployee(jdbc, "E002", "员工二", "110101199001010022", "13800000002", 1, new BigDecimal("15000.00"));
         jdbc.update("UPDATE hr_employee SET hire_date='2026-08-01' WHERE employee_code='E002'");
         jdbc.update("INSERT INTO hr_salary_history (employee_id,effective_month,base_salary_before,base_salary_after) VALUES (1,'2026-01',0,10000),(1,'2026-08',10000,15000),(2,'2026-08',0,15000)");
 

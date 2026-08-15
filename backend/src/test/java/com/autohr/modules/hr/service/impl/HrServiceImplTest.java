@@ -134,6 +134,31 @@ class HrServiceImplTest {
         verify(salaryHistoryMapper).updateById(history);
     }
 
+    @Test
+    void salaryChangeRejectsDirtyEmployeeWithoutHireDateOrExplicitEffectiveMonth() {
+        Department department = department(7L);
+        Employee employee = new Employee();
+        employee.setId(42L);
+        employee.setEmployeeCode("EMP-42");
+        employee.setDepartmentId(7L);
+        employee.setJobId(3L);
+        employee.setBaseSalary(new BigDecimal("10000.00"));
+
+        when(departmentMapper.selectById(7L)).thenReturn(department);
+        when(employeeMapper.selectCount(any())).thenReturn(0L);
+        when(employeeMapper.selectById(42L)).thenReturn(employee);
+        when(recruitmentJobMapper.selectById(3L)).thenReturn(job(3L));
+        EmployeeSaveRequest request = employeeRequest(42L);
+        request.setBaseSalary(BigDecimal.ZERO);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> hrService.saveEmployee(request, 99L));
+
+        assertEquals("Employee hire date is required when effective month is blank", exception.getMessage());
+        verify(employeeMapper, never()).updateById(any(Employee.class));
+        verify(salaryHistoryMapper, never()).insert(any(SalaryHistory.class));
+    }
+
     private Department department(Long id) {
         Department department = new Department();
         department.setId(id);
