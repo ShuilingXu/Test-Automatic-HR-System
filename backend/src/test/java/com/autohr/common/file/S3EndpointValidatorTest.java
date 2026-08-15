@@ -40,6 +40,14 @@ class S3EndpointValidatorTest {
     }
 
     @Test
+    void rejectsNativeIpv6LocalPrivateLinkLocalAndMulticastAddresses() {
+        assertFalse(S3EndpointValidator.isAllowed("https://[::1]:9000", false, false));
+        assertFalse(S3EndpointValidator.isAllowed("https://[fc00::1]:9000", false, false));
+        assertFalse(S3EndpointValidator.isAllowed("https://[fe80::1]:9000", false, false));
+        assertFalse(S3EndpointValidator.isAllowed("https://[ff02::1]:9000", false, false));
+    }
+
+    @Test
     void reportsDnsFailureWithoutDependingOnExternalDns() {
         S3EndpointValidator.ValidationResult result = S3EndpointValidator.validate(
                 "https://s3.example.test", false, false,

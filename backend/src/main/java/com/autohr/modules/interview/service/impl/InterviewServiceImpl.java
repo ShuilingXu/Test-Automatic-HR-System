@@ -3386,6 +3386,7 @@ public class InterviewServiceImpl implements InterviewService {
         vo.setAiMaxQuestionRounds(entity.getAiMaxQuestionRounds());
         vo.setAiOutputMode(entity.getAiOutputMode());
         vo.setProcessStatusView(entity.getProcessStatusView());
+        vo.setUpdatedAt(entity.getUpdatedAt());
         if (isTemplateProcess(entity)) {
             InterviewProcessStage active = listProcessStages(entity.getId()).stream()
                     .filter(stage -> List.of("IN_PROGRESS", "READY", "UPLOADING", "WAITING_APPROVAL").contains(stage.getStageStatus()))

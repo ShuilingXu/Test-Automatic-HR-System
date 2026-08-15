@@ -192,6 +192,11 @@ let aiExamChunkWriteError = null
 let aiExamPendingWriteBytes = 0
 let aiExamRecordingUploadPromise = null
 let aiAnswerAbortController = null
+let processStateRevision = 0
+let processLoadGeneration = 0
+let heartbeatDataRefreshTimer = null
+let heartbeatDataRefreshInFlight = false
+let heartbeatDataRefreshQueued = false
 
 const currentAiRecords = computed(() => processSummary.value?.processStageId
   ? aiRecords.value.filter((item) => item.processStageId === processSummary.value.processStageId)
@@ -270,6 +275,8 @@ async function loadProcessRecords(options = {}) {
     return
   }
   refreshState.loading = true
+  const generation = ++processLoadGeneration
+  const requestRevision = processStateRevision
   try {
     if (!sessionForm.processId) {
       ElMessage.warning('请从面试者首页的报名记录进入面试')
@@ -281,9 +288,14 @@ async function loadProcessRecords(options = {}) {
       interviewApi.getNextAiQuestion(sessionForm.processId),
       interviewApi.listIntervieweeAiRecords({ processId: sessionForm.processId }),
     ])
+    if (componentDisposed || generation !== processLoadGeneration || requestRevision !== processStateRevision) {
+      scheduleHeartbeatDataRefresh()
+      return
+    }
     processSummary.value = processResponse.data
     currentQuestion.value = questionResponse.data
     aiRecords.value = recordsResponse.data
+    processStateRevision += 1
     if (currentQuestion.value?.answerStatus === 'FAILED' && !aiAnswer.answerContent) {
       aiAnswer.answerContent = currentQuestion.value.answerContent || ''
     }
@@ -293,20 +305,25 @@ async function loadProcessRecords(options = {}) {
     syncAiAutoRefresh()
     syncHeartbeat()
   } catch (error) {
+    if (componentDisposed || generation !== processLoadGeneration || requestRevision !== processStateRevision) {
+      scheduleHeartbeatDataRefresh()
+      return
+    }
     refreshState.retryCount += 1
     refreshState.lastError = error.message || '刷新失败'
-    if (componentDisposed) return
     if (!options.silent) {
       fail(error)
     }
     scheduleAiRefresh(nextRefreshDelay())
   } finally {
     refreshState.loading = false
+    if (heartbeatDataRefreshQueued) scheduleHeartbeatDataRefresh()
   }
 }
 
 function syncAiAutoRefresh() {
-  if (processSummary.value?.currentStage === 'AI' && processSummary.value?.stageStatus === 'IN_PROGRESS' && !currentQuestion.value) {
+  if (processSummary.value?.currentStage === 'AI' && processSummary.value?.stageStatus === 'IN_PROGRESS' && !currentQuestion.value
+    && !heartbeatDataRefreshQueued && !heartbeatDataRefreshInFlight) {
     scheduleAiRefresh(3000)
   } else {
     clearAiRefresh()
@@ -447,11 +464,15 @@ function syncHeartbeat() {
       const response = await interviewApi.heartbeat(sessionForm.processId)
       if (!componentDisposed && response.data) {
         const previousSummary = processSummary.value
+        if (isOlderProcessSummary(response.data, previousSummary)) return
+        const refreshInterviewData = shouldRefreshAfterHeartbeat(previousSummary, response.data)
         processSummary.value = response.data
+        processStateRevision += 1
         heartbeatState.failed = false
         heartbeatState.message = ''
         notifyAiFinishedIfNeeded()
         uploadVideoRecordingAfterTerminalHeartbeat(previousSummary, response.data)
+        if (refreshInterviewData) scheduleHeartbeatDataRefresh()
         syncAiAutoRefresh()
         syncHeartbeat()
       }
@@ -464,6 +485,66 @@ function syncHeartbeat() {
       heartbeatInFlight = false
     }
   }, 30000)
+}
+
+function isOlderProcessSummary(candidate, current) {
+  const candidateTime = Date.parse(candidate?.updatedAt || '')
+  const currentTime = Date.parse(current?.updatedAt || '')
+  return Number.isFinite(candidateTime) && Number.isFinite(currentTime) && candidateTime < currentTime
+}
+
+function shouldRefreshAfterHeartbeat(previousSummary, nextSummary) {
+  if (!previousSummary) return true
+  return previousSummary.currentStage !== nextSummary.currentStage
+    || previousSummary.processStageId !== nextSummary.processStageId
+    || previousSummary.stageStatus !== nextSummary.stageStatus
+    || previousSummary.aiAverageScore !== nextSummary.aiAverageScore
+    || previousSummary.updatedAt !== nextSummary.updatedAt
+    || (nextSummary.currentStage === 'AI' && nextSummary.stageStatus === 'IN_PROGRESS' && !currentQuestion.value)
+}
+
+function scheduleHeartbeatDataRefresh() {
+  if (componentDisposed) return
+  heartbeatDataRefreshQueued = true
+  if (heartbeatDataRefreshTimer || heartbeatDataRefreshInFlight || refreshState.loading) return
+  heartbeatDataRefreshTimer = setTimeout(() => {
+    heartbeatDataRefreshTimer = null
+    void refreshHeartbeatInterviewData()
+  }, 150)
+}
+
+async function refreshHeartbeatInterviewData() {
+  if (componentDisposed || refreshState.loading || heartbeatDataRefreshInFlight) return
+  heartbeatDataRefreshQueued = false
+  heartbeatDataRefreshInFlight = true
+  const revision = processStateRevision
+  const aiQuestionActive = processSummary.value?.currentStage === 'AI'
+    && processSummary.value?.stageStatus === 'IN_PROGRESS'
+    && processSummary.value?.overallStatus === 'IN_PROGRESS'
+  let refreshFailed = false
+  try {
+    const [questionResponse, recordsResponse] = await Promise.all([
+      aiQuestionActive ? interviewApi.getNextAiQuestion(sessionForm.processId) : Promise.resolve({ data: null }),
+      interviewApi.listIntervieweeAiRecords({ processId: sessionForm.processId }),
+    ])
+    if (componentDisposed) return
+    if (revision !== processStateRevision) {
+      heartbeatDataRefreshQueued = true
+      return
+    }
+    currentQuestion.value = questionResponse.data
+    aiRecords.value = recordsResponse.data
+    if (currentQuestion.value?.answerStatus === 'FAILED' && !aiAnswer.answerContent) {
+      aiAnswer.answerContent = currentQuestion.value.answerContent || ''
+    }
+  } catch {
+    refreshFailed = true
+  } finally {
+    heartbeatDataRefreshInFlight = false
+    if (heartbeatDataRefreshQueued) scheduleHeartbeatDataRefresh()
+    else if (refreshFailed && !componentDisposed && aiQuestionActive) scheduleAiRefresh(nextRefreshDelay())
+    else syncAiAutoRefresh()
+  }
 }
 
 function isPendingAiResolved() {
@@ -1265,6 +1346,8 @@ onBeforeUnmount(() => {
   antiCheatRetryTimer = null
   clearInterval(heartbeatTimer)
   heartbeatTimer = null
+  clearTimeout(heartbeatDataRefreshTimer)
+  heartbeatDataRefreshTimer = null
   aiAnswerAbortController?.abort()
   clearAiRefresh()
   document.removeEventListener('keydown', handleRestrictedShortcut, true)

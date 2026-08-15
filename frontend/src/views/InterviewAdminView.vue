@@ -382,6 +382,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { authApi, hrApi, interviewApi, recruitmentApi, systemApi } from '../services/api'
 import { attachRemoteTrack, buildMediaErrorMessage, createPeerConnection, defaultIceServers, playVideo, requestCameraAndMicrophone } from '../utils/media'
 import { appendRecordingChunk, beginRecordingSession, buildRecordingFile, deleteRecordingSession, formatRecordingSize, getRecordingSession, MAX_RECORDING_UPLOAD_BYTES, RECORDING_STOP_THRESHOLD_BYTES, RECORDING_WRITE_HIGH_WATER_BYTES, RECORDING_WRITE_LOW_WATER_BYTES, updateRecordingSession } from '../utils/recordingStore'
+import { buildInterviewDecision } from '../utils/interviewDecision'
 import { readSessionUser } from '../utils/session'
 
 const sessionUser = ref(readSessionUser())
@@ -745,17 +746,26 @@ function isFinalApproval(process) {
   return stages.length > 0 && String(stages.at(-1).processStageId || stages.at(-1).id) === String(process.processStageId)
 }
 async function decisionPayload(process, approved) {
-  if (!approved) return { approved }
-  const departmentId = process.jobDepartmentId || onboardingDepartmentId.value || null
-  if (isFinalApproval(process) && !departmentId) {
+  const decision = buildInterviewDecision({
+    process,
+    approved,
+    finalApproval: isFinalApproval(process),
+    detailProcessId: isProcessDetail.value ? selectedProcess.value?.id : null,
+    draft: {
+      departmentId: onboardingDepartmentId.value,
+      jobId: onboardingJobId.value,
+      baseSalary: onboardingBaseSalary.value,
+    },
+  })
+  if (decision.missing === 'department') {
     await promptForFinalApprovalDetails(process, '最终审批通过前请选择入职部门')
     return null
   }
-  if (isFinalApproval(process) && (!onboardingJobId.value || Number(onboardingBaseSalary.value) <= 0)) {
+  if (decision.missing === 'jobAndSalary') {
     await promptForFinalApprovalDetails(process, '最终审批通过前请选择入职岗位并填写正数基本薪资')
     return null
   }
-  return { approved, departmentId, jobId: isFinalApproval(process) ? onboardingJobId.value : null, baseSalary: isFinalApproval(process) ? onboardingBaseSalary.value : null }
+  return decision.payload
 }
 async function promptForFinalApprovalDetails(process, message) {
   ElMessage.warning(message)
@@ -1338,7 +1348,11 @@ watch(() => route.fullPath, () => {
   syncRouteState().catch((error) => { if (!componentDisposed) fail(error) })
 })
 
-watch(() => selectedProcess.value?.id, (processId) => {
+watch([isProcessDetail, () => selectedProcess.value?.id], ([detail, processId]) => {
+  if (!detail) {
+    clearOnboardingDraft()
+    return
+  }
   onboardingDepartmentId.value = selectedProcess.value?.jobDepartmentId || null
   onboardingJobId.value = selectedProcess.value?.jobId || null
   onboardingBaseSalary.value = null
@@ -1346,8 +1360,14 @@ watch(() => selectedProcess.value?.id, (processId) => {
 })
 
 watch(() => selectedProcess.value?.jobDepartmentId, (departmentId) => {
-  if (departmentId) onboardingDepartmentId.value = departmentId
+  if (isProcessDetail.value && departmentId) onboardingDepartmentId.value = departmentId
 })
+
+function clearOnboardingDraft() {
+  onboardingDepartmentId.value = null
+  onboardingJobId.value = null
+  onboardingBaseSalary.value = null
+}
 
 onMounted(() => {
   window.addEventListener('pagehide', handleHrPageHide)

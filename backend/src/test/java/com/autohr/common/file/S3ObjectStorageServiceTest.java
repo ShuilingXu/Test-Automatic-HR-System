@@ -13,9 +13,11 @@ import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 
 import java.net.InetAddress;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -111,7 +113,7 @@ class S3ObjectStorageServiceTest {
     }
 
     @Test
-    void temporaryDnsFailureReusesOnlyThePreviouslyValidatedConfiguration() throws Exception {
+    void temporaryDnsFailureUsesOnlyTheOriginalBoundedGraceWindow() throws Exception {
         when(systemConfigService.loadConfig(any(String[].class))).thenReturn(enabledConfig());
         when(s3ClientFactory.create(anyString(), anyString(), anyString(), anyString(), anyString(), anyBoolean()))
                 .thenReturn(s3Client);
@@ -129,11 +131,13 @@ class S3ObjectStorageServiceTest {
         }, clock::get);
 
         service.deleteObjectIfEnabled("resumes/first.pdf");
-        clock.set(Duration.ofMinutes(2).toNanos());
+        clock.set(Duration.ofSeconds(65).toNanos());
         service.deleteObjectIfEnabled("resumes/second.pdf");
+        clock.set(Duration.ofSeconds(71).toNanos());
+        service.deleteObjectIfEnabled("resumes/third.pdf");
 
         verify(s3Client, times(2)).deleteObject(any(DeleteObjectRequest.class));
-        assertEquals(2, dnsLookups.get());
+        assertEquals(3, dnsLookups.get());
         verify(s3ClientFactory, times(1))
                 .create(anyString(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
     }
@@ -160,6 +164,45 @@ class S3ObjectStorageServiceTest {
         service.deleteObjectIfEnabled("resumes/second.pdf");
 
         verify(s3Client, times(1)).deleteObject(any(DeleteObjectRequest.class));
+    }
+
+    @Test
+    void concurrentEndpointLookupsDoNotHoldThePublicationLock() throws Exception {
+        when(systemConfigService.loadConfig(any(String[].class))).thenReturn(enabledConfig());
+        when(s3ClientFactory.create(anyString(), anyString(), anyString(), anyString(), anyString(), anyBoolean()))
+                .thenReturn(s3Client);
+        List<CompletableFuture<Void>> tasks = new CopyOnWriteArrayList<>();
+        doAnswer(invocation -> {
+            tasks.add(CompletableFuture.runAsync(invocation.getArgument(0)));
+            return null;
+        }).when(s3ArchiveExecutor).execute(any(Runnable.class));
+        CountDownLatch lookupsStarted = new CountDownLatch(2);
+        CountDownLatch releaseLookups = new CountDownLatch(1);
+        S3ObjectStorageService service = service(host -> {
+            lookupsStarted.countDown();
+            try {
+                if (!releaseLookups.await(3, TimeUnit.SECONDS)) {
+                    throw new java.net.UnknownHostException("timed out waiting for concurrent lookup");
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new java.net.UnknownHostException("lookup interrupted");
+            }
+            return new InetAddress[]{InetAddress.getByAddress(new byte[]{1, 1, 1, 1})};
+        });
+
+        service.deleteObjectIfEnabled("resumes/first.pdf");
+        service.deleteObjectIfEnabled("resumes/second.pdf");
+        try {
+            assertTrue(lookupsStarted.await(1, TimeUnit.SECONDS));
+        } finally {
+            releaseLookups.countDown();
+        }
+        for (CompletableFuture<Void> task : tasks) {
+            task.get(3, TimeUnit.SECONDS);
+        }
+
+        verify(s3Client, times(2)).deleteObject(any(DeleteObjectRequest.class));
     }
 
     @Test

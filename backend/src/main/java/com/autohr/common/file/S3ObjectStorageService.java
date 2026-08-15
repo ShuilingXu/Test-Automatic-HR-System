@@ -277,40 +277,63 @@ public class S3ObjectStorageService {
                                       boolean uploadEndpoint) {
         EndpointValidationKey key = new EndpointValidationKey(endpoint, allowHttp, allowPrivate);
         long now = nanoClock.getAsLong();
-        EndpointValidationSnapshot current = uploadEndpoint ? uploadEndpointValidation : externalEndpointValidation;
-        if (current != null && current.key().equals(key) && now < current.expiresAtNanos()) {
-            return current.allowed();
+        EndpointValidationSnapshot observed = uploadEndpoint ? uploadEndpointValidation : externalEndpointValidation;
+        if (isFreshEndpointValidation(observed, key, now)) {
+            return observed.allowed();
         }
+
+        // DNS may block. Resolve outside the publication lock so upload and download
+        // endpoint checks cannot stall each other.
+        S3EndpointValidator.ValidationResult result = S3EndpointValidator.validate(
+                endpoint, allowHttp, allowPrivate, addressResolver);
         synchronized (endpointValidationMonitor) {
-            current = uploadEndpoint ? uploadEndpointValidation : externalEndpointValidation;
+            EndpointValidationSnapshot current = uploadEndpoint
+                    ? uploadEndpointValidation
+                    : externalEndpointValidation;
             now = nanoClock.getAsLong();
-            if (current != null && current.key().equals(key) && now < current.expiresAtNanos()) {
+            if (current != observed && isFreshEndpointValidation(current, key, now)) {
                 return current.allowed();
             }
-            S3EndpointValidator.ValidationResult result = S3EndpointValidator.validate(
-                    endpoint, allowHttp, allowPrivate, addressResolver);
             boolean useStaleSuccess = result.failure() == S3EndpointValidator.ValidationFailure.DNS_FAILURE
                     && current != null
                     && current.key().equals(key)
-                    && current.allowed();
-            long validationTtl = result.failure() == S3EndpointValidator.ValidationFailure.DNS_FAILURE
-                    ? DNS_RETRY_TTL_NANOS
-                    : ENDPOINT_VALIDATION_TTL_NANOS;
-            EndpointValidationSnapshot replacement = new EndpointValidationSnapshot(
-                    key,
-                    result.allowed() || useStaleSuccess,
-                    now + validationTtl);
+                    && current.allowed()
+                    && now < current.staleUntilNanos();
+            EndpointValidationSnapshot replacement;
+            if (result.allowed()) {
+                long expiresAt = now + ENDPOINT_VALIDATION_TTL_NANOS;
+                replacement = new EndpointValidationSnapshot(
+                        key, true, expiresAt, expiresAt + DNS_RETRY_TTL_NANOS);
+            } else if (useStaleSuccess) {
+                // Repeated lookup failures never extend the original grace deadline.
+                replacement = new EndpointValidationSnapshot(
+                        key, true, current.staleUntilNanos(), current.staleUntilNanos());
+            } else {
+                long retryTtl = result.failure() == S3EndpointValidator.ValidationFailure.DNS_FAILURE
+                        ? DNS_RETRY_TTL_NANOS
+                        : ENDPOINT_VALIDATION_TTL_NANOS;
+                long expiresAt = now + retryTtl;
+                replacement = new EndpointValidationSnapshot(key, false, expiresAt, expiresAt);
+            }
             if (uploadEndpoint) {
                 uploadEndpointValidation = replacement;
             } else {
                 externalEndpointValidation = replacement;
             }
             if (useStaleSuccess) {
-                log.warn("S3 endpoint DNS lookup failed temporarily; retaining the previously validated endpoint for 10 seconds: {}",
+                log.warn("S3 endpoint DNS lookup failed temporarily; retaining the previously validated endpoint within its bounded grace window: {}",
                         endpoint);
             }
             return replacement.allowed();
         }
+    }
+
+    private boolean isFreshEndpointValidation(EndpointValidationSnapshot snapshot,
+                                              EndpointValidationKey key,
+                                              long now) {
+        return snapshot != null
+                && snapshot.key().equals(key)
+                && now < snapshot.expiresAtNanos();
     }
 
     private <T> T withUploadClient(StorageSettings settings, Function<S3Client, T> action) {
@@ -509,7 +532,8 @@ public class S3ObjectStorageService {
     private record EndpointValidationKey(String endpoint, boolean allowHttp, boolean allowPrivate) {
     }
 
-    private record EndpointValidationSnapshot(EndpointValidationKey key, boolean allowed, long expiresAtNanos) {
+    private record EndpointValidationSnapshot(EndpointValidationKey key, boolean allowed,
+                                              long expiresAtNanos, long staleUntilNanos) {
     }
 
     private record UploadClientBundle(S3Client client) implements AutoCloseable {
