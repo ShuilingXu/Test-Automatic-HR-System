@@ -30,6 +30,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/register/code", "/api/auth/password-reset", "/api/auth/password-reset/code", "/api/auth/captcha").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/recruitment/jobs/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/site-content").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/recruitment/candidates/mine", "/api/recruitment/resumes/**").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/interview/runtime-config", "/api/interview/ice-servers").authenticated()
                         .requestMatchers("/api/site-content/admin/**").hasAnyAuthority("ROLE_IT_ADMIN", "ROLE_HR_ADMIN", "IT_ADMIN", "HR_ADMIN")
                         .requestMatchers("/api/system/**").hasAnyAuthority("ROLE_IT_ADMIN", "IT_ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/recruitment/candidates/**").hasAnyAuthority("ROLE_INTERVIEWEE", "INTERVIEWEE")

@@ -74,6 +74,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
                 migrateRecruitmentJobColumns(connection, statement);
                 migrateHrEmployeeColumns(connection, statement);
                 migrateInterviewLlmConfigColumns(connection, statement);
+                migratePayrollNumericColumns(connection, statement);
                 migrateSysUserColumns(connection, statement);
                 migrateReferentialIntegrityConstraints(connection, statement);
                 assertNoDuplicateBusinessKeys(statement);
@@ -163,6 +164,7 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "interview_process", "remark", "VARCHAR(2000)");
         addColumnIfMissing(connection, statement, "interview_process", "ai_recording_path", "VARCHAR(500)");
         addColumnIfMissing(connection, statement, "interview_process", "ai_recording_file_name", "VARCHAR(255)");
+        addColumnIfMissing(connection, statement, "interview_process", "last_heartbeat_at", dateTimeType());
         addColumnIfMissing(connection, statement, "interview_process", "template_id", "INTEGER");
         addColumnIfMissing(connection, statement, "interview_process", "template_name", "VARCHAR(128)");
     }
@@ -257,6 +259,14 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
 
     private void migrateInterviewLlmConfigColumns(Connection connection, Statement statement) throws SQLException {
         widenColumnIfNeeded(connection, statement, "interview_llm_config", "api_key", "VARCHAR(512)");
+    }
+
+    private void migratePayrollNumericColumns(Connection connection, Statement statement) throws SQLException {
+        for (String column : new String[]{"cumulative_income", "cumulative_deduction_base",
+                "cumulative_social_insurance", "cumulative_special_deduction", "cumulative_taxable_income",
+                "cumulative_tax_withheld"}) {
+            widenNumericColumnIfNeeded(connection, statement, "hr_payroll_month", column, 16, 2);
+        }
     }
 
     private void migrateReferentialIntegrityConstraints(Connection connection, Statement statement) throws SQLException {
@@ -635,6 +645,40 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
             statement.executeUpdate("ALTER TABLE " + table + " ALTER COLUMN " + column + " TYPE " + definition);
         } else {
             statement.executeUpdate("ALTER TABLE " + table + " MODIFY COLUMN " + column + " " + definition);
+        }
+    }
+
+    private void widenNumericColumnIfNeeded(Connection connection, Statement statement, String table,
+                                            String column, int desiredPrecision, int desiredScale) throws SQLException {
+        if (activeDatabase.type() == DatabaseType.SQLITE) {
+            return;
+        }
+        String query = activeDatabase.type() == DatabaseType.PGSQL
+                ? "SELECT numeric_precision, numeric_scale FROM information_schema.columns "
+                    + "WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?"
+                : "SELECT numeric_precision, numeric_scale FROM information_schema.columns "
+                    + "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?";
+        int precision;
+        int scale;
+        try (PreparedStatement queryStatement = connection.prepareStatement(query)) {
+            queryStatement.setString(1, table);
+            queryStatement.setString(2, column);
+            try (ResultSet result = queryStatement.executeQuery()) {
+                if (!result.next()) {
+                    throw new SQLException("Missing column " + table + "." + column);
+                }
+                precision = result.getInt("numeric_precision");
+                scale = result.getInt("numeric_scale");
+            }
+        }
+        if (precision >= desiredPrecision && scale >= desiredScale) {
+            return;
+        }
+        String definition = "DECIMAL(" + desiredPrecision + "," + desiredScale + ")";
+        if (activeDatabase.type() == DatabaseType.PGSQL) {
+            statement.executeUpdate("ALTER TABLE " + table + " ALTER COLUMN " + column + " TYPE " + definition);
+        } else {
+            statement.executeUpdate("ALTER TABLE " + table + " MODIFY COLUMN " + column + " " + definition + " NOT NULL");
         }
     }
 

@@ -235,6 +235,17 @@ public class InterviewController {
         return ApiResponse.success(interviewService.getIntervieweeProcess(processId, current.getId()));
     }
 
+    /**
+     * Dedicated liveness endpoint. It deliberately does not share the anti-cheat event
+     * contract so a heartbeat cannot increment switch counters or be deduplicated as an event.
+     */
+    @PostMapping("/interviewee/heartbeat/{processId}")
+    public ApiResponse<InterviewVO> heartbeat(Authentication authentication,
+                                               @PathVariable Long processId) {
+        SessionUserVO current = currentUser(authentication);
+        return ApiResponse.success(interviewService.heartbeat(processId, current.getId()));
+    }
+
     @GetMapping("/interviewee/next-question/{processId}")
     public ApiResponse<InterviewVO> getNextQuestion(Authentication authentication,
                                                     @PathVariable Long processId) {

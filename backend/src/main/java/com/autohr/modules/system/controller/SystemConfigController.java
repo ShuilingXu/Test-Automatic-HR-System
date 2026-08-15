@@ -104,7 +104,9 @@ public class SystemConfigController {
         try {
             URI endpoint = URI.create(value.trim());
             if (endpoint.getHost() == null
-                    || !("http".equalsIgnoreCase(endpoint.getScheme()) || "https".equalsIgnoreCase(endpoint.getScheme()))) {
+                    || !("http".equalsIgnoreCase(endpoint.getScheme()) || "https".equalsIgnoreCase(endpoint.getScheme()))
+                    || endpoint.getRawUserInfo() != null
+                    || endpoint.getRawFragment() != null) {
                 throw new IllegalArgumentException("unsupported endpoint");
             }
         } catch (IllegalArgumentException ex) {

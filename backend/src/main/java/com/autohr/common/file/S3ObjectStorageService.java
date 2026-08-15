@@ -83,6 +83,10 @@ public class S3ObjectStorageService {
             log.warn("Skipping S3 archive because the upload endpoint is not configured");
             return;
         }
+        if (!isValidEndpoint(endpoint)) {
+            log.warn("Skipping S3 archive because the endpoint is invalid");
+            return;
+        }
         String region = valueOrDefault(config.get("S3_REGION"), "us-east-1");
         String bucket = trim(config.get("S3_BUCKET"));
         String accessKeyId = trim(config.get("S3_ACCESS_KEY_ID"));
@@ -131,6 +135,9 @@ public class S3ObjectStorageService {
         String accessKeyId = trim(config.get("S3_ACCESS_KEY_ID"));
         String secretAccessKey = trim(config.get("S3_SECRET_ACCESS_KEY"));
         if (endpoint.isEmpty() || bucket.isEmpty() || accessKeyId.isEmpty() || secretAccessKey.isEmpty()) {
+            return Optional.empty();
+        }
+        if (!isValidEndpoint(endpoint)) {
             return Optional.empty();
         }
         try {
@@ -191,6 +198,19 @@ public class S3ObjectStorageService {
             return trim(config.get("S3_ENDPOINT"));
         }
         return trim(config.get("S3_INTERNAL_ENDPOINT"));
+    }
+
+    private boolean isValidEndpoint(String endpoint) {
+        URI uri;
+        try {
+            uri = URI.create(endpoint);
+        } catch (IllegalArgumentException ex) {
+            return false;
+        }
+        return uri.getHost() != null
+                && ("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                && uri.getRawUserInfo() == null
+                && uri.getRawFragment() == null;
     }
 
     private String buildObjectKey(String prefix, String objectName) {

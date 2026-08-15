@@ -238,6 +238,7 @@ export const interviewApi = {
   listProcesses(params) { return requestPage('/interview/hr/processes', params) },
   getProcess(id) { return request.get(`/interview/hr/processes/${id}`) },
   getIntervieweeProcess(processId) { return request.get(`/interview/interviewee/process/${processId}`) },
+  heartbeat(processId) { return request.post(`/interview/interviewee/heartbeat/${processId}`) },
   getNextAiQuestion(processId) { return request.get(`/interview/interviewee/next-question/${processId}`) },
   listAiRecords(params) { return requestPage('/interview/hr/ai-records', params) },
   listIntervieweeAiRecords(params) { return requestPage('/interview/interviewee/ai-records', params) },

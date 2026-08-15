@@ -41,6 +41,7 @@ public interface InterviewService {
     InterviewVO getProcess(Long processId);
     InterviewVO getProcessStage(Long processId, Long processStageId);
     InterviewVO getIntervieweeProcess(Long processId, Long intervieweeUserId);
+    InterviewVO heartbeat(Long processId, Long intervieweeUserId);
     InterviewVO getNextAiQuestion(Long processId);
     InterviewVO getIntervieweeNextAiQuestion(Long processId, Long intervieweeUserId);
     InterviewVO submitAiAnswer(AiAnswerRequest request);

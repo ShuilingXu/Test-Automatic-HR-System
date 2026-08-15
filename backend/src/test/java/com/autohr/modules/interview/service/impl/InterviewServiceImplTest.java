@@ -52,6 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -90,6 +91,27 @@ class InterviewServiceImplTest {
 
     @InjectMocks
     InterviewServiceImpl service;
+
+    @Test
+    void heartbeatPersistsLivenessWithoutUsingAntiCheatEvents() {
+        InterviewProcess process = new InterviewProcess();
+        process.setId(42L);
+        process.setIntervieweeUserId(9L);
+        process.setOverallStatus("IN_PROGRESS");
+        when(processMapper.selectById(42L)).thenReturn(process);
+        when(processMapper.update(
+                ArgumentMatchers.<InterviewProcess>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewProcess>>any())).thenReturn(1);
+
+        assertEquals(42L, service.heartbeat(42L, 9L).getProcessId());
+        assertTrue(process.getLastHeartbeatAt() != null);
+        verify(processMapper).update(
+                ArgumentMatchers.<InterviewProcess>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewProcess>>argThat(wrapper ->
+                        ((LambdaUpdateWrapper<?>) wrapper).getSqlSet().contains("last_heartbeat_at")));
+        verify(authRedisSecurityStore, never()).claimRateLimitedEvent(any(), any(), any(),
+                ArgumentMatchers.anyInt(), ArgumentMatchers.anyInt(), ArgumentMatchers.anyInt(), any());
+    }
 
     @Test
     void rejectsApprovalWhenAnotherRequestAlreadyClaimedTheTransition() {
@@ -207,6 +229,24 @@ class InterviewServiceImplTest {
                     return sqlSet.contains("summary_status") && !sqlSet.contains("session_status");
                 }));
         verify(videoSessionMapper, never()).updateById(any());
+    }
+
+    @Test
+    void retriesThreeTimesWhenPersistedRecordingsAreTemporarilyUnreadable() {
+        InterviewVideoSession session = videoSession(7L, null, "RECORDED");
+        session.setSummaryStatus("PENDING_MERGE");
+        when(videoSessionMapper.update(
+                ArgumentMatchers.<InterviewVideoSession>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewVideoSession>>any())).thenReturn(1);
+        when(videoSessionMapper.selectById(7L)).thenReturn(session);
+        when(videoMergeService.canMerge(session)).thenReturn(false);
+        ReflectionTestUtils.setField(service, "videoMergeRetryDelayMillis", 0L);
+
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(
+                service, "mergeAndSummarizeVideoSessionSafely", 7L));
+
+        verify(videoMergeService, times(3)).canMerge(session);
+        verify(videoMergeService, never()).mergeRecordings(any());
     }
 
     @Test

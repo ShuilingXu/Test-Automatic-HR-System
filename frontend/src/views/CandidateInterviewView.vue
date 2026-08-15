@@ -164,6 +164,8 @@ let componentDisposed = false
 let peer = null
 let pollTimer = null
 let aiRefreshTimer = null
+let heartbeatTimer = null
+let heartbeatInFlight = false
 let recorder = null
 let recorderStopPromise = null
 let recordingChunkWrites = Promise.resolve()
@@ -287,6 +289,7 @@ async function loadProcessRecords(options = {}) {
     refreshState.lastError = ''
     notifyAiFinishedIfNeeded()
     syncAiAutoRefresh()
+    syncHeartbeat()
   } catch (error) {
     refreshState.retryCount += 1
     refreshState.lastError = error.message || '刷新失败'
@@ -425,6 +428,31 @@ async function refreshPendingAiState() {
     if (componentDisposed) return
     schedulePendingAiRefresh()
   }
+}
+
+function syncHeartbeat() {
+  const active = processSummary.value?.overallStatus === 'IN_PROGRESS'
+  if (!active || !sessionForm.processId || componentDisposed) {
+    clearInterval(heartbeatTimer)
+    heartbeatTimer = null
+    return
+  }
+  if (heartbeatTimer) return
+  heartbeatTimer = setInterval(async () => {
+    if (componentDisposed || heartbeatInFlight || processSummary.value?.overallStatus !== 'IN_PROGRESS') return
+    heartbeatInFlight = true
+    try {
+      const response = await interviewApi.heartbeat(sessionForm.processId)
+      if (!componentDisposed && response.data) {
+        processSummary.value = response.data
+        syncHeartbeat()
+      }
+    } catch (error) {
+      if (!componentDisposed) console.warn('面试心跳上报失败', error)
+    } finally {
+      heartbeatInFlight = false
+    }
+  }, 30000)
 }
 
 function isPendingAiResolved() {
@@ -1214,6 +1242,8 @@ onBeforeUnmount(() => {
   componentDisposed = true
   clearTimeout(antiCheatRetryTimer)
   antiCheatRetryTimer = null
+  clearInterval(heartbeatTimer)
+  heartbeatTimer = null
   aiAnswerAbortController?.abort()
   clearAiRefresh()
   document.removeEventListener('keydown', handleRestrictedShortcut, true)

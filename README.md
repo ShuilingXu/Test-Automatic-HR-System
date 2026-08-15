@@ -262,8 +262,9 @@ API Key 使用 AES-GCM 加密后落库；`CONFIG_ENCRYPTION_KEY` 未配置时复
 
 1. 面试者 AI 面试页面会监听切屏等事件。
 2. 前端通过 `/api/interview/interviewee/anti-cheat-event` 上报防作弊事件。
-3. 系统累计切屏次数。
-4. 达到阈值后，流程会转入 HR 人工审批。
+3. 面试进行期间，前端每 30 秒调用独立的 `/api/interview/interviewee/heartbeat/{processId}` 上报在线状态；心跳不会增加切屏次数。
+4. 系统累计切屏次数。
+5. 达到阈值后，流程会转入 HR 人工审批。
 
 ### 11. HR 审批 AI 面试结果
 
@@ -521,7 +522,9 @@ python3 scripts/migrate-sqlite-to-postgres.py autohr.db --dsn "$POSTGRES_DSN" --
 覆盖迁移要求系统已安装 PostgreSQL 客户端工具 `pg_dump`。开始覆盖前，脚本会把 PostgreSQL
 完整备份到 `backups/postgres-migration/`，默认保留 5 天并自动清理过期备份；可用
 `--backup-dir` 和 `--backup-retention-days` 调整。迁移在单个数据库事务中执行，包含流程模板、
-模板阶段和已创建的流程阶段；任何错误都会显式回滚全部目标库改动，源 SQLite 文件不会被改写。
+模板阶段、薪资月表和仪表盘配置等 `schema.sql` 中的全部 29 张业务表。脚本启动时会校验迁移表清单与
+`schema.sql` 一致，写入后逐表核对 SQLite 与 PostgreSQL 行数；任何错误都会显式回滚全部目标库改动，
+源 SQLite 文件不会被改写。
 
 ### 一键发行包与 systemd
 

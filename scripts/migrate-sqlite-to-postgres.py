@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -35,6 +36,30 @@ TABLES = [
 EXPECTED_TABLE_COUNT = 29
 if len(TABLES) != EXPECTED_TABLE_COUNT:
     raise RuntimeError(f"Migration table list must contain {EXPECTED_TABLE_COUNT} tables, got {len(TABLES)}")
+
+SCHEMA_PATH = Path(__file__).resolve().parent.parent / "backend" / "src" / "main" / "resources" / "schema.sql"
+
+
+def require_complete_table_manifest():
+    schema = SCHEMA_PATH.read_text(encoding="utf-8")
+    schema_tables = set(re.findall(
+        r"^\s*CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([A-Za-z0-9_]+)\s*\(",
+        schema,
+        flags=re.IGNORECASE | re.MULTILINE,
+    ))
+    manifest_tables = set(TABLES)
+    if len(TABLES) != len(manifest_tables):
+        raise RuntimeError("Migration table manifest contains duplicate table names.")
+    if schema_tables != manifest_tables:
+        missing = sorted(schema_tables - manifest_tables)
+        extra = sorted(manifest_tables - schema_tables)
+        raise RuntimeError(
+            "Migration table manifest differs from schema.sql; "
+            f"missing={missing or 'none'}, extra={extra or 'none'}"
+        )
+
+
+require_complete_table_manifest()
 
 TYPE_COLUMNS = {
     "smallint", "integer", "bigint", "numeric", "decimal", "real", "double precision",
@@ -190,6 +215,7 @@ def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False,
                                 cursor.execute(f"TRUNCATE TABLE {table_list} CASCADE")
                     deferred_updates = []
                     migrated_tables = set()
+                    source_row_counts = {}
                     for table in TABLES:
                         columns = [row[1] for row in source.execute(f"PRAGMA table_info({quote(table)})")]
                         if not columns:
@@ -203,6 +229,7 @@ def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False,
                         if missing_columns:
                             raise SystemExit(f"Target PostgreSQL table {table} is missing columns: {', '.join(missing_columns)}")
                         rows = source.execute(f"SELECT * FROM {quote(table)}").fetchall()
+                        source_row_counts[table] = len(rows)
                         print(f"{table}: {len(rows)} rows")
                         if dry_run:
                             continue
@@ -239,6 +266,14 @@ def migrate(sqlite_path, postgres_dsn, force_overwrite=False, dry_run=False,
                                     f"Could not restore {table}.{column} for source row {row_id}"
                                 )
                         reset_sequences(cursor)
+                        for table, source_count in source_row_counts.items():
+                            cursor.execute(f"SELECT COUNT(*) FROM {quote(table)}")
+                            target_count = cursor.fetchone()[0]
+                            if target_count != source_count:
+                                raise RuntimeError(
+                                    f"Row-count verification failed for {table}: "
+                                    f"SQLite={source_count}, PostgreSQL={target_count}"
+                                )
                     print(f"Migration table coverage: {len(migrated_tables)}/{EXPECTED_TABLE_COUNT}")
             except BaseException:
                 target.rollback()

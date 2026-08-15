@@ -62,9 +62,10 @@ public class VideoMergeService {
         if (source == null || !Files.isRegularFile(Path.of(source))) {
             throw new BusinessException("视频文件不存在，不能分离音频");
         }
+        Path output = null;
         try {
             Files.createDirectories(UploadPaths.RECORDING_DIR);
-            Path output = UploadPaths.RECORDING_DIR.resolve(session.getVideoSerialNo() + "-audio.pcm").normalize().toAbsolutePath();
+            output = UploadPaths.RECORDING_DIR.resolve(session.getVideoSerialNo() + "-audio.pcm").normalize().toAbsolutePath();
             if (!output.startsWith(UploadPaths.RECORDING_DIR)) {
                 throw new BusinessException("音频文件路径非法");
             }
@@ -100,6 +101,9 @@ public class VideoMergeService {
             session.setAudioFileName(output.getFileName().toString());
         } catch (IOException ex) {
             throw new BusinessException("分离音频失败: " + ex.getMessage());
+        } catch (RuntimeException ex) {
+            deleteTemporaryAudio(output == null ? null : output.toString());
+            throw ex;
         }
     }
 
@@ -108,9 +112,10 @@ public class VideoMergeService {
         if (source == null || !Files.isRegularFile(Path.of(source))) {
             throw new BusinessException("" + speaker + "录制文件不存在，不能分离音频");
         }
+        Path output = null;
         try {
             Files.createDirectories(UploadPaths.RECORDING_DIR);
-            Path output = UploadPaths.RECORDING_DIR.resolve(session.getVideoSerialNo() + "-" + speaker + "-audio.pcm").normalize().toAbsolutePath();
+            output = UploadPaths.RECORDING_DIR.resolve(session.getVideoSerialNo() + "-" + speaker + "-audio.pcm").normalize().toAbsolutePath();
             if (!output.startsWith(UploadPaths.RECORDING_DIR)) {
                 throw new BusinessException("说话人音频文件路径非法");
             }
@@ -129,6 +134,9 @@ public class VideoMergeService {
             return output.toString();
         } catch (IOException ex) {
             throw new BusinessException("分离" + speaker + "音频失败: " + ex.getMessage());
+        } catch (RuntimeException ex) {
+            deleteTemporaryAudio(output == null ? null : output.toString());
+            throw ex;
         }
     }
 
