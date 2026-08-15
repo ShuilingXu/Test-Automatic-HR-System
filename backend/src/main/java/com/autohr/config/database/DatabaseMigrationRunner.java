@@ -18,6 +18,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 
@@ -105,6 +107,8 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
             case MYSQL -> schema
                     .replace("    FOREIGN KEY (department_id) REFERENCES hr_department(id),\n    FOREIGN KEY (job_id) REFERENCES recruitment_job(id)\n);",
                             "    FOREIGN KEY (department_id) REFERENCES hr_department(id)\n);")
+                    .replace("VARCHAR(5000) NOT NULL", "TEXT NOT NULL")
+                    .replace("VARCHAR(5000)", "TEXT")
                     .replace("CREATE UNIQUE INDEX IF NOT EXISTS", "CREATE UNIQUE INDEX")
                     .replace("CREATE INDEX IF NOT EXISTS", "CREATE INDEX")
                     .replace("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY AUTO_INCREMENT");
@@ -224,6 +228,115 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         addColumnIfMissing(connection, statement, "interview_video_session", "interviewee_ice_candidates", "TEXT");
         addColumnIfMissing(connection, statement, "interview_video_session", "recording_file_name", "VARCHAR(255)");
         addColumnIfMissing(connection, statement, "interview_video_session", "process_stage_id", "INTEGER");
+        addColumnIfMissing(connection, statement, "interview_video_session", "stage_scope_id", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing(connection, statement, "interview_video_session", "last_activity_at", dateTimeType());
+        statement.executeUpdate("UPDATE interview_video_session SET stage_scope_id = COALESCE(process_stage_id, 0)");
+        statement.executeUpdate("UPDATE interview_video_session SET last_activity_at = "
+                + "COALESCE(last_activity_at, updated_at, start_time, created_at, CURRENT_TIMESTAMP)");
+        enforceVideoSessionIntegrityConstraints(connection, statement);
+        archiveAndRemoveDuplicateVideoSessions(connection, statement);
+    }
+
+    private void archiveAndRemoveDuplicateVideoSessions(Connection connection, Statement statement) throws SQLException {
+        String dateTimeType = dateTimeType();
+        execute(statement, "CREATE TABLE IF NOT EXISTS interview_video_session_duplicate_archive ("
+                + "original_session_id INTEGER PRIMARY KEY, process_id INTEGER NOT NULL, process_stage_id INTEGER, "
+                + "stage_scope_id INTEGER NOT NULL, video_serial_no VARCHAR(128), video_join_link VARCHAR(500), "
+                + "approver_user_id INTEGER, approver_name VARCHAR(64), interviewee_join_time " + dateTimeType + ", "
+                + "hr_join_time " + dateTimeType + ", start_time " + dateTimeType + ", end_time " + dateTimeType + ", "
+                + "recording_end_requested_at " + dateTimeType + ", recording_path VARCHAR(500), "
+                + "hr_recording_path VARCHAR(500), hr_recording_file_name VARCHAR(255), "
+                + "interviewee_recording_path VARCHAR(500), interviewee_recording_file_name VARCHAR(255), "
+                + "merged_recording_path VARCHAR(500), merged_recording_file_name VARCHAR(255), "
+                + "audio_path VARCHAR(500), audio_file_name VARCHAR(255), transcript_text TEXT, summary_text TEXT, "
+                + "summary_status VARCHAR(128), hr_offer_sdp TEXT, interviewee_answer_sdp TEXT, "
+                + "hr_ice_candidates TEXT, interviewee_ice_candidates TEXT, recording_file_name VARCHAR(255), "
+                + "session_status VARCHAR(32), last_activity_at " + dateTimeType + ", created_at " + dateTimeType + ", "
+                + "updated_at " + dateTimeType + ", archived_at " + dateTimeType + " NOT NULL DEFAULT CURRENT_TIMESTAMP)");
+        try (PreparedStatement cleanup = connection.prepareStatement(
+                "DELETE FROM interview_video_session_duplicate_archive WHERE archived_at < ?")) {
+            cleanup.setTimestamp(1, Timestamp.valueOf(LocalDateTime.now().minusDays(5)));
+            cleanup.executeUpdate();
+        }
+        String duplicateQuality = videoSessionCompletenessExpression("duplicate_session");
+        String betterQuality = videoSessionCompletenessExpression("better_session");
+        String duplicatePredicate = "EXISTS (SELECT 1 FROM interview_video_session better_session "
+                + "WHERE better_session.process_id = duplicate_session.process_id "
+                + "AND better_session.stage_scope_id = duplicate_session.stage_scope_id AND ("
+                + betterQuality + " > " + duplicateQuality + " OR (" + betterQuality + " = "
+                + duplicateQuality + " AND better_session.id > duplicate_session.id)))";
+        String archiveColumns = "original_session_id, process_id, process_stage_id, stage_scope_id, video_serial_no, "
+                + "video_join_link, approver_user_id, approver_name, interviewee_join_time, hr_join_time, start_time, "
+                + "end_time, recording_end_requested_at, recording_path, hr_recording_path, hr_recording_file_name, "
+                + "interviewee_recording_path, interviewee_recording_file_name, merged_recording_path, "
+                + "merged_recording_file_name, audio_path, audio_file_name, transcript_text, summary_text, "
+                + "summary_status, hr_offer_sdp, interviewee_answer_sdp, hr_ice_candidates, "
+                + "interviewee_ice_candidates, recording_file_name, session_status, last_activity_at, created_at, updated_at";
+        String sourceColumns = archiveColumns.replace("original_session_id", "id");
+        int archived = statement.executeUpdate("INSERT INTO interview_video_session_duplicate_archive "
+                + "(" + archiveColumns + ") SELECT "
+                + Arrays.stream(sourceColumns.split(", ")).map(column -> "duplicate_session." + column).collect(java.util.stream.Collectors.joining(", "))
+                + " FROM interview_video_session duplicate_session WHERE " + duplicatePredicate + " "
+                + "AND NOT EXISTS (SELECT 1 FROM interview_video_session_duplicate_archive archived "
+                + "WHERE archived.original_session_id = duplicate_session.id)");
+        int removed = statement.executeUpdate("DELETE FROM interview_video_session WHERE EXISTS ("
+                + "SELECT 1 FROM interview_video_session_duplicate_archive archived "
+                + "WHERE archived.original_session_id = interview_video_session.id "
+                + "AND archived.process_id = interview_video_session.process_id "
+                + "AND archived.stage_scope_id = interview_video_session.stage_scope_id)");
+        if (archived > 0 || removed > 0) {
+            log.warn("Archived {} and removed {} duplicate interview video session row(s) before enforcing uniqueness",
+                    archived, removed);
+        }
+    }
+
+    private String videoSessionCompletenessExpression(String alias) {
+        return "(CASE WHEN " + alias + ".merged_recording_path IS NOT NULL AND " + alias
+                + ".merged_recording_path <> '' THEN 128 ELSE 0 END + CASE WHEN " + alias
+                + ".hr_recording_path IS NOT NULL AND " + alias + ".hr_recording_path <> '' THEN 32 ELSE 0 END + CASE WHEN "
+                + alias + ".interviewee_recording_path IS NOT NULL AND " + alias
+                + ".interviewee_recording_path <> '' THEN 32 ELSE 0 END + CASE WHEN " + alias
+                + ".recording_path IS NOT NULL AND " + alias + ".recording_path <> '' THEN 16 ELSE 0 END + CASE WHEN "
+                + alias + ".summary_text IS NOT NULL AND " + alias + ".summary_text <> '' THEN 8 ELSE 0 END + CASE WHEN "
+                + alias + ".transcript_text IS NOT NULL AND " + alias + ".transcript_text <> '' THEN 4 ELSE 0 END + CASE "
+                + alias + ".session_status WHEN 'PASSED' THEN 12 WHEN 'REJECTED' THEN 12 WHEN 'TERMINATED' THEN 12 "
+                + "WHEN 'WAITING_APPROVAL' THEN 10 WHEN 'RECORDED' THEN 10 WHEN 'END_REQUESTED' THEN 8 "
+                + "WHEN 'RECORDING' THEN 6 ELSE 0 END)";
+    }
+
+    private void enforceVideoSessionIntegrityConstraints(Connection connection, Statement statement) throws SQLException {
+        if (activeDatabase.type() == DatabaseType.SQLITE) {
+            return;
+        }
+        if (activeDatabase.type() == DatabaseType.PGSQL) {
+            statement.executeUpdate("ALTER TABLE interview_video_session ALTER COLUMN stage_scope_id SET DEFAULT 0");
+            statement.executeUpdate("ALTER TABLE interview_video_session ALTER COLUMN stage_scope_id SET NOT NULL");
+            statement.executeUpdate("ALTER TABLE interview_video_session ALTER COLUMN last_activity_at SET DEFAULT CURRENT_TIMESTAMP");
+            statement.executeUpdate("ALTER TABLE interview_video_session ALTER COLUMN last_activity_at SET NOT NULL");
+        } else {
+            statement.executeUpdate("ALTER TABLE interview_video_session MODIFY COLUMN stage_scope_id INTEGER NOT NULL DEFAULT 0");
+            statement.executeUpdate("ALTER TABLE interview_video_session MODIFY COLUMN last_activity_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP");
+        }
+        String constraintName = "ck_interview_video_session_stage_scope";
+        if (!checkConstraintExists(connection, "interview_video_session", constraintName)) {
+            statement.executeUpdate("ALTER TABLE interview_video_session ADD CONSTRAINT " + constraintName
+                    + " CHECK (stage_scope_id = COALESCE(process_stage_id, 0))");
+        }
+    }
+
+    private boolean checkConstraintExists(Connection connection, String table, String constraintName) throws SQLException {
+        String sql = activeDatabase.type() == DatabaseType.PGSQL
+                ? "SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=current_schema() "
+                    + "AND table_name=? AND constraint_name=? AND constraint_type='CHECK'"
+                : "SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema=DATABASE() "
+                    + "AND table_name=? AND constraint_name=? AND constraint_type='CHECK'";
+        try (PreparedStatement query = connection.prepareStatement(sql)) {
+            query.setString(1, table);
+            query.setString(2, constraintName);
+            try (ResultSet result = query.executeQuery()) {
+                return result.next() && result.getLong(1) > 0;
+            }
+        }
     }
 
     private String dateTimeType() {
@@ -280,6 +393,12 @@ public class DatabaseMigrationRunner implements CommandLineRunner {
         ensureForeignKey(connection, statement, "fk_hr_department_manager", "hr_department", "manager_employee_id", "hr_employee");
         ensureEmployeeSourceCandidateForeignKey(connection, statement);
         ensureForeignKey(connection, statement, "fk_binding_employee", "hr_integration_binding", "employee_id", "hr_employee");
+        ensureForeignKey(connection, statement, "fk_salary_history_employee", "hr_salary_history", "employee_id", "hr_employee");
+        ensureForeignKey(connection, statement, "fk_performance_employee", "hr_performance_month", "employee_id", "hr_employee");
+        ensureForeignKey(connection, statement, "fk_overtime_employee", "hr_overtime_month", "employee_id", "hr_employee");
+        ensureForeignKey(connection, statement, "fk_social_insurance_employee", "hr_social_insurance_month", "employee_id", "hr_employee");
+        ensureForeignKey(connection, statement, "fk_special_deduction_employee", "hr_special_deduction_month", "employee_id", "hr_employee");
+        ensureForeignKey(connection, statement, "fk_payroll_employee", "hr_payroll_month", "employee_id", "hr_employee");
         ensureForeignKey(connection, statement, "fk_candidate_interviewee_user", "recruitment_candidate", "interviewee_user_id", "sys_user");
         ensureForeignKey(connection, statement, "fk_process_candidate", "interview_process", "recruitment_candidate_id", "recruitment_candidate");
         ensureForeignKey(connection, statement, "fk_process_interviewee_user", "interview_process", "interviewee_user_id", "sys_user");

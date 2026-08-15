@@ -10,6 +10,7 @@ import org.springframework.core.task.TaskRejectedException;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectResponse;
 
 import java.net.InetAddress;
 import java.time.Duration;
@@ -113,7 +114,7 @@ class S3ObjectStorageServiceTest {
     }
 
     @Test
-    void temporaryDnsFailureUsesOnlyTheOriginalBoundedGraceWindow() throws Exception {
+    void expiredDnsApprovalIsNotReusedWhenRefreshFails() throws Exception {
         when(systemConfigService.loadConfig(any(String[].class))).thenReturn(enabledConfig());
         when(s3ClientFactory.create(anyString(), anyString(), anyString(), anyString(), anyString(), anyBoolean()))
                 .thenReturn(s3Client);
@@ -136,8 +137,8 @@ class S3ObjectStorageServiceTest {
         clock.set(Duration.ofSeconds(71).toNanos());
         service.deleteObjectIfEnabled("resumes/third.pdf");
 
-        verify(s3Client, times(2)).deleteObject(any(DeleteObjectRequest.class));
-        assertEquals(3, dnsLookups.get());
+        verify(s3Client, times(1)).deleteObject(any(DeleteObjectRequest.class));
+        assertEquals(2, dnsLookups.get());
         verify(s3ClientFactory, times(1))
                 .create(anyString(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
     }
@@ -214,6 +215,27 @@ class S3ObjectStorageServiceTest {
         assertDoesNotThrow(() -> service.deleteObjectIfEnabled("resumes/resume.pdf"));
 
         verify(systemConfigService).loadConfig(any(String[].class));
+    }
+
+    @Test
+    void retriesTransientObjectDeletionThreeTimes() throws Exception {
+        when(systemConfigService.loadConfig(any(String[].class))).thenReturn(enabledConfig());
+        when(s3ClientFactory.create(anyString(), anyString(), anyString(), anyString(), anyString(), anyBoolean()))
+                .thenReturn(s3Client);
+        when(s3Client.deleteObject(any(DeleteObjectRequest.class)))
+                .thenThrow(new RuntimeException("temporary-1"))
+                .thenThrow(new RuntimeException("temporary-2"))
+                .thenReturn(DeleteObjectResponse.builder().build());
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(0)).run();
+            return null;
+        }).when(s3ArchiveExecutor).execute(any(Runnable.class));
+        S3ObjectStorageService service = service(host ->
+                new InetAddress[]{InetAddress.getByAddress(new byte[]{1, 1, 1, 1})});
+
+        service.deleteObjectIfEnabled("resumes/retry.pdf");
+
+        verify(s3Client, times(3)).deleteObject(any(DeleteObjectRequest.class));
     }
 
     private S3ObjectStorageService service(S3EndpointValidator.AddressResolver resolver) {

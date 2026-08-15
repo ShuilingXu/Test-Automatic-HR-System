@@ -87,6 +87,66 @@ class DatabaseMigrationRunnerTest {
     }
 
     @Test
+    void archivesHistoricalVideoSessionDuplicatesBeforeAddingScopeUniqueness() throws Exception {
+        String url = "jdbc:sqlite:" + tempDirectory.resolve("video-session-migration.db").toString().replace('\\', '/');
+        DataSource dataSource = new DriverManagerDataSource(url);
+        DatabaseMigrationRunner runner = new DatabaseMigrationRunner(
+                dataSource,
+                new ActiveDatabase(DatabaseType.SQLITE, url, "", "", false),
+                new AppMigrationProperties());
+        runner.run();
+
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("DROP INDEX uq_interview_video_session_process_scope");
+            statement.executeUpdate("INSERT INTO interview_video_session "
+                    + "(process_id,process_stage_id,stage_scope_id,video_serial_no,video_join_link,session_status) VALUES "
+                    + "(10,NULL,0,'legacy-old','/legacy-old','RECORDING'),"
+                    + "(10,NULL,0,'legacy-new','/legacy-new','END_REQUESTED'),"
+                    + "(20,101,101,'template-old','/template-old','RECORDING'),"
+                    + "(20,101,101,'template-new','/template-new','END_REQUESTED')");
+            statement.executeUpdate("INSERT INTO interview_video_session "
+                    + "(process_id,process_stage_id,stage_scope_id,video_serial_no,video_join_link,session_status,"
+                    + "merged_recording_path,transcript_text) VALUES "
+                    + "(30,NULL,0,'complete-old','/complete-old','RECORDED','merged.webm','recoverable transcript'),"
+                    + "(30,NULL,0,'empty-new','/empty-new','CREATED',NULL,NULL)");
+        }
+
+        runner.run();
+
+        try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            assertUniqueIndex(connection, "interview_video_session", "uq_interview_video_session_process_scope");
+            try (ResultSet rows = statement.executeQuery("SELECT COUNT(*) FROM interview_video_session")) {
+                assertTrue(rows.next());
+                assertEquals(3, rows.getInt(1));
+            }
+            try (ResultSet archived = statement.executeQuery(
+                    "SELECT COUNT(*) FROM interview_video_session_duplicate_archive")) {
+                assertTrue(archived.next());
+                assertEquals(3, archived.getInt(1));
+            }
+            try (ResultSet retained = statement.executeQuery(
+                    "SELECT video_serial_no,transcript_text FROM interview_video_session WHERE process_id=30")) {
+                assertTrue(retained.next());
+                assertEquals("complete-old", retained.getString("video_serial_no"));
+                assertEquals("recoverable transcript", retained.getString("transcript_text"));
+            }
+            try (ResultSet archived = statement.executeQuery(
+                    "SELECT video_join_link,session_status FROM interview_video_session_duplicate_archive "
+                            + "WHERE video_serial_no='empty-new'")) {
+                assertTrue(archived.next());
+                assertEquals("/empty-new", archived.getString("video_join_link"));
+                assertEquals("CREATED", archived.getString("session_status"));
+            }
+            assertThrows(SQLException.class, () -> statement.executeUpdate("INSERT INTO interview_video_session "
+                    + "(process_id,process_stage_id,stage_scope_id,video_serial_no,video_join_link,session_status) "
+                    + "VALUES (10,NULL,0,'legacy-third','/legacy-third','CREATED')"));
+            assertThrows(SQLException.class, () -> statement.executeUpdate("INSERT INTO interview_video_session "
+                    + "(process_id,process_stage_id,stage_scope_id,video_serial_no,video_join_link,session_status) "
+                    + "VALUES (40,200,0,'bad-scope','/bad-scope','CREATED')"));
+        }
+    }
+
+    @Test
     void upgradesLegacySqliteEmployeesAndEnforcesTheJobForeignKey() throws Exception {
         String url = "jdbc:sqlite:" + tempDirectory.resolve("legacy-payroll.db").toString().replace('\\', '/');
         DataSource dataSource = new DriverManagerDataSource(url);
@@ -149,7 +209,10 @@ class DatabaseMigrationRunnerTest {
         assertTrue(mysql.contains("INTEGER PRIMARY KEY AUTO_INCREMENT"));
         assertTrue(mysql.contains("default_overtime_rate DECIMAL(12,2) NOT NULL DEFAULT 0"));
         assertTrue(mysql.contains("cumulative_income DECIMAL(16,2) NOT NULL"));
+        assertTrue(mysql.contains("question_content TEXT NOT NULL"));
+        assertTrue(mysql.contains("suggested_next_question TEXT"));
         assertTrue(mysql.contains("CREATE UNIQUE INDEX uq_payroll_employee_month"));
+        assertTrue(mysql.contains("CREATE UNIQUE INDEX uq_interview_video_session_process_scope"));
         assertFalse(mysql.contains("AUTOINCREMENT"));
         assertFalse(employeeTable(mysql).contains("FOREIGN KEY (job_id) REFERENCES recruitment_job(id)"));
 
@@ -158,6 +221,7 @@ class DatabaseMigrationRunnerTest {
         assertTrue(postgres.contains("INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY"));
         assertTrue(postgres.contains("calculated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"));
         assertTrue(postgres.contains("cumulative_taxable_income DECIMAL(16,2) NOT NULL"));
+        assertTrue(postgres.contains("CREATE UNIQUE INDEX IF NOT EXISTS uq_interview_video_session_process_scope"));
         assertFalse(postgres.contains("AUTOINCREMENT"));
         assertFalse(postgres.contains("DATETIME"));
         assertFalse(employeeTable(postgres).contains("FOREIGN KEY (job_id) REFERENCES recruitment_job(id)"));

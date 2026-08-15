@@ -48,6 +48,7 @@ public class S3ObjectStorageService {
     };
     private static final long ENDPOINT_VALIDATION_TTL_NANOS = Duration.ofMinutes(1).toNanos();
     private static final long DNS_RETRY_TTL_NANOS = Duration.ofSeconds(10).toNanos();
+    private static final int DELETE_MAX_ATTEMPTS = 3;
 
     private final SystemConfigService systemConfigService;
     private final ThreadPoolTaskExecutor s3ArchiveExecutor;
@@ -184,15 +185,35 @@ public class S3ObjectStorageService {
         try {
             withUploadClient(settings, client -> {
                 for (String objectName : objectNames) {
+                    String objectKey;
                     try {
-                        String objectKey = buildObjectKey(settings.prefix(), objectName);
-                        client.deleteObject(DeleteObjectRequest.builder()
-                                .bucket(settings.bucket())
-                                .key(objectKey)
-                                .build());
-                        log.info("Deleted S3 object {} from bucket {}", objectKey, settings.bucket());
+                        objectKey = buildObjectKey(settings.prefix(), objectName);
                     } catch (Exception ex) {
-                        log.warn("Best-effort S3 deletion failed for {}: {}", objectName, ex.toString());
+                        log.warn("Skipping invalid S3 deletion key {}: {}", objectName, ex.toString());
+                        continue;
+                    }
+                    for (int attempt = 1; attempt <= DELETE_MAX_ATTEMPTS; attempt++) {
+                        try {
+                            client.deleteObject(DeleteObjectRequest.builder()
+                                    .bucket(settings.bucket())
+                                    .key(objectKey)
+                                    .build());
+                            log.info("Deleted S3 object {} from bucket {}", objectKey, settings.bucket());
+                            break;
+                        } catch (Exception ex) {
+                            if (attempt == DELETE_MAX_ATTEMPTS) {
+                                log.error("S3 deletion failed after {} attempts for {}: {}",
+                                        DELETE_MAX_ATTEMPTS, objectName, ex.toString());
+                                break;
+                            }
+                            try {
+                                Thread.sleep(200L * attempt);
+                            } catch (InterruptedException interrupted) {
+                                Thread.currentThread().interrupt();
+                                log.warn("S3 deletion retry interrupted for {}", objectName);
+                                break;
+                            }
+                        }
                     }
                 }
                 return null;
@@ -294,35 +315,21 @@ public class S3ObjectStorageService {
             if (current != observed && isFreshEndpointValidation(current, key, now)) {
                 return current.allowed();
             }
-            boolean useStaleSuccess = result.failure() == S3EndpointValidator.ValidationFailure.DNS_FAILURE
-                    && current != null
-                    && current.key().equals(key)
-                    && current.allowed()
-                    && now < current.staleUntilNanos();
             EndpointValidationSnapshot replacement;
             if (result.allowed()) {
                 long expiresAt = now + ENDPOINT_VALIDATION_TTL_NANOS;
-                replacement = new EndpointValidationSnapshot(
-                        key, true, expiresAt, expiresAt + DNS_RETRY_TTL_NANOS);
-            } else if (useStaleSuccess) {
-                // Repeated lookup failures never extend the original grace deadline.
-                replacement = new EndpointValidationSnapshot(
-                        key, true, current.staleUntilNanos(), current.staleUntilNanos());
+                replacement = new EndpointValidationSnapshot(key, true, expiresAt);
             } else {
                 long retryTtl = result.failure() == S3EndpointValidator.ValidationFailure.DNS_FAILURE
                         ? DNS_RETRY_TTL_NANOS
                         : ENDPOINT_VALIDATION_TTL_NANOS;
                 long expiresAt = now + retryTtl;
-                replacement = new EndpointValidationSnapshot(key, false, expiresAt, expiresAt);
+                replacement = new EndpointValidationSnapshot(key, false, expiresAt);
             }
             if (uploadEndpoint) {
                 uploadEndpointValidation = replacement;
             } else {
                 externalEndpointValidation = replacement;
-            }
-            if (useStaleSuccess) {
-                log.warn("S3 endpoint DNS lookup failed temporarily; retaining the previously validated endpoint within its bounded grace window: {}",
-                        endpoint);
             }
             return replacement.allowed();
         }
@@ -533,7 +540,7 @@ public class S3ObjectStorageService {
     }
 
     private record EndpointValidationSnapshot(EndpointValidationKey key, boolean allowed,
-                                              long expiresAtNanos, long staleUntilNanos) {
+                                              long expiresAtNanos) {
     }
 
     private record UploadClientBundle(S3Client client) implements AutoCloseable {

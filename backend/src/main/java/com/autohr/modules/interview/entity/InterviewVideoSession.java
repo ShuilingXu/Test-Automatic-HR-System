@@ -16,6 +16,7 @@ public class InterviewVideoSession {
     private Long id;
     private Long processId;
     private Long processStageId;
+    private Long stageScopeId;
     private String videoSerialNo;
     private String videoJoinLink;
     private Long approverUserId;
@@ -43,6 +44,7 @@ public class InterviewVideoSession {
     private String intervieweeIceCandidates;
     private String recordingFileName;
     private String sessionStatus;
+    private LocalDateTime lastActivityAt;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
     @TableField(fill = FieldFill.INSERT_UPDATE)

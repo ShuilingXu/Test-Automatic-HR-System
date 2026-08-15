@@ -452,6 +452,7 @@ CREATE TABLE IF NOT EXISTS interview_video_session (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     process_id INTEGER NOT NULL,
     process_stage_id INTEGER,
+    stage_scope_id INTEGER NOT NULL DEFAULT 0,
     video_serial_no VARCHAR(128) NOT NULL,
     video_join_link VARCHAR(500) NOT NULL,
     approver_user_id INTEGER,
@@ -479,8 +480,11 @@ CREATE TABLE IF NOT EXISTS interview_video_session (
     interviewee_ice_candidates TEXT,
     recording_file_name VARCHAR(255),
     session_status VARCHAR(32) NOT NULL,
+    last_activity_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_interview_video_session_stage_scope
+        CHECK (stage_scope_id = COALESCE(process_stage_id, 0))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_interview_job_knowledge_weight_job_base
@@ -535,5 +539,6 @@ CREATE INDEX IF NOT EXISTS idx_interview_ai_record_answer_lease ON interview_ai_
 CREATE INDEX IF NOT EXISTS idx_interview_ai_record_process_stage_id ON interview_ai_record(process_stage_id);
 CREATE INDEX IF NOT EXISTS idx_interview_video_session_process_id ON interview_video_session(process_id);
 CREATE INDEX IF NOT EXISTS idx_interview_video_session_process_stage_id ON interview_video_session(process_stage_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_interview_video_session_process_scope ON interview_video_session(process_id, stage_scope_id);
 CREATE INDEX IF NOT EXISTS idx_interview_process_template_stage_template_id ON interview_process_template_stage(template_id);
 CREATE INDEX IF NOT EXISTS idx_interview_process_stage_process_id ON interview_process_stage(process_id);

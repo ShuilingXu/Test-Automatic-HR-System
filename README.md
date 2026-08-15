@@ -174,7 +174,11 @@ npm.cmd run build
 
 1. 使用默认后台账号登录 `/login`。
 2. 登录成功后，后台用户进入 `/admin`，面试者进入 `/user`。
-3. 前端会保存 JWT 到 `localStorage` 的 `autohr-access-token`，并在后续请求中自动添加 `Authorization: Bearer <token>`。旧版本的 `demo-token` 会在首次读取时自动迁移，退出登录时新旧 key 会一并清理。
+3. 前端会保存 JWT 到 `localStorage` 的 `autohr-access-token`，并在后续请求中自动添加 `Authorization: Bearer <token>`。旧版本的 `demo-token` 会在首次读取时自动迁移，退出登录时新旧 key 会一并清理。`localStorage` 中的 Bearer Token 会被同源 JavaScript 读取，因此任何 XSS 都可能导致登录凭据泄露；生产环境不得注入第三方脚本，必须启用下文的 CSP 响应头与 HTTPS，并保持默认 2 小时或更短的 Token 有效期。
+
+### 站点外观设置
+
+`IT_ADMIN` 可在 `/admin/content` 的“站点外观”区域维护 Logo 地址、站点标题、副标题和页脚文本。公开首页、登录页、后台导航、浏览器标题与 favicon 会读取 `GET /api/site-settings` 并同步更新；管理接口 `GET/POST /api/site-settings/admin` 仅允许 `IT_ADMIN`。Logo 仅接受站内绝对路径或 HTTPS URL。字段名 `footerHtml` 为兼容既有接口保留，前端始终按纯文本展示，不解析 HTML。
 
 ### 2. 维护组织和员工信息
 
@@ -286,6 +290,8 @@ API Key 使用 AES-GCM 加密后落库；`CONFIG_ENCRYPTION_KEY` 未配置时复
 6. HR 审批视频面试结果。
 
 如果结束后 10 分钟仍未完整收到双方录像，系统会将会话标记为“录像缺失”并进入待审批，不阻止 HR 作出决定；迟到录像补齐后仍会自动触发合并和概要生成。
+
+视频会话若持续无候选人心跳、加入、SDP/ICE 或录像上传活动，会由后端自动请求结束并进入上述录像合并/缺失兜底流程；这也覆盖创建后双方都未加入便关闭页面的会话。默认非活跃超时为 30 分钟，可用 `INTERVIEW_VIDEO_INACTIVE_TIMEOUT_MINUTES` 调整；扫描周期由 `INTERVIEW_VIDEO_INACTIVE_SCAN_INTERVAL_MS` 控制。
 
 WebRTC 默认使用以下 STUN：
 
@@ -401,7 +407,7 @@ spring:
 | `MIGRATION_ENABLED` | `true` | 是否执行表结构迁移 |
 | `JWT_SECRET` | 无（必填） | JWT 签名密钥，必须使用长度不少于 32 个字符的随机值 |
 | `CONFIG_ENCRYPTION_KEY` | `JWT_SECRET` | LLM API Key 等配置密文的独立加密密钥；设置后必须稳定保管 |
-| `JWT_EXPIRATION` | `86400000` | Token 有效期，单位毫秒 |
+| `JWT_EXPIRATION` | `7200000` | Token 有效期，单位毫秒；默认 2 小时 |
 | `REDIS_HOST` | `127.0.0.1` | 验证码、验证状态和限流使用的 Redis 地址 |
 | `REDIS_PORT` | `6379` | Redis 端口 |
 | `REDIS_PASSWORD` | 空 | Redis 密码，只保存在服务器 `.env` 中 |
@@ -554,6 +560,14 @@ sudo systemctl status auto-hr
 
 安装脚本会创建低权限 `autohr` 系统用户，保留 `/opt/auto-hr/uploads` 与日志目录，将 `.env` 设为 `0600`，安装并启动 `auto-hr.service`，然后等待 60 秒健康检查。首次安装必须传入生产 `.env`；后续升级不传参数时会沿用 `/opt/auto-hr/.env`。默认服务监听 `127.0.0.1:8081`，适合由 OpenResty/Nginx 终止 TLS 并反向代理；服务以生产 profile 启动、开机自启，并在异常退出时自动重启。若由 OpenResty 直接托管静态文件，可将包内 `frontend/` 同步到站点目录，并把 `/api` 反代到 `127.0.0.1:8081`。
 
+生产 OpenResty/Nginx 必须在 HTTPS 站点响应中设置 CSP。`frontend/index.html` 的 meta 仅作为静态页面兜底，不能替代响应头；建议在站点 `server` 块加入以下与后端一致的策略，并确认没有其他配置覆盖它：
+
+```nginx
+add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; media-src 'self' data: blob: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; child-src 'self' blob:" always;
+```
+
+该策略不允许第三方脚本。生产站点、API、Logo、对象存储下载地址和 WebSocket 必须使用 TLS；确需引入新外部来源时，应逐项审查后只放行精确域名，不要放宽 `script-src`。
+
 ## 面试相关配置
 
 | 变量 | 默认值 | 说明 |
@@ -592,6 +606,7 @@ mvn package
 ```bash
 cd frontend
 npm install
+npm test
 npm run dev
 npm run build
 npm run lint

@@ -51,6 +51,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class HrServiceImpl implements HrService {
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final List<String> EMPLOYEE_PAYROLL_TABLES = List.of(
+            "hr_payroll_month",
+            "hr_performance_month",
+            "hr_overtime_month",
+            "hr_social_insurance_month",
+            "hr_special_deduction_month",
+            "hr_salary_history");
 
     private final DepartmentMapper departmentMapper;
     private final EmployeeMapper employeeMapper;
@@ -200,6 +207,13 @@ public class HrServiceImpl implements HrService {
     @Transactional
     public void deleteEmployee(Long id) {
         requireEmployee(id);
+        for (String table : EMPLOYEE_PAYROLL_TABLES) {
+            Long recordCount = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM " + table + " WHERE employee_id=?", Long.class, id);
+            if (recordCount != null && recordCount > 0) {
+                throw new BusinessException("该员工已有薪资记录，不能删除");
+            }
+        }
         Long managerCount = employeeMapper.selectCount(new LambdaQueryWrapper<Employee>().eq(Employee::getManagerEmployeeId, id));
         if (managerCount > 0) {
             throw new BusinessException("该员工仍被作为直属上级引用，不能删除");

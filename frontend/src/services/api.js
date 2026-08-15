@@ -207,6 +207,12 @@ export const siteContentApi = {
   remove(id) { return request.delete(`/site-content/admin/${id}`) },
 }
 
+export const siteSettingsApi = {
+  getPublic() { return request.get('/site-settings') },
+  getAdmin() { return request.get('/site-settings/admin') },
+  save(payload) { return request.post('/site-settings/admin', payload) },
+}
+
 export const interviewApi = {
   getRuntimeConfig() { return request.get('/interview/runtime-config') },
   getIceServers() { return request.get('/interview/ice-servers') },

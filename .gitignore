@@ -35,6 +35,7 @@ Thumbs.db
 .env.*
 !.env.example
 .site-content.json
+.site-settings.json
 *.log
 /backend/uploads/resumes
 /backend/uploads

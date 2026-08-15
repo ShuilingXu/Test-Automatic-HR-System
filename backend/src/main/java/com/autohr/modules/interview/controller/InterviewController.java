@@ -9,6 +9,7 @@ import com.autohr.common.file.FileDownloadSupport;
 import com.autohr.common.file.S3ObjectStorageService;
 import com.autohr.common.file.UploadPaths;
 import com.autohr.modules.auth.dto.SessionUserVO;
+import com.autohr.modules.auth.service.AuditLogService;
 import com.autohr.modules.auth.service.AuthService;
 import com.autohr.modules.interview.dto.AiAnswerRequest;
 import com.autohr.modules.interview.dto.AntiCheatEventRequest;
@@ -30,6 +31,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -56,6 +58,7 @@ public class InterviewController {
 
     private final InterviewService interviewService;
     private final AuthService authService;
+    private final AuditLogService auditLogService;
     private final S3ObjectStorageService s3ObjectStorageService;
 
     @Value("${interview.webrtc.stun-urls:stun:stun.l.google.com:19302,stun:stun.cloudflare.com:3478}")
@@ -99,8 +102,13 @@ public class InterviewController {
     }
 
     @PostMapping("/hr/knowledge-bases")
-    public ApiResponse<InterviewVO> saveKnowledgeBase(@Valid @RequestBody KnowledgeBaseSaveRequest request) {
-        return ApiResponse.success(interviewService.saveKnowledgeBase(request));
+    @Transactional
+    public ApiResponse<InterviewVO> saveKnowledgeBase(Authentication authentication,
+                                                       @Valid @RequestBody KnowledgeBaseSaveRequest request) {
+        InterviewVO saved = interviewService.saveKnowledgeBase(request);
+        audit(authentication, request.getId() == null ? "CREATE_KNOWLEDGE_BASE" : "UPDATE_KNOWLEDGE_BASE",
+                "KNOWLEDGE_BASE", saved.getId(), saved.getKnowledgeBaseName());
+        return ApiResponse.success(saved);
     }
 
     @GetMapping("/hr/knowledge-bases")
@@ -113,8 +121,10 @@ public class InterviewController {
     }
 
     @PostMapping("/hr/knowledge-bases/{id}/delete")
-    public ApiResponse<Void> deleteKnowledgeBase(@PathVariable Long id) {
+    @Transactional
+    public ApiResponse<Void> deleteKnowledgeBase(Authentication authentication, @PathVariable Long id) {
         interviewService.deleteKnowledgeBase(id);
+        audit(authentication, "DELETE_KNOWLEDGE_BASE", "KNOWLEDGE_BASE", id, "删除知识库");
         return ApiResponse.success("deleted", null);
     }
 
@@ -164,8 +174,14 @@ public class InterviewController {
     }
 
     @PostMapping("/it/llm-configs")
-    public ApiResponse<InterviewVO> saveLlmConfig(@Valid @RequestBody LlmConfigSaveRequest request) {
-        return ApiResponse.success(interviewService.saveLlmConfig(request));
+    @Transactional
+    public ApiResponse<InterviewVO> saveLlmConfig(Authentication authentication,
+                                                   @Valid @RequestBody LlmConfigSaveRequest request) {
+        InterviewVO saved = interviewService.saveLlmConfig(request);
+        audit(authentication, request.getId() == null ? "CREATE_LLM_CONFIG" : "UPDATE_LLM_CONFIG",
+                "LLM_CONFIG", saved.getId(),
+                "configName=" + saved.getConfigName() + ", modelRole=" + saved.getModelRole());
+        return ApiResponse.success(saved);
     }
 
     @GetMapping("/it/llm-configs")
@@ -178,14 +194,21 @@ public class InterviewController {
     }
 
     @PostMapping("/it/llm-configs/{id}/delete")
-    public ApiResponse<Void> deleteLlmConfig(@PathVariable Long id) {
+    @Transactional
+    public ApiResponse<Void> deleteLlmConfig(Authentication authentication, @PathVariable Long id) {
         interviewService.deleteLlmConfig(id);
+        audit(authentication, "DELETE_LLM_CONFIG", "LLM_CONFIG", id, "删除 LLM 配置");
         return ApiResponse.success("deleted", null);
     }
 
     @PostMapping("/hr/process-templates")
-    public ApiResponse<InterviewVO> saveProcessTemplate(@Valid @RequestBody InterviewProcessTemplateSaveRequest request) {
-        return ApiResponse.success(interviewService.saveProcessTemplate(request));
+    @Transactional
+    public ApiResponse<InterviewVO> saveProcessTemplate(Authentication authentication,
+                                                         @Valid @RequestBody InterviewProcessTemplateSaveRequest request) {
+        InterviewVO saved = interviewService.saveProcessTemplate(request);
+        audit(authentication, request.getId() == null ? "CREATE_PROCESS_TEMPLATE" : "UPDATE_PROCESS_TEMPLATE",
+                "PROCESS_TEMPLATE", saved.getId(), saved.getTemplateName());
+        return ApiResponse.success(saved);
     }
 
     @GetMapping("/hr/process-templates")
@@ -203,14 +226,23 @@ public class InterviewController {
     }
 
     @PostMapping("/hr/process-templates/{id}/delete")
-    public ApiResponse<Void> deleteProcessTemplate(@PathVariable Long id, @RequestParam Integer version) {
+    @Transactional
+    public ApiResponse<Void> deleteProcessTemplate(Authentication authentication,
+                                                    @PathVariable Long id,
+                                                    @RequestParam Integer version) {
         interviewService.deleteProcessTemplate(id, version);
+        audit(authentication, "DELETE_PROCESS_TEMPLATE", "PROCESS_TEMPLATE", id, "version=" + version);
         return ApiResponse.success("deleted", null);
     }
 
     @PostMapping("/hr/processes")
-    public ApiResponse<InterviewVO> startProcess(@Valid @RequestBody StartInterviewProcessRequest request) {
-        return ApiResponse.success(interviewService.startInterviewProcess(request));
+    @Transactional
+    public ApiResponse<InterviewVO> startProcess(Authentication authentication,
+                                                  @Valid @RequestBody StartInterviewProcessRequest request) {
+        InterviewVO started = interviewService.startInterviewProcess(request);
+        audit(authentication, "START_INTERVIEW_PROCESS", "INTERVIEW_PROCESS", started.getId(),
+                "candidateId=" + request.getRecruitmentCandidateId() + ", templateId=" + request.getTemplateId());
+        return ApiResponse.success(started);
     }
 
     @GetMapping("/hr/processes")
@@ -476,6 +508,12 @@ public class InterviewController {
 
     private SessionUserVO currentUser(Authentication authentication) {
         return authService.loadUserByUsername(authentication.getName());
+    }
+
+    private void audit(Authentication authentication, String action, String targetType, Long targetId, String detail) {
+        SessionUserVO current = currentUser(authentication);
+        auditLogService.log(current.getId(), current.getDisplayName(), current.getRoleCode(),
+                "INTERVIEW", action, targetType, String.valueOf(targetId), detail);
     }
 
     private ApiResponse<DownloadUrlResponse> externalDownloadUrl(String objectName) {

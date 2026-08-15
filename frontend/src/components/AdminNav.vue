@@ -1,9 +1,9 @@
 <template>
   <nav class="admin-nav" aria-label="管理后台导航">
     <div class="admin-nav-inner">
-      <RouterLink class="admin-brand" to="/admin/dashboard" aria-label="Auto HR 仪表盘">
-        <span class="brand-mark">AH</span>
-        <span class="brand-name">Auto HR</span>
+      <RouterLink class="admin-brand" to="/admin/dashboard" :aria-label="`${siteSettings.siteTitle} 仪表盘`">
+        <BrandMark />
+        <span class="brand-name">{{ siteSettings.siteTitle }}</span>
       </RouterLink>
       <div class="admin-nav-links">
         <RouterLink v-for="item in visibleItems" :key="item.to" :to="item.to">{{ item.label }}</RouterLink>
@@ -19,10 +19,13 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import BrandMark from './BrandMark.vue'
+import { useSiteSettings } from '../composables/useSiteSettings'
 import { authApi } from '../services/api'
 import { readSessionUser } from '../utils/session'
 
 const router = useRouter()
+const { siteSettings } = useSiteSettings()
 const sessionUser = ref(readSessionUser())
 const privileged = computed(() => ['IT_ADMIN', 'HR_ADMIN'].includes(sessionUser.value?.roleCode))
 const visibleItems = computed(() => {
@@ -73,8 +76,11 @@ async function logout() {
   padding: 0 28px;
 }
 .admin-brand {
+  --site-brand-size: 30px;
   display: inline-flex;
   flex: 0 0 auto;
+  min-width: 0;
+  max-width: min(30vw, 260px);
   align-items: center;
   gap: 9px;
   color: var(--ink);
@@ -82,17 +88,7 @@ async function logout() {
   font-weight: 800;
   letter-spacing: 0.01em;
 }
-.brand-mark {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border-radius: 8px;
-  background: var(--primary);
-  color: #fff;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-}
+.brand-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-nav-links {
   display: flex;
   flex: 1 1 auto;

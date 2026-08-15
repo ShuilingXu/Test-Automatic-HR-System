@@ -2,8 +2,8 @@
   <div class="login-page">
     <section class="login-layout">
       <aside class="login-intro">
-        <RouterLink class="login-brand" to="/"><span class="brand-mark">A</span><span><strong>千早爱音</strong><small>人才与组织中心</small></span></RouterLink>
-        <div class="login-intro-copy"><p class="page-eyebrow">PEOPLE OPERATIONS</p><h1>欢迎回来，<br /><em>从这里继续。</em></h1><p>统一管理招聘、面试与团队信息，让每一次协作都更清晰。</p></div>
+        <RouterLink class="login-brand" to="/"><BrandMark /><span><strong>{{ siteSettings.siteTitle }}</strong><small>人才与组织中心</small></span></RouterLink>
+        <div class="login-intro-copy"><p class="page-eyebrow">PEOPLE OPERATIONS</p><h1>欢迎回来，<br /><em>从这里继续。</em></h1><p>{{ siteSettings.siteSubtitle }}</p></div>
         <div class="login-intro-foot"><span>安全连接</span><span>·</span><span>组织工作台</span></div>
       </aside>
       <div class="login-forms">
@@ -83,11 +83,14 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import BrandMark from '../components/BrandMark.vue'
+import { useSiteSettings } from '../composables/useSiteSettings'
 import { authApi } from '../services/api'
 import { isStrongPassword, strongPasswordMessage } from '../utils/password'
 import { writeSession } from '../utils/session'
 
 const router = useRouter()
+const { siteSettings } = useSiteSettings()
 const loginForm = reactive({ username: '', password: '', captchaId: '', captchaCode: '' })
 const registerForm = reactive({ username: '', password: '', displayName: '', contactType: 'phone', mobilePhone: '', email: '', verificationCode: '', captchaId: '', captchaCode: '' })
 const passwordResetForm = reactive({ contactType: 'phone', mobilePhone: '', email: '', verificationCode: '', newPassword: '', captchaId: '', captchaCode: '' })
@@ -244,7 +247,9 @@ onMounted(async () => {
 <style scoped>
 .login-page { min-height: 100vh; padding: 26px; background: #eef2ef; display: grid; place-items: center; }
 .login-layout { width: min(1180px, 100%); min-height: 720px; display: grid; grid-template-columns: minmax(280px, .76fr) minmax(0, 1.5fr); overflow: hidden; border: 1px solid #d2ddd6; border-radius: 12px; background: #fff; box-shadow: 0 24px 65px rgba(28, 55, 45, .12); }
-.login-intro { display: flex; flex-direction: column; padding: 34px; color: #f5f8f5; background: #164f46; }.login-brand { display: inline-flex; align-items: center; gap: 11px; color: inherit; text-decoration: none; }.login-brand .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; background: #d6eee2; color: #164f46; font-weight: 800; }.login-brand strong, .login-brand small { display: block; }.login-brand strong { font-size: 15px; }.login-brand small { margin-top: 2px; color: rgba(245, 248, 245, .62); font-size: 11px; }.login-intro .page-eyebrow { color: #afd8c6; }.login-intro-copy { margin: auto 0; }.login-intro-copy h1 { margin: 17px 0; color: #fff; font-size: clamp(34px, 4vw, 56px); line-height: 1.08; letter-spacing: -.04em; }.login-intro-copy h1 em { color: #c5e9d6; font-style: normal; }.login-intro-copy p:last-child { max-width: 310px; margin: 0; color: rgba(245, 248, 245, .72); line-height: 1.75; }.login-intro-foot { display: flex; gap: 9px; color: rgba(245, 248, 245, .58); font-size: 12px; }.login-forms { padding: 54px 58px 40px; }.login-forms-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 43px; }.login-forms-head h2 { margin: 9px 0 0; font-size: 32px; letter-spacing: -.03em; }.login-forms-head a { color: #5c7067; font-size: 13px; text-decoration: none; }.login-forms-head a:hover { color: #164f46; }.form-columns { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 54px; }.login-form { min-width: 0; }.login-form h3 { margin: 0 0 26px; font-size: 18px; }.register-form { padding-left: 54px; border-left: 1px solid #dce5df; }.login-note { margin: 45px 0 0; color: #7c8982; font-size: 12px; line-height: 1.7; }
+.login-intro { display: flex; flex-direction: column; padding: 34px; color: #f5f8f5; background: #164f46; }.login-brand { --site-brand-background: #d6eee2; --site-brand-color: #164f46; display: inline-flex; align-items: center; gap: 11px; color: inherit; text-decoration: none; }.login-brand strong, .login-brand small { display: block; }.login-brand strong { font-size: 15px; }.login-brand small { margin-top: 2px; color: rgba(245, 248, 245, .62); font-size: 11px; }.login-intro .page-eyebrow { color: #afd8c6; }.login-intro-copy { margin: auto 0; }.login-intro-copy h1 { margin: 17px 0; color: #fff; font-size: clamp(34px, 4vw, 56px); line-height: 1.08; letter-spacing: -.04em; }.login-intro-copy h1 em { color: #c5e9d6; font-style: normal; }.login-intro-copy p:last-child { max-width: 310px; margin: 0; color: rgba(245, 248, 245, .72); line-height: 1.75; }.login-intro-foot { display: flex; gap: 9px; color: rgba(245, 248, 245, .58); font-size: 12px; }.login-forms { padding: 54px 58px 40px; }.login-forms-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 43px; }.login-forms-head h2 { margin: 9px 0 0; font-size: 32px; letter-spacing: -.03em; }.login-forms-head a { color: #5c7067; font-size: 13px; text-decoration: none; }.login-forms-head a:hover { color: #164f46; }.form-columns { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 54px; }.login-form { min-width: 0; }.login-form h3 { margin: 0 0 26px; font-size: 18px; }.register-form { padding-left: 54px; border-left: 1px solid #dce5df; }.login-note { margin: 45px 0 0; color: #7c8982; font-size: 12px; line-height: 1.7; }
+.login-brand, .login-brand > span:last-child, .login-intro-copy { min-width: 0; }
+.login-brand strong, .login-brand small, .login-intro-copy p:last-child { overflow-wrap: anywhere; }
 .code-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; width: 100%; }
 .captcha-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(96px, 128px); gap: 10px; width: 100%; min-width: 0; }
 .captcha-image { width: 100%; max-width: 128px; height: 48px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-soft); cursor: pointer; overflow: visible; }

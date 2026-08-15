@@ -3,6 +3,8 @@ package com.autohr.modules.hr.service.impl;
 import com.autohr.common.exception.BusinessException;
 import com.autohr.modules.hr.dto.EmployeeSaveRequest;
 import com.autohr.modules.hr.dto.EmployeeVO;
+import com.autohr.modules.hr.dto.HrDashboardVO;
+import com.autohr.modules.hr.dto.HrStatisticsVO;
 import com.autohr.modules.hr.entity.Department;
 import com.autohr.modules.hr.entity.Employee;
 import com.autohr.modules.hr.entity.SalaryHistory;
@@ -10,6 +12,7 @@ import com.autohr.modules.hr.mapper.DepartmentMapper;
 import com.autohr.modules.hr.mapper.EmployeeMapper;
 import com.autohr.modules.hr.mapper.IntegrationBindingMapper;
 import com.autohr.modules.hr.mapper.SalaryHistoryMapper;
+import com.autohr.modules.hr.service.HrStatisticsService;
 import com.autohr.modules.recruitment.entity.RecruitmentJob;
 import com.autohr.modules.recruitment.mapper.RecruitmentJobMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,9 +29,12 @@ import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -47,6 +53,7 @@ class HrServiceImplTest {
     @Mock private RecruitmentJobMapper recruitmentJobMapper;
     @Mock private SalaryHistoryMapper salaryHistoryMapper;
     @Mock private JdbcTemplate jdbc;
+    @Mock private HrStatisticsService hrStatisticsService;
 
     @InjectMocks
     private HrServiceImpl hrService;
@@ -157,6 +164,19 @@ class HrServiceImplTest {
         assertEquals("Employee hire date is required when effective month is blank", exception.getMessage());
         verify(employeeMapper, never()).updateById(any(Employee.class));
         verify(salaryHistoryMapper, never()).insert(any(SalaryHistory.class));
+    }
+
+    @Test
+    void dashboardReusesOneCompleteStatisticsSnapshot() {
+        HrStatisticsVO statistics = new HrStatisticsVO();
+        statistics.getSalary().setAverageGross(new BigDecimal("12345.67"));
+        when(hrStatisticsService.statistics(anyString())).thenReturn(statistics);
+
+        HrDashboardVO dashboard = hrService.getDashboard();
+
+        assertSame(statistics, dashboard.getStatistics());
+        assertEquals(new BigDecimal("12345.67"), dashboard.getAverageGrossSalary());
+        verify(hrStatisticsService, times(1)).statistics(anyString());
     }
 
     private Department department(Long id) {

@@ -157,8 +157,33 @@
       </section>
 
       <section v-if="activeTab === 'content'" class="page-card content-page">
-        <div class="topline"><div><p class="page-eyebrow">Site editor</p><h2>站点内容</h2><p class="page-subtitle">管理首页的信息发布。保存为草稿后，发布状态才会显示在公开首页。</p></div><el-button @click="loadContent">刷新</el-button></div>
-        <div class="content-editor-layout">
+        <div class="topline"><div><p class="page-eyebrow">Site editor</p><h2>站点内容</h2><p class="page-subtitle">管理公开站点品牌信息与首页发布内容。</p></div><el-button @click="loadContent">刷新</el-button></div>
+        <section v-if="isItAdmin" class="site-settings-section" aria-labelledby="site-settings-title">
+          <div class="section-intro"><div><h3 id="site-settings-title">站点外观</h3><p>保存后立即同步到公开首页、登录页、浏览器标题和后台导航。</p></div></div>
+          <div class="site-settings-layout">
+            <el-form :model="siteSettingsForm" label-position="top" class="site-settings-form">
+              <el-form-item label="Logo 地址"><el-input v-model="siteSettingsForm.logoUrl" maxlength="500" placeholder="/logo.svg 或 https://cdn.example.com/logo.png" /></el-form-item>
+              <el-form-item label="站点标题"><el-input v-model="siteSettingsForm.siteTitle" maxlength="120" show-word-limit /></el-form-item>
+              <el-form-item label="站点副标题"><el-input v-model="siteSettingsForm.siteSubtitle" type="textarea" :rows="3" maxlength="500" show-word-limit /></el-form-item>
+              <el-form-item label="页脚文本"><el-input v-model="siteSettingsForm.footerHtml" type="textarea" :rows="3" maxlength="500" show-word-limit placeholder="按纯文本展示，不解析 HTML" /></el-form-item>
+              <div class="action-row"><el-button type="primary" :loading="siteSettingsSaving" @click="saveSiteSettings">保存站点设置</el-button></div>
+            </el-form>
+            <aside class="site-settings-preview" aria-label="站点外观预览">
+              <div class="preview-brand">
+                <span class="preview-brand-mark" aria-hidden="true">
+                  <img v-if="siteSettingsPreview.logoUrl && !siteLogoPreviewFailed" :src="siteSettingsPreview.logoUrl" alt="" @error="siteLogoPreviewFailed = true" />
+                  <span v-else>{{ siteSettingsInitials }}</span>
+                </span>
+                <strong>{{ siteSettingsPreview.siteTitle }}</strong>
+              </div>
+              <p class="site-settings-subtitle">{{ siteSettingsPreview.siteSubtitle }}</p>
+              <p class="site-settings-footer">{{ siteSettingsPreview.footerHtml }}</p>
+            </aside>
+          </div>
+        </section>
+        <section class="announcement-section" aria-labelledby="announcement-editor-title">
+          <div class="section-intro"><div><h3 id="announcement-editor-title">首页信息发布</h3><p>保存为草稿后，只有切换为发布状态的内容才会显示在公开首页。</p></div></div>
+          <div class="content-editor-layout">
           <el-form :model="contentForm" label-position="top" class="content-form">
             <el-form-item label="标题"><el-input v-model="contentForm.title" placeholder="例如：春季招聘开放" /></el-form-item>
             <el-form-item label="摘要"><el-input v-model="contentForm.summary" maxlength="140" show-word-limit placeholder="首页列表中展示的一句话" /></el-form-item>
@@ -168,9 +193,10 @@
             <div class="action-row"><el-button type="primary" @click="saveContent">保存内容</el-button><el-button @click="resetContentForm">新建内容</el-button></div>
           </el-form>
           <aside class="content-preview"><div class="preview-label">首页预览</div><p class="preview-date">{{ contentForm.publishedAt || '未设置日期' }}</p><h3>{{ contentForm.title || '内容标题' }}</h3><p>{{ contentForm.summary || contentForm.content || '这里会显示首页信息摘要。' }}</p><span :class="['publish-state', { published: contentForm.published }]">{{ contentForm.published ? '已发布' : '草稿' }}</span></aside>
-        </div>
-        <div class="content-table-head"><h3>已保存内容</h3><span>{{ contentItems.length }} 条</span></div>
-        <el-table :data="contentItems" stripe class="data-table" @row-click="editContent"><el-table-column prop="title" label="标题" min-width="200" /><el-table-column prop="type" label="类型" width="110" /><el-table-column prop="publishedAt" label="时间" width="160" /><el-table-column label="状态" width="100"><template #default="scope"><el-tag :type="scope.row.published ? 'success' : 'info'">{{ scope.row.published ? '已发布' : '草稿' }}</el-tag></template></el-table-column><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteContent(scope.row.id)">删除</el-button></template></el-table-column></el-table>
+          </div>
+          <div class="content-table-head"><h3>已保存内容</h3><span>{{ contentItems.length }} 条</span></div>
+          <el-table :data="contentItems" stripe class="data-table" @row-click="editContent"><el-table-column prop="title" label="标题" min-width="200" /><el-table-column prop="type" label="类型" width="110" /><el-table-column prop="publishedAt" label="时间" width="160" /><el-table-column label="状态" width="100"><template #default="scope"><el-tag :type="scope.row.published ? 'success' : 'info'">{{ scope.row.published ? '已发布' : '草稿' }}</el-tag></template></el-table-column><el-table-column label="操作" width="100"><template #default="scope"><el-button text type="danger" @click.stop="deleteContent(scope.row.id)">删除</el-button></template></el-table-column></el-table>
+        </section>
       </section>
 
       <section v-if="activeTab === 'recruitment'" class="page-card">
@@ -222,9 +248,11 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AdminNav from '../components/AdminNav.vue'
-import { authApi, downloadBlob, hrApi, interviewApi, recruitmentApi, siteContentApi } from '../services/api'
+import { authApi, downloadBlob, hrApi, interviewApi, recruitmentApi, siteContentApi, siteSettingsApi } from '../services/api'
+import { applyLoadedSiteSettings } from '../composables/useSiteSettings'
 import { readSessionUser, writeSessionUser } from '../utils/session'
 import { isStrongPassword, strongPasswordMessage } from '../utils/password'
+import { DEFAULT_SITE_SETTINGS, normalizeSiteSettings, safeBrandAssetUrl, siteInitials } from '../utils/siteSettings'
 
 const router = useRouter()
 const route = useRoute()
@@ -251,6 +279,8 @@ const selectedTemplateId = ref(null)
 const selectedInterviewCandidate = ref(null)
 const startingInterview = ref(false)
 const consoleReady = ref(false)
+const siteSettingsSaving = ref(false)
+const siteLogoPreviewFailed = ref(false)
 
 const userForm = reactive({ id: null, username: '', displayName: '', roleCode: 'HR_USER', status: 1, mobilePhone: '', email: '', newPassword: '' })
 const departmentForm = reactive({ id: null, departmentName: '', departmentCode: '', parentDepartmentId: null, managerEmployeeId: null, description: '', sortOrder: 0, status: 1 })
@@ -262,6 +292,9 @@ const employeeFilter = reactive({ departmentId: null, employmentStatus: null, na
 const jobFilter = reactive({ status: null, departmentName: '', jobType: '', keyword: '' })
 const candidateFilter = reactive({ jobId: null, status: '', interviewStageStatus: '', keyword: '' })
 const contentForm = reactive({ id: null, type: 'announcement', title: '', summary: '', content: '', cover: '', published: false, publishedAt: '' })
+const siteSettingsForm = reactive({ ...DEFAULT_SITE_SETTINGS })
+const siteSettingsPreview = computed(() => normalizeSiteSettings(siteSettingsForm))
+const siteSettingsInitials = computed(() => siteInitials(siteSettingsPreview.value.siteTitle))
 
 const roleLabels = {
   IT_ADMIN: 'IT管理员',
@@ -350,7 +383,16 @@ async function loadSession() { try { const response = await authApi.getSession()
 async function loadDashboard() { try { Object.assign(dashboard, (await hrApi.getDashboard()).data) } catch (error) { fail(error) } }
 async function loadDepartments() { try { departments.value = (await hrApi.listAllDepartments(cleanParams(departmentFilter))).data } catch (error) { fail(error) } }
 async function loadEmployees() { try { employees.value = (await hrApi.listAllEmployees(cleanParams(employeeFilter))).data } catch (error) { fail(error) } }
-async function loadContent() { try { contentItems.value = (await siteContentApi.listAdmin()).data || [] } catch (error) { fail(error) } }
+async function loadContentItems() {
+  try { contentItems.value = (await siteContentApi.listAdmin()).data || [] } catch (error) { fail(error) }
+}
+async function loadContent() {
+  await loadContentItems()
+  if (isItAdmin.value) await loadAdminSiteSettings()
+}
+async function loadAdminSiteSettings() {
+  try { Object.assign(siteSettingsForm, normalizeSiteSettings((await siteSettingsApi.getAdmin()).data)) } catch (error) { fail(error) }
+}
 async function loadJobs() { try { jobs.value = (await recruitmentApi.listAllAdminJobs(cleanParams(jobFilter))).data } catch (error) { fail(error) } }
 async function loadCandidates() { try { candidates.value = (await recruitmentApi.listCandidates(cleanParams(candidateFilter))).data } catch (error) { fail(error) } }
 async function loadRecruitment() { await Promise.all([loadJobs(), loadCandidates()]) }
@@ -389,8 +431,26 @@ async function saveEmployee() { try { await hrApi.saveEmployee({ ...employeeForm
 async function downloadEmployeeTemplate() { try { downloadBlob(await hrApi.employeeTemplate(), 'employee-import-template.xlsx') } catch (error) { fail(error) } }
 async function importEmployees({ file }) { try { const result = (await hrApi.importEmployees(file)).data; employeeImportRows.value = result.rows || []; employeeImportVisible.value = true; ElMessage.success(`导入完成：成功 ${result.successCount} 行，失败 ${result.failureCount} 行`); await loadEmployees() } catch (error) { fail(error) } }
 function mask(value) { if (!value) return '-'; const text = String(value); return text.length <= 4 ? '****' : `${text.slice(0, 3)}****${text.slice(-4)}` }
-async function saveContent() { try { const saved = (await siteContentApi.save({ ...contentForm })).data; Object.assign(contentForm, saved); ElMessage.success(contentForm.published ? '内容已发布' : '草稿已保存'); await loadContent() } catch (error) { fail(error) } }
-async function deleteContent(id) { try { await siteContentApi.remove(id); ElMessage.success('内容已删除'); if (contentForm.id === id) resetContentForm(); await loadContent() } catch (error) { fail(error) } }
+async function saveContent() { try { const saved = (await siteContentApi.save({ ...contentForm })).data; Object.assign(contentForm, saved); ElMessage.success(contentForm.published ? '内容已发布' : '草稿已保存'); await loadContentItems() } catch (error) { fail(error) } }
+async function saveSiteSettings() {
+  const logoUrl = siteSettingsForm.logoUrl.trim()
+  if (logoUrl && !safeBrandAssetUrl(logoUrl)) {
+    ElMessage.warning('Logo 地址只允许站内绝对路径或 HTTPS 地址')
+    return
+  }
+  siteSettingsSaving.value = true
+  try {
+    const saved = normalizeSiteSettings((await siteSettingsApi.save(normalizeSiteSettings(siteSettingsForm))).data)
+    Object.assign(siteSettingsForm, saved)
+    applyLoadedSiteSettings(saved)
+    ElMessage.success('站点设置已保存')
+  } catch (error) {
+    fail(error)
+  } finally {
+    siteSettingsSaving.value = false
+  }
+}
+async function deleteContent(id) { try { await siteContentApi.remove(id); ElMessage.success('内容已删除'); if (contentForm.id === id) resetContentForm(); await loadContentItems() } catch (error) { fail(error) } }
 function resetContentForm() { Object.assign(contentForm, { id: null, type: 'announcement', title: '', summary: '', content: '', cover: '', published: false, publishedAt: '' }) }
 function editContent(row) { Object.assign(contentForm, row) }
 async function deleteDepartment(id) { try { await hrApi.deleteDepartment(id); ElMessage.success('部门已删除'); if (departmentForm.id === id) resetDepartmentForm(); await loadAll() } catch (error) { fail(error) } }
@@ -500,6 +560,7 @@ watch(() => route.fullPath, () => {
     syncRouteState()
   }
 }, { immediate: true })
+watch(() => siteSettingsForm.logoUrl, () => { siteLogoPreviewFailed.value = false })
 
 function syncRouteState() {
   recruitmentMode.value = route.meta.recruitmentMode || recruitmentMode.value
@@ -547,6 +608,20 @@ function syncRouteState() {
 .audit-panel-head h3 { margin: 0; }
 .audit-panel-head span { color: var(--text-muted); font-weight: 600; font-size: 13px; }
 .compact-table { margin-top: 12px; }
+.site-settings-section, .announcement-section { padding-top: 24px; border-top: 1px solid var(--border); }
+.announcement-section { margin-top: 30px; }
+.section-intro { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.section-intro h3 { margin: 0; font-size: 18px; }
+.section-intro p { margin: 7px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.65; }
+.site-settings-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(260px, .75fr); gap: 28px; margin-top: 22px; }
+.site-settings-form { min-width: 0; }
+.site-settings-preview { min-width: 0; padding: 22px 0 0 24px; border-left: 1px solid var(--border); }
+.preview-brand { display: flex; align-items: center; gap: 11px; }
+.preview-brand-mark { display: inline-grid; flex: 0 0 auto; width: 36px; height: 36px; place-items: center; overflow: hidden; border-radius: var(--radius-sm); background: var(--primary); color: #fff; font-size: 11px; font-weight: 800; }
+.preview-brand-mark img { display: block; width: 100%; height: 100%; padding: 2px; object-fit: contain; }
+.preview-brand strong { min-width: 0; overflow-wrap: anywhere; }
+.site-settings-subtitle { margin: 28px 0; color: var(--ink-soft); font-size: 17px; line-height: 1.65; overflow-wrap: anywhere; }
+.site-settings-footer { margin: 0; padding-top: 16px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .content-editor-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(240px, .75fr); gap: 22px; margin-top: 24px; }
 .content-type-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
 .content-type-options :deep(.el-radio-button) { width: 100%; }
@@ -564,7 +639,7 @@ function syncRouteState() {
 .dialog-intro { margin: 0 0 18px; color: var(--text-muted); line-height: 1.7; }.template-preview { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-soft); }.template-preview span, .template-option-detail { color: var(--text-muted); font-size: 12px; }.template-option-detail { display: block; margin-top: 3px; }
 @media (max-width: 1200px) { .audit-grid { grid-template-columns: 1fr; } }
 @media (max-width: 1200px) { .metric-grid { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
-@media (max-width: 980px) { .form-grid, .content-editor-layout { grid-template-columns: 1fr; } }
+@media (max-width: 980px) { .form-grid, .content-editor-layout, .site-settings-layout { grid-template-columns: 1fr; } .site-settings-preview { padding: 22px 0 0; border-top: 1px solid var(--border); border-left: 0; } }
 @media (max-width: 900px) { .console-main { padding: 22px 14px 36px; } }
 @media (max-width: 640px) { .form-row { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .metric-grid { grid-template-columns: 1fr; } }

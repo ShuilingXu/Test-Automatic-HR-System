@@ -6,6 +6,7 @@ import com.autohr.config.database.DatabaseMigrationRunner;
 import com.autohr.config.database.DatabaseType;
 import com.autohr.modules.hr.dto.PayrollGenerateRequest;
 import com.autohr.modules.hr.dto.PayrollVO;
+import com.autohr.modules.hr.dto.MonthlyPerformanceRequest;
 import com.autohr.common.exception.BusinessException;
 import jakarta.validation.Validation;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -135,6 +136,43 @@ class PayrollPersistenceIntegrationTest {
 
         assertEquals(1, generated.size());
         assertEquals("E001", generated.get(0).getEmployeeCode());
+    }
+
+    @Test
+    void laterLockedPayrollBlocksRecalculationDeletionAndEarlierInputChanges() throws Exception {
+        JdbcTemplate jdbc = migratedDatabase("locked-future-payroll.db");
+        insertDepartmentAndJob(jdbc);
+        insertEmployee(jdbc, 1, "E001", "2026-01-01", 1, null, "10000.00");
+        jdbc.update("INSERT INTO hr_salary_history (employee_id,effective_month,base_salary_before,base_salary_after) VALUES (1,'2026-01',0,10000)");
+        insertPayroll(jdbc, 1, "2026-08", 0);
+        insertPayroll(jdbc, 1, "2026-09", 1);
+        jdbc.update("INSERT INTO hr_performance_month (employee_id,salary_month,amount) VALUES (1,'2026-07',500)");
+        PayrollServiceImpl payrollService = service(jdbc);
+
+        BusinessException recalculateError = assertThrows(BusinessException.class,
+                () -> payrollService.generate(request(1L, "2026-08")));
+        BusinessException deleteError = assertThrows(BusinessException.class,
+                () -> payrollService.deletePayroll(1L, "2026-08"));
+        MonthlyPerformanceRequest performance = new MonthlyPerformanceRequest();
+        performance.setEmployeeId(1L);
+        performance.setSalaryMonth("2026-07");
+        performance.setAmount(new BigDecimal("800.00"));
+        BusinessException inputSaveError = assertThrows(BusinessException.class,
+                () -> payrollService.savePerformance(performance, 9L));
+        BusinessException inputDeleteError = assertThrows(BusinessException.class,
+                () -> payrollService.deleteInput("performance", 1L, "2026-07"));
+
+        String expected = "A later payroll is locked; unlock subsequent months before changing this payroll period";
+        assertEquals(expected, recalculateError.getMessage());
+        assertEquals(expected, deleteError.getMessage());
+        assertEquals(expected, inputSaveError.getMessage());
+        assertEquals(expected, inputDeleteError.getMessage());
+        assertEquals(1L, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM hr_payroll_month WHERE employee_id=1 AND salary_month='2026-08'",
+                Long.class));
+        assertEquals(new BigDecimal("500"), jdbc.queryForObject(
+                "SELECT amount FROM hr_performance_month WHERE employee_id=1 AND salary_month='2026-07'",
+                BigDecimal.class));
     }
 
     @Test

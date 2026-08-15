@@ -39,7 +39,7 @@ mybatis-plus:
 
 jwt:
   secret: ${JWT_SECRET}
-  expiration: ${JWT_EXPIRATION:86400000}
+  expiration: ${JWT_EXPIRATION:7200000}
   header: Authorization
 
 security:
@@ -72,6 +72,9 @@ interview:
     ffmpeg-path: ${INTERVIEW_VIDEO_FFMPEG_PATH:${FFMPEG_PATH:ffmpeg}}
     video-codec: ${INTERVIEW_VIDEO_VIDEO_CODEC:libvpx-vp9}
     audio-codec: ${INTERVIEW_VIDEO_AUDIO_CODEC:libopus}
+    inactive-timeout-minutes: ${INTERVIEW_VIDEO_INACTIVE_TIMEOUT_MINUTES:30}
+    inactive-scan-interval-ms: ${INTERVIEW_VIDEO_INACTIVE_SCAN_INTERVAL_MS:60000}
+    missing-recording-scan-interval-ms: ${INTERVIEW_VIDEO_MISSING_RECORDING_SCAN_INTERVAL_MS:60000}
 
 resume:
   ocr:

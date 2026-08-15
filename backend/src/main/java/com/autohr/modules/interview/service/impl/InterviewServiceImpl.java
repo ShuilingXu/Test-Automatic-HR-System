@@ -169,6 +169,9 @@ public class InterviewServiceImpl implements InterviewService {
     @Value("${interview.video.merge-retry-delay-ms:2000}")
     private long videoMergeRetryDelayMillis;
 
+    @Value("${interview.video.inactive-timeout-minutes:30}")
+    private long videoInactiveTimeoutMinutes;
+
     private static final long MAX_RECORDING_SIZE = 100 * 1024 * 1024;
     private static final long MAX_CSV_FILE_SIZE = 5L * 1024 * 1024;
     private static final int MAX_CSV_ROWS = 5000;
@@ -190,6 +193,8 @@ public class InterviewServiceImpl implements InterviewService {
     private static final long AI_QUESTION_RETRY_MAX_SECONDS = 900L;
     private static final int VIDEO_MERGE_MAX_ATTEMPTS = 3;
     private static final long MISSING_RECORDING_TIMEOUT_MINUTES = 10L;
+    private static final Set<String> ACTIVE_VIDEO_SESSION_STATUSES = Set.of(
+            "CREATED", "HR_JOINED", "INTERVIEWEE_JOINED", "OFFER_PUBLISHED", "ANSWER_SUBMITTED", "RECORDING");
     private static final Set<String> ALLOWED_RECORDING_CONTENT_TYPES = Set.of("video/webm", "application/octet-stream");
     private static final Set<String> ALLOWED_ANTI_CHEAT_EVENTS = Set.of(
             "AI_RECORDING_DENIED", "AI_RECORDING_STARTED", "AI_RECORDING_UNSUPPORTED", "AI_RECORDING_UPLOADED",
@@ -223,6 +228,23 @@ public class InterviewServiceImpl implements InterviewService {
                 transactionTemplate.execute(status -> markMissingRecordingForApproval(sessionId, cutoff, status));
             } catch (RuntimeException ex) {
                 log.warn("Unable to release video session {} after recording upload timeout", sessionId, ex);
+            }
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${interview.video.inactive-scan-interval-ms:60000}")
+    public void releaseInactiveVideoSessions() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(Math.max(videoInactiveTimeoutMinutes, 1L));
+        List<Long> sessionIds = videoSessionMapper.selectList(new LambdaQueryWrapper<InterviewVideoSession>()
+                        .in(InterviewVideoSession::getSessionStatus, ACTIVE_VIDEO_SESSION_STATUSES)
+                        .isNotNull(InterviewVideoSession::getLastActivityAt)
+                        .le(InterviewVideoSession::getLastActivityAt, cutoff))
+                .stream().map(InterviewVideoSession::getId).toList();
+        for (Long sessionId : sessionIds) {
+            try {
+                transactionTemplate.execute(status -> releaseInactiveVideoSession(sessionId, cutoff, status));
+            } catch (RuntimeException ex) {
+                log.warn("Unable to release inactive video session {}", sessionId, ex);
             }
         }
     }
@@ -670,9 +692,36 @@ public class InterviewServiceImpl implements InterviewService {
                 process = requireProcess(processId);
             } else {
                 process.setLastHeartbeatAt(heartbeatAt);
+                touchActiveVideoSessionForHeartbeat(process, heartbeatAt);
             }
         }
         return toIntervieweeProcessVO(process);
+    }
+
+    private void touchActiveVideoSessionForHeartbeat(InterviewProcess process, LocalDateTime activityAt) {
+        if (!StrUtil.equals(process.getCurrentStage(), "VIDEO")) {
+            return;
+        }
+        LambdaUpdateWrapper<InterviewVideoSession> update = new LambdaUpdateWrapper<InterviewVideoSession>()
+                .eq(InterviewVideoSession::getProcessId, process.getId())
+                .in(InterviewVideoSession::getSessionStatus, ACTIVE_VIDEO_SESSION_STATUSES)
+                .set(InterviewVideoSession::getLastActivityAt, activityAt);
+        if (isTemplateProcess(process)) {
+            InterviewProcessStage stage;
+            try {
+                stage = requireActiveProcessStage(process);
+            } catch (BusinessException ex) {
+                log.debug("Skipping video heartbeat activity update for process {}: {}", process.getId(), ex.getMessage());
+                return;
+            }
+            if (!"VIDEO".equals(stage.getStageType())) {
+                return;
+            }
+            update.eq(InterviewVideoSession::getProcessStageId, stage.getId());
+        } else {
+            update.isNull(InterviewVideoSession::getProcessStageId);
+        }
+        videoSessionMapper.update(null, update);
     }
 
     @Override
@@ -1024,6 +1073,7 @@ public class InterviewServiceImpl implements InterviewService {
         for (int attempt = 0; attempt < 3; attempt++) {
             InterviewVideoSession session = requireVideoSessionByProcess(processId);
             if (session.getIntervieweeJoinTime() != null) {
+                touchVideoSessionActivity(session.getId());
                 return toIntervieweeVideoSessionVO(session);
             }
             ensureVideoSessionAcceptsJoin(session);
@@ -1039,7 +1089,8 @@ public class InterviewServiceImpl implements InterviewService {
                     .isNull(session.getSessionStatus() == null, InterviewVideoSession::getSessionStatus)
                     .set(InterviewVideoSession::getIntervieweeJoinTime, now)
                     .set(setStartTime, InterviewVideoSession::getStartTime, now)
-                    .set(InterviewVideoSession::getSessionStatus, nextStatus);
+                    .set(InterviewVideoSession::getSessionStatus, nextStatus)
+                    .set(InterviewVideoSession::getLastActivityAt, now);
             if (videoSessionMapper.update(null, update) == 1) {
                 InterviewVideoSession persisted = videoSessionMapper.selectById(session.getId());
                 auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "INTERVIEWEE_JOIN_VIDEO", "VIDEO_SESSION", String.valueOf(session.getId()), String.valueOf(processId));
@@ -1059,6 +1110,7 @@ public class InterviewServiceImpl implements InterviewService {
                 if (session.getApproverUserId() != null && !Objects.equals(session.getApproverUserId(), approverUserId)) {
                     throw new BusinessException("该视频面试已由另一位 HR 加入");
                 }
+                touchVideoSessionActivity(session.getId());
                 return toVideoSessionVO(session);
             }
             ensureVideoSessionAcceptsJoin(session);
@@ -1079,7 +1131,8 @@ public class InterviewServiceImpl implements InterviewService {
                     .set(InterviewVideoSession::getApproverName, approverName)
                     .set(InterviewVideoSession::getHrJoinTime, now)
                     .set(setStartTime, InterviewVideoSession::getStartTime, now)
-                    .set(InterviewVideoSession::getSessionStatus, nextStatus);
+                    .set(InterviewVideoSession::getSessionStatus, nextStatus)
+                    .set(InterviewVideoSession::getLastActivityAt, now);
             if (session.getApproverUserId() == null) {
                 update.isNull(InterviewVideoSession::getApproverUserId);
             } else {
@@ -1342,6 +1395,7 @@ public class InterviewServiceImpl implements InterviewService {
         session.setMergedRecordingPath(null);
         session.setMergedRecordingFileName(null);
         session.setSessionStatus("OFFER_PUBLISHED");
+        session.setLastActivityAt(LocalDateTime.now());
         videoSessionMapper.updateById(session);
         auditLogService.log(session.getApproverUserId(), session.getApproverName(), "HR_ADMIN", "INTERVIEW", "PUBLISH_VIDEO_OFFER", "VIDEO_SESSION", String.valueOf(session.getId()), session.getVideoSerialNo());
         return toVideoSignalVO(session);
@@ -1375,7 +1429,8 @@ public class InterviewServiceImpl implements InterviewService {
                     .set(InterviewVideoSession::getIntervieweeAnswerSdp, request.getAnswerSdp())
                     .set(setJoinTime, InterviewVideoSession::getIntervieweeJoinTime, now)
                     .set(InterviewVideoSession::getIntervieweeIceCandidates, null)
-                    .set(InterviewVideoSession::getSessionStatus, nextStatus);
+                    .set(InterviewVideoSession::getSessionStatus, nextStatus)
+                    .set(InterviewVideoSession::getLastActivityAt, LocalDateTime.now());
             if (videoSessionMapper.update(null, update) == 1) {
                 InterviewVideoSession persisted = videoSessionMapper.selectById(session.getId());
                 auditLogService.log(intervieweeUserId, displayName(intervieweeName, "面试者"), "INTERVIEWEE", "INTERVIEW", "SUBMIT_VIDEO_ANSWER", "VIDEO_SESSION", String.valueOf(session.getId()), session.getVideoSerialNo());
@@ -1402,7 +1457,8 @@ public class InterviewServiceImpl implements InterviewService {
                     .eq(InterviewVideoSession::getId, session.getId())
                     .eq(existing != null, InterviewVideoSession::getHrIceCandidates, existing)
                     .isNull(existing == null, InterviewVideoSession::getHrIceCandidates)
-                    .set(InterviewVideoSession::getHrIceCandidates, appended);
+                    .set(InterviewVideoSession::getHrIceCandidates, appended)
+                    .set(InterviewVideoSession::getLastActivityAt, LocalDateTime.now());
             if (videoSessionMapper.update(null, update) == 1) {
                 session.setHrIceCandidates(appended);
                 return toVideoSignalVO(session);
@@ -1429,7 +1485,8 @@ public class InterviewServiceImpl implements InterviewService {
                     .eq(InterviewVideoSession::getId, session.getId())
                     .eq(existing != null, InterviewVideoSession::getIntervieweeIceCandidates, existing)
                     .isNull(existing == null, InterviewVideoSession::getIntervieweeIceCandidates)
-                    .set(InterviewVideoSession::getIntervieweeIceCandidates, appended);
+                    .set(InterviewVideoSession::getIntervieweeIceCandidates, appended)
+                    .set(InterviewVideoSession::getLastActivityAt, LocalDateTime.now());
             if (videoSessionMapper.update(null, update) == 1) {
                 session.setIntervieweeIceCandidates(appended);
                 return toIntervieweeVideoSignalVO(session);
@@ -1534,7 +1591,8 @@ public class InterviewServiceImpl implements InterviewService {
                         .eq(InterviewVideoSession::getId, session.getId())
                         .eq(InterviewVideoSession::getSessionStatus, session.getSessionStatus())
                         .set(InterviewVideoSession::getRecordingPath, storedFile.toString())
-                        .set(InterviewVideoSession::getRecordingFileName, storedName);
+                        .set(InterviewVideoSession::getRecordingFileName, storedName)
+                        .set(InterviewVideoSession::getLastActivityAt, LocalDateTime.now());
                 if (StrUtil.equals(role, "hr")) {
                     update.eq(session.getHrRecordingPath() != null, InterviewVideoSession::getHrRecordingPath, session.getHrRecordingPath())
                             .isNull(session.getHrRecordingPath() == null, InterviewVideoSession::getHrRecordingPath)
@@ -1724,8 +1782,8 @@ public class InterviewServiceImpl implements InterviewService {
             employee.setEmployeeCode("PENDING-" + candidate.getId());
         }
         employee.setFullName(candidate.getFullName());
-        employee.setIdCardNo(StrUtil.blankToDefault(candidate.getIdCardNo(), "PENDING-ID-" + candidate.getId()));
-        employee.setMobilePhone(candidate.getMobilePhone());
+        employee.setIdCardNo(StrUtil.blankToDefault(candidate.getIdCardNo(), "PENDING-ID-" + candidate.getId()).trim());
+        employee.setMobilePhone(StrUtil.trim(candidate.getMobilePhone()));
         employee.setEmail(candidate.getEmail());
         employee.setRecruitmentMajor(candidate.getMajor());
         employee.setPositionName(job.getJobTitle());
@@ -1742,7 +1800,12 @@ public class InterviewServiceImpl implements InterviewService {
         employee.setSourceChannel("RECRUITMENT_INTERVIEW");
         employee.setNotes("面试流程通过，待入职同步生成");
         if (existing == null) {
-            employeeMapper.insert(employee);
+            assertEmployeeIdentityAvailable(employee);
+            try {
+                employeeMapper.insert(employee);
+            } catch (DataIntegrityViolationException ex) {
+                throwEmployeeInsertConflict(employee);
+            }
         } else {
             employeeMapper.updateById(employee);
         }
@@ -1755,6 +1818,49 @@ public class InterviewServiceImpl implements InterviewService {
                 StrUtil.blankToDefault(operatorRoleCode, "HR_ADMIN"), "PAYROLL", "ONBOARDING_SALARY_SAVE",
                 "HR_EMPLOYEE", String.valueOf(employee.getId()),
                 "month=" + history.getEffectiveMonth() + ", baseSalary=" + employee.getBaseSalary().toPlainString());
+    }
+
+    private void assertEmployeeIdentityAvailable(Employee employee) {
+        if (findEmployeeByMobile(employee.getMobilePhone()) != null) {
+            throw new BusinessException("手机号已被其他员工使用，无法转入职");
+        }
+        if (findEmployeeByIdCard(employee.getIdCardNo()) != null) {
+            throw new BusinessException("身份证号已被其他员工使用，无法转入职");
+        }
+    }
+
+    private void throwEmployeeInsertConflict(Employee employee) {
+        if (findEmployeeByMobile(employee.getMobilePhone()) != null) {
+            throw new BusinessException("手机号已被其他员工使用，无法转入职");
+        }
+        if (findEmployeeByIdCard(employee.getIdCardNo()) != null) {
+            throw new BusinessException("身份证号已被其他员工使用，无法转入职");
+        }
+        Employee concurrent = employeeMapper.selectOne(new LambdaQueryWrapper<Employee>()
+                .eq(Employee::getSourceCandidateId, employee.getSourceCandidateId())
+                .last("LIMIT 1"));
+        if (concurrent != null) {
+            throw new BusinessException("该候选人已生成待入职员工，请刷新后重试");
+        }
+        throw new BusinessException("员工唯一字段发生并发冲突，请刷新后重试");
+    }
+
+    private Employee findEmployeeByMobile(String mobilePhone) {
+        if (StrUtil.isBlank(mobilePhone)) {
+            return null;
+        }
+        return employeeMapper.selectOne(new LambdaQueryWrapper<Employee>()
+                .eq(Employee::getMobilePhone, mobilePhone.trim())
+                .last("LIMIT 1"));
+    }
+
+    private Employee findEmployeeByIdCard(String idCardNo) {
+        if (StrUtil.isBlank(idCardNo)) {
+            return null;
+        }
+        return employeeMapper.selectOne(new LambdaQueryWrapper<Employee>()
+                .eq(Employee::getIdCardNo, idCardNo.trim())
+                .last("LIMIT 1"));
     }
 
     private void updateCandidateStage(InterviewProcess process) {
@@ -2009,31 +2115,39 @@ public class InterviewServiceImpl implements InterviewService {
     }
 
     private InterviewVideoSession ensureVideoSession(Long processId, Long approverUserId, String approverName) {
-        InterviewVideoSession existing = videoSessionMapper.selectOne(new LambdaQueryWrapper<InterviewVideoSession>()
-                .eq(InterviewVideoSession::getProcessId, processId)
-                .isNull(InterviewVideoSession::getProcessStageId)
-                .last("LIMIT 1"));
+        InterviewVideoSession existing = findVideoSession(processId, null);
         if (existing != null) {
-            resetVideoSession(existing, approverUserId, approverName);
-            videoSessionMapper.updateById(existing);
+            if (StrUtil.equals(existing.getSessionStatus(), "CREATED")) {
+                existing.setApproverUserId(approverUserId);
+                existing.setApproverName(approverName);
+                existing.setLastActivityAt(LocalDateTime.now());
+                videoSessionMapper.updateById(existing);
+            }
             return existing;
         }
         InterviewVideoSession session = new InterviewVideoSession();
         session.setProcessId(processId);
+        session.setStageScopeId(0L);
         session.setVideoSerialNo("VID-" + UUID.randomUUID());
         session.setVideoJoinLink("/interview/interviewee?processId=" + processId + "&serial=" + session.getVideoSerialNo());
         session.setApproverUserId(approverUserId);
         session.setApproverName(approverName);
         session.setSessionStatus("CREATED");
-        videoSessionMapper.insert(session);
-        return session;
+        session.setLastActivityAt(LocalDateTime.now());
+        try {
+            videoSessionMapper.insert(session);
+            return session;
+        } catch (DataIntegrityViolationException ex) {
+            InterviewVideoSession concurrent = findVideoSession(processId, null);
+            if (concurrent != null) {
+                return concurrent;
+            }
+            throw new BusinessException("视频会话创建发生唯一性冲突，请刷新后重试");
+        }
     }
 
     private InterviewVideoSession ensureVideoSession(Long processId, Long processStageId, Long approverUserId, String approverName) {
-        InterviewVideoSession existing = videoSessionMapper.selectOne(new LambdaQueryWrapper<InterviewVideoSession>()
-                .eq(InterviewVideoSession::getProcessId, processId)
-                .eq(InterviewVideoSession::getProcessStageId, processStageId)
-                .last("LIMIT 1"));
+        InterviewVideoSession existing = findVideoSession(processId, processStageId);
         if (existing != null) {
             if (StrUtil.equals(existing.getSessionStatus(), "CREATED")) {
                 existing.setApproverUserId(approverUserId);
@@ -2045,13 +2159,35 @@ public class InterviewServiceImpl implements InterviewService {
         InterviewVideoSession session = new InterviewVideoSession();
         session.setProcessId(processId);
         session.setProcessStageId(processStageId);
+        session.setStageScopeId(processStageId);
         session.setVideoSerialNo("VID-" + UUID.randomUUID());
         session.setVideoJoinLink("/interview/interviewee?processId=" + processId + "&serial=" + session.getVideoSerialNo());
         session.setApproverUserId(approverUserId);
         session.setApproverName(approverName);
         session.setSessionStatus("CREATED");
-        videoSessionMapper.insert(session);
-        return session;
+        session.setLastActivityAt(LocalDateTime.now());
+        try {
+            videoSessionMapper.insert(session);
+            return session;
+        } catch (DataIntegrityViolationException ex) {
+            InterviewVideoSession concurrent = findVideoSession(processId, processStageId);
+            if (concurrent != null) {
+                return concurrent;
+            }
+            throw new BusinessException("视频会话创建发生唯一性冲突，请刷新后重试");
+        }
+    }
+
+    private InterviewVideoSession findVideoSession(Long processId, Long processStageId) {
+        LambdaQueryWrapper<InterviewVideoSession> query = new LambdaQueryWrapper<InterviewVideoSession>()
+                .eq(InterviewVideoSession::getProcessId, processId)
+                .last("LIMIT 1");
+        if (processStageId == null) {
+            query.isNull(InterviewVideoSession::getProcessStageId);
+        } else {
+            query.eq(InterviewVideoSession::getProcessStageId, processStageId);
+        }
+        return videoSessionMapper.selectOne(query);
     }
 
     private void resetVideoSession(InterviewVideoSession session, Long approverUserId, String approverName) {
@@ -2082,6 +2218,8 @@ public class InterviewServiceImpl implements InterviewService {
         session.setHrIceCandidates(null);
         session.setIntervieweeIceCandidates(null);
         session.setSessionStatus("CREATED");
+        session.setStageScopeId(Objects.requireNonNullElse(session.getProcessStageId(), 0L));
+        session.setLastActivityAt(LocalDateTime.now());
     }
 
     private void ensureInProgress(InterviewProcess process) {
@@ -2619,7 +2757,8 @@ public class InterviewServiceImpl implements InterviewService {
                     .set(session.getEndTime() == null, InterviewVideoSession::getEndTime, endTime)
                     .set(session.getRecordingEndRequestedAt() == null,
                             InterviewVideoSession::getRecordingEndRequestedAt, recordingEndRequestedAt)
-                    .set(InterviewVideoSession::getSessionStatus, "END_REQUESTED");
+                    .set(InterviewVideoSession::getSessionStatus, "END_REQUESTED")
+                    .set(InterviewVideoSession::getLastActivityAt, LocalDateTime.now());
             if (videoSessionMapper.update(null, update) == 1) {
                 session.setEndTime(endTime);
                 session.setRecordingEndRequestedAt(recordingEndRequestedAt);
@@ -2632,6 +2771,13 @@ public class InterviewServiceImpl implements InterviewService {
             }
         }
         throw new BusinessException("视频结束状态发生并发变化，请重试");
+    }
+
+    private void touchVideoSessionActivity(Long sessionId) {
+        videoSessionMapper.update(null, new LambdaUpdateWrapper<InterviewVideoSession>()
+                .eq(InterviewVideoSession::getId, sessionId)
+                .in(InterviewVideoSession::getSessionStatus, ACTIVE_VIDEO_SESSION_STATUSES)
+                .set(InterviewVideoSession::getLastActivityAt, LocalDateTime.now()));
     }
 
     private InterviewVideoSession claimVideoSessionForMerge(InterviewVideoSession initialSession) {
@@ -3617,6 +3763,80 @@ public class InterviewServiceImpl implements InterviewService {
                 && session.getIntervieweeJoinTime() != null
                 && StrUtil.isNotBlank(session.getHrOfferSdp())
                 && StrUtil.isNotBlank(session.getIntervieweeAnswerSdp());
+    }
+
+    private Boolean releaseInactiveVideoSession(Long sessionId,
+                                                LocalDateTime cutoff,
+                                                org.springframework.transaction.TransactionStatus transactionStatus) {
+        InterviewVideoSession session = videoSessionMapper.selectById(sessionId);
+        if (session == null
+                || !ACTIVE_VIDEO_SESSION_STATUSES.contains(session.getSessionStatus())
+                || session.getLastActivityAt() == null
+                || session.getLastActivityAt().isAfter(cutoff)) {
+            return false;
+        }
+        InterviewProcess process = processMapper.selectById(session.getProcessId());
+        if (process == null
+                || !StrUtil.equals(process.getOverallStatus(), "IN_PROGRESS")
+                || !StrUtil.equals(process.getCurrentStage(), "VIDEO")) {
+            return false;
+        }
+
+        InterviewProcessStage stage = null;
+        if (isTemplateProcess(process)) {
+            stage = session.getProcessStageId() == null ? null : processStageMapper.selectById(session.getProcessStageId());
+            if (stage == null
+                    || !Objects.equals(stage.getProcessId(), process.getId())
+                    || !StrUtil.equals(stage.getStageType(), "VIDEO")
+                    || !StrUtil.equalsAny(stage.getStageStatus(), "READY", "IN_PROGRESS", "UPLOADING")) {
+                return false;
+            }
+        } else if (session.getProcessStageId() != null) {
+            return false;
+        }
+
+        String previousStatus = session.getSessionStatus();
+        LocalDateTime inactiveSince = session.getLastActivityAt();
+        LocalDateTime endedAt = LocalDateTime.now();
+        int sessionUpdated = videoSessionMapper.update(null, new LambdaUpdateWrapper<InterviewVideoSession>()
+                .eq(InterviewVideoSession::getId, sessionId)
+                .eq(InterviewVideoSession::getSessionStatus, previousStatus)
+                .isNotNull(InterviewVideoSession::getLastActivityAt)
+                .le(InterviewVideoSession::getLastActivityAt, cutoff)
+                .set(session.getEndTime() == null, InterviewVideoSession::getEndTime, endedAt)
+                .set(session.getRecordingEndRequestedAt() == null,
+                        InterviewVideoSession::getRecordingEndRequestedAt, endedAt.plusSeconds(3))
+                .set(InterviewVideoSession::getSessionStatus, "END_REQUESTED")
+                .set(InterviewVideoSession::getLastActivityAt, endedAt));
+        if (sessionUpdated != 1) {
+            return false;
+        }
+        session.setEndTime(session.getEndTime() == null ? endedAt : session.getEndTime());
+        session.setRecordingEndRequestedAt(session.getRecordingEndRequestedAt() == null
+                ? endedAt.plusSeconds(3) : session.getRecordingEndRequestedAt());
+        session.setSessionStatus("END_REQUESTED");
+        session.setLastActivityAt(endedAt);
+
+        if (stage == null) {
+            if (!StrUtil.equals(process.getStageStatus(), "UPLOADING")) {
+                markStandardVideoUploading(process);
+            }
+        } else if (!StrUtil.equals(stage.getStageStatus(), "UPLOADING")) {
+            markTemplateVideoUploading(process, stage);
+        }
+        if (!StrUtil.equals(process.getStageStatus(), "UPLOADING")) {
+            transactionStatus.setRollbackOnly();
+            return false;
+        }
+
+        log.warn("Video session {} was ended after no activity since {}", sessionId, inactiveSince);
+        auditLogService.log(null, "SYSTEM", "SYSTEM", "INTERVIEW", "VIDEO_INACTIVITY_TIMEOUT",
+                "VIDEO_SESSION", String.valueOf(sessionId),
+                "inactiveBefore=" + cutoff + ", previousStatus=" + previousStatus);
+        if (hasBothRecordingReferences(session)) {
+            claimVideoSessionForMerge(session);
+        }
+        return true;
     }
 
     private Boolean markMissingRecordingForApproval(Long sessionId,

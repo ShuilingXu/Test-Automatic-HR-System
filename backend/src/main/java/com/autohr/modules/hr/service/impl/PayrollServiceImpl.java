@@ -37,6 +37,8 @@ import java.util.*;
 public class PayrollServiceImpl implements PayrollService {
     private static final BigDecimal ZERO = new BigDecimal("0.00");
     private static final BigDecimal MONTHLY_DEDUCTION = new BigDecimal("5000.00");
+    private static final String LOCKED_FUTURE_PAYROLL_MESSAGE =
+            "A later payroll is locked; unlock subsequent months before changing this payroll period";
     private final JdbcTemplate jdbc;
     private final Validator validator;
     private ActiveDatabase activeDatabase;
@@ -96,12 +98,13 @@ public class PayrollServiceImpl implements PayrollService {
     public List<PayrollVO> generate(PayrollGenerateRequest request) {
         YearMonth target = parseMonth(request.getSalaryMonth());
         List<Map<String, Object>> employees = request.getEmployeeId() == null
-                ? jdbc.queryForList("SELECT e.*, j.default_overtime_rate FROM hr_employee e LEFT JOIN recruitment_job j ON e.job_id=j.id WHERE e.employment_status IN (1,3) AND e.salary_confirmed=1")
+                ? jdbc.queryForList("SELECT e.*, j.default_overtime_rate FROM hr_employee e LEFT JOIN recruitment_job j ON e.job_id=j.id WHERE e.employment_status IN (1,3) AND e.salary_confirmed=1 ORDER BY e.id")
                 : List.of(ensureEmployee(request.getEmployeeId()));
         List<PayrollVO> result = new ArrayList<>();
         for (Map<String, Object> employee : employees) {
             if (integer(employee.get("salary_confirmed")) != 1) throw new BusinessException("Employee salary has not been confirmed");
             Long employeeId = number(employee.get("id"));
+            lockEmployeePayroll(employeeId);
             LocalDate hireDate = localDate(employee.get("hire_date"));
             LocalDate dismissalDate = localDate(employee.get("dismissal_date"));
             int employmentStatus = integer(employee.get("employment_status"));
@@ -121,6 +124,7 @@ public class PayrollServiceImpl implements PayrollService {
                 }
                 continue;
             }
+            assertNoLockedFuturePayroll(employeeId, target.toString());
             PayrollVO payroll = calculate(employee, target);
             upsertPayroll(payroll);
             result.add(payroll);
@@ -147,6 +151,7 @@ public class PayrollServiceImpl implements PayrollService {
     @Override @Transactional
     public void setLocked(Long employeeId, String salaryMonth, boolean locked) {
         parseMonth(salaryMonth);
+        lockEmployeePayroll(employeeId);
         int changed = jdbc.update("UPDATE hr_payroll_month SET locked=? WHERE employee_id=? AND salary_month=?", locked ? 1 : 0, employeeId, salaryMonth);
         if (changed == 0) throw new BusinessException("Payroll does not exist");
     }
@@ -154,7 +159,9 @@ public class PayrollServiceImpl implements PayrollService {
     @Override @Transactional
     public void deletePayroll(Long employeeId, String salaryMonth) {
         parseMonth(salaryMonth);
+        lockEmployeePayroll(employeeId);
         assertWritable(employeeId, salaryMonth);
+        assertNoLockedFuturePayroll(employeeId, salaryMonth);
         int changed = jdbc.update("DELETE FROM hr_payroll_month WHERE employee_id=? AND salary_month=?", employeeId, salaryMonth);
         if (changed == 0) throw new BusinessException("Payroll does not exist");
     }
@@ -242,13 +249,35 @@ public class PayrollServiceImpl implements PayrollService {
 
     private void assertWritable(Long employeeId, String month) { PayrollMutationGuard.requireWritable(isLocked(employeeId, month)); }
     private void assertInputWritable(Long employeeId, String month) {
+        parseMonth(month);
+        lockEmployeePayroll(employeeId);
         assertWritable(employeeId, month);
+        assertNoLockedFuturePayroll(employeeId, month);
         if (jdbc.queryForObject("SELECT COUNT(*) FROM hr_payroll_month WHERE employee_id=? AND salary_month=?",
                 Long.class, employeeId, month) > 0) {
             throw new BusinessException("Payroll has already been generated for this month; delete or regenerate it before changing inputs");
         }
     }
+    private void assertNoLockedFuturePayroll(Long employeeId, String month) {
+        Long count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM hr_payroll_month WHERE employee_id=? AND salary_month>? AND locked=1",
+                Long.class, employeeId, month);
+        if (count != null && count > 0) {
+            throw new BusinessException(LOCKED_FUTURE_PAYROLL_MESSAGE);
+        }
+    }
     private boolean isLocked(Long employeeId, String month) { return jdbc.queryForObject("SELECT COUNT(*) FROM hr_payroll_month WHERE employee_id=? AND salary_month=? AND locked=1", Long.class, employeeId, month) > 0; }
+    private void lockEmployeePayroll(Long employeeId) {
+        DatabaseType databaseType = activeDatabase == null ? DatabaseType.SQLITE : activeDatabase.type();
+        if (databaseType == DatabaseType.SQLITE) {
+            return;
+        }
+        List<Long> ids = jdbc.query("SELECT id FROM hr_employee WHERE id=? FOR UPDATE",
+                (resultSet, rowNum) -> resultSet.getLong(1), employeeId);
+        if (ids.isEmpty()) {
+            throw new BusinessException("Employee does not exist: " + employeeId);
+        }
+    }
     private Map<String,Object> ensureEmployee(Long id) { List<Map<String,Object>> rows = jdbc.queryForList("SELECT e.*,j.default_overtime_rate FROM hr_employee e LEFT JOIN recruitment_job j ON e.job_id=j.id WHERE e.id=?", id); if (rows.isEmpty()) throw new BusinessException("Employee does not exist: " + id); return rows.get(0); }
     private void upsertMonthlyInput(String table, String insertColumns, String updateColumns, Object... values) {
         String[] columns = insertColumns.split(",");

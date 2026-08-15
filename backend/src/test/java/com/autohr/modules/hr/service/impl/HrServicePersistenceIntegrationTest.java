@@ -27,7 +27,6 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
-import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
@@ -83,8 +82,6 @@ class HrServicePersistenceIntegrationTest {
             request.setDepartmentId(1L);
             request.setBankAccountNo("6222000000000001");
             request.setBankName("Test Bank");
-            request.setHireDate(LocalDate.of(2024, 3, 18));
-
             Long employeeId = service.saveEmployee(request, 99L).getId();
 
             assertEquals("2024-03", jdbc.queryForObject(

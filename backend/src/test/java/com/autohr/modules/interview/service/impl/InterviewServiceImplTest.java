@@ -4,6 +4,8 @@ import com.autohr.common.exception.BusinessException;
 import com.autohr.common.file.S3ObjectStorageService;
 import com.autohr.modules.auth.service.AuditLogService;
 import com.autohr.modules.auth.service.AuthRedisSecurityStore;
+import com.autohr.modules.hr.entity.Department;
+import com.autohr.modules.hr.entity.Employee;
 import com.autohr.modules.hr.mapper.DepartmentMapper;
 import com.autohr.modules.hr.mapper.EmployeeMapper;
 import com.autohr.modules.hr.mapper.SalaryHistoryMapper;
@@ -26,6 +28,8 @@ import com.autohr.modules.interview.mapper.InterviewVideoSessionMapper;
 import com.autohr.modules.interview.service.VideoMergeService;
 import com.autohr.modules.recruitment.mapper.RecruitmentCandidateMapper;
 import com.autohr.modules.recruitment.mapper.RecruitmentJobMapper;
+import com.autohr.modules.recruitment.entity.RecruitmentCandidate;
+import com.autohr.modules.recruitment.entity.RecruitmentJob;
 import com.autohr.modules.system.service.SystemConfigService;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
@@ -40,11 +44,15 @@ import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,6 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -66,6 +75,7 @@ class InterviewServiceImplTest {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(configuration, "test"), InterviewProcess.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(configuration, "test"), InterviewProcessStage.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(configuration, "test"), InterviewVideoSession.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(configuration, "test"), Employee.class);
     }
 
     @Mock InterviewKnowledgeBaseMapper knowledgeBaseMapper;
@@ -403,6 +413,155 @@ class InterviewServiceImplTest {
                 "validateRecordingFile", "recording.webm", "video/webm", file));
     }
 
+    @Test
+    void rejectsOnboardingWhenMobileAlreadyBelongsToAnotherEmployee() {
+        InterviewProcess process = onboardingProcess();
+        RecruitmentCandidate candidate = onboardingCandidate();
+        RecruitmentJob job = onboardingJob();
+        Department department = activeDepartment();
+        Employee conflict = new Employee();
+        conflict.setId(99L);
+        when(recruitmentCandidateMapper.selectById(31L)).thenReturn(candidate);
+        when(recruitmentJobMapper.selectById(5L)).thenReturn(job);
+        when(departmentMapper.selectById(8L)).thenReturn(department);
+        when(employeeMapper.selectOne(any())).thenAnswer(invocation -> {
+            String sql = ((Wrapper<?>) invocation.getArgument(0)).getSqlSegment();
+            return sql.contains("mobile_phone") ? conflict : null;
+        });
+
+        BusinessException error = assertThrows(BusinessException.class, () -> ReflectionTestUtils.invokeMethod(
+                service, "syncToPendingOnboarding", process, 8L, 5L, new BigDecimal("12000"),
+                1L, "HR", "HR_ADMIN"));
+
+        assertTrue(error.getMessage().contains("手机号"));
+        verify(employeeMapper, never()).insert(any());
+    }
+
+    @Test
+    void reportsIdCardConflictDiscoveredAfterConcurrentEmployeeInsert() {
+        InterviewProcess process = onboardingProcess();
+        RecruitmentCandidate candidate = onboardingCandidate();
+        RecruitmentJob job = onboardingJob();
+        Department department = activeDepartment();
+        Employee conflict = new Employee();
+        conflict.setId(99L);
+        AtomicInteger idCardLookups = new AtomicInteger();
+        when(recruitmentCandidateMapper.selectById(31L)).thenReturn(candidate);
+        when(recruitmentJobMapper.selectById(5L)).thenReturn(job);
+        when(departmentMapper.selectById(8L)).thenReturn(department);
+        when(employeeMapper.selectOne(any())).thenAnswer(invocation -> {
+            String sql = ((Wrapper<?>) invocation.getArgument(0)).getSqlSegment();
+            if (sql.contains("id_card_no") && idCardLookups.incrementAndGet() > 1) {
+                return conflict;
+            }
+            return null;
+        });
+        doThrow(new DataIntegrityViolationException("unique id_card_no"))
+                .when(employeeMapper).insert(any());
+
+        BusinessException error = assertThrows(BusinessException.class, () -> ReflectionTestUtils.invokeMethod(
+                service, "syncToPendingOnboarding", process, 8L, 5L, new BigDecimal("12000"),
+                1L, "HR", "HR_ADMIN"));
+
+        assertTrue(error.getMessage().contains("身份证号"));
+    }
+
+    @Test
+    void returnsConcurrentTemplateVideoSessionAfterUniqueInsertConflict() {
+        InterviewVideoSession concurrent = videoSession(77L, 11L, "CREATED");
+        when(videoSessionMapper.selectOne(any())).thenReturn(null, concurrent);
+        doThrow(new DataIntegrityViolationException("unique process scope"))
+                .when(videoSessionMapper).insert(any());
+
+        InterviewVideoSession result = ReflectionTestUtils.invokeMethod(
+                service, "ensureVideoSession", 42L, 11L, 3L, "HR");
+
+        assertEquals(77L, result.getId());
+        verify(videoSessionMapper, times(2)).selectOne(any());
+    }
+
+    @Test
+    void repeatedLegacyVideoSessionCreationPreservesExistingRecording() {
+        InterviewVideoSession existing = videoSession(77L, null, "RECORDED");
+        existing.setMergedRecordingPath("uploads/interviews/merged.webm");
+        existing.setTranscriptText("existing transcript");
+        when(videoSessionMapper.selectOne(any())).thenReturn(existing);
+
+        InterviewVideoSession result = ReflectionTestUtils.invokeMethod(
+                service, "ensureVideoSession", 42L, 3L, "HR");
+
+        assertEquals("uploads/interviews/merged.webm", result.getMergedRecordingPath());
+        assertEquals("existing transcript", result.getTranscriptText());
+        assertEquals("RECORDED", result.getSessionStatus());
+        verify(videoSessionMapper, never()).updateById(any());
+        verify(videoSessionMapper, never()).insert(any());
+    }
+
+    @Test
+    void staleRecordingSessionAdvancesToEndRequestedAndIsAudited() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
+        InterviewVideoSession session = videoSession(7L, null, "RECORDING");
+        session.setLastActivityAt(cutoff.minusSeconds(1));
+        InterviewProcess process = activeVideoProcess(false);
+        process.setRecruitmentCandidateId(31L);
+        RecruitmentCandidate candidate = onboardingCandidate();
+        when(videoSessionMapper.selectById(7L)).thenReturn(session);
+        when(processMapper.selectById(42L)).thenReturn(process);
+        when(videoSessionMapper.update(
+                ArgumentMatchers.<InterviewVideoSession>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewVideoSession>>any())).thenReturn(1);
+        when(processMapper.update(
+                ArgumentMatchers.<InterviewProcess>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewProcess>>any())).thenReturn(1);
+        when(recruitmentCandidateMapper.selectById(31L)).thenReturn(candidate);
+
+        Boolean changed = ReflectionTestUtils.invokeMethod(service, "releaseInactiveVideoSession",
+                7L, cutoff, new SimpleTransactionStatus());
+
+        assertEquals(Boolean.TRUE, changed);
+        verify(auditLogService).log(null, "SYSTEM", "SYSTEM", "INTERVIEW", "VIDEO_INACTIVITY_TIMEOUT",
+                "VIDEO_SESSION", "7", "inactiveBefore=" + cutoff + ", previousStatus=RECORDING");
+    }
+
+    @Test
+    void recentRecordingSessionIsNotEndedByInactiveScan() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
+        InterviewVideoSession session = videoSession(7L, null, "RECORDING");
+        session.setLastActivityAt(cutoff.plusSeconds(1));
+        when(videoSessionMapper.selectById(7L)).thenReturn(session);
+
+        Boolean changed = ReflectionTestUtils.invokeMethod(service, "releaseInactiveVideoSession",
+                7L, cutoff, new SimpleTransactionStatus());
+
+        assertEquals(Boolean.FALSE, changed);
+        verify(videoSessionMapper, never()).update(
+                ArgumentMatchers.<InterviewVideoSession>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewVideoSession>>any());
+    }
+
+    @Test
+    void staleCreatedSessionIsAlsoReleasedWhenEveryoneClosedThePage() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
+        InterviewVideoSession session = videoSession(7L, null, "CREATED");
+        session.setLastActivityAt(cutoff.minusSeconds(1));
+        InterviewProcess process = activeVideoProcess(false);
+        process.setRecruitmentCandidateId(31L);
+        when(videoSessionMapper.selectById(7L)).thenReturn(session);
+        when(processMapper.selectById(42L)).thenReturn(process);
+        when(videoSessionMapper.update(
+                ArgumentMatchers.<InterviewVideoSession>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewVideoSession>>any())).thenReturn(1);
+        when(processMapper.update(
+                ArgumentMatchers.<InterviewProcess>isNull(),
+                ArgumentMatchers.<Wrapper<InterviewProcess>>any())).thenReturn(1);
+        when(recruitmentCandidateMapper.selectById(31L)).thenReturn(onboardingCandidate());
+
+        Boolean changed = ReflectionTestUtils.invokeMethod(service, "releaseInactiveVideoSession",
+                7L, cutoff, new SimpleTransactionStatus());
+
+        assertEquals(Boolean.TRUE, changed);
+    }
+
     private InterviewProcess activeVideoProcess(boolean template) {
         InterviewProcess process = new InterviewProcess();
         process.setId(42L);
@@ -420,5 +579,38 @@ class InterviewServiceImplTest {
         session.setProcessStageId(processStageId);
         session.setSessionStatus(status);
         return session;
+    }
+
+    private InterviewProcess onboardingProcess() {
+        InterviewProcess process = new InterviewProcess();
+        process.setId(42L);
+        process.setRecruitmentCandidateId(31L);
+        process.setJobId(5L);
+        return process;
+    }
+
+    private RecruitmentCandidate onboardingCandidate() {
+        RecruitmentCandidate candidate = new RecruitmentCandidate();
+        candidate.setId(31L);
+        candidate.setFullName("测试候选人");
+        candidate.setMobilePhone("13800138000");
+        candidate.setIdCardNo("110101199001010011");
+        candidate.setMajor("计算机");
+        return candidate;
+    }
+
+    private RecruitmentJob onboardingJob() {
+        RecruitmentJob job = new RecruitmentJob();
+        job.setId(5L);
+        job.setJobTitle("工程师");
+        job.setDepartmentId(8L);
+        return job;
+    }
+
+    private Department activeDepartment() {
+        Department department = new Department();
+        department.setId(8L);
+        department.setStatus(1);
+        return department;
     }
 }
