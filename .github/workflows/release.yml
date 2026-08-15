@@ -51,11 +51,10 @@ jobs:
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ format('build-{0}', github.run_number) }}
         run: |
           mapfile -t expired_tags < <(gh release list --limit 100 \
             --json tagName,createdAt,isPrerelease,isDraft \
-            --jq "map(select(.isPrerelease == true and .isDraft == false and .tagName != \"$RELEASE_TAG\")) | sort_by(.createdAt) | reverse | .[4:] | .[].tagName")
+            --jq "map(select(.isPrerelease == true and .isDraft == false)) | sort_by(.createdAt) | reverse | .[5:] | .[].tagName")
           for tag in "${expired_tags[@]}"; do
             gh release delete "$tag" --cleanup-tag --yes
           done
