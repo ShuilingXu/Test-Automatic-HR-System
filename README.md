@@ -393,7 +393,7 @@ spring:
       - optional:file:../.env[.properties]
 ```
 
-`.env` 使用 Java Properties 语法，由 Spring Boot 和系统配置服务统一解析；生产 systemd 单元还通过 `EnvironmentFile=/opt/auto-hr/.env` 将同一文件导入进程。真实进程环境变量的优先级高于 `.env` 文件，适合由容器或 systemd 临时覆盖配置。通过系统配置页面保存时会自动转义空格、反斜杠、`=`、`:`、`#` 和 `!`，因此密码、Token 和 Endpoint 中的特殊字符可在重启后原样生效。手工编辑时如需字面反斜杠，请写成 `\\`。
+`.env` 使用 Java Properties 语法，由 Spring Boot 和系统配置服务统一解析；生产 systemd 单元还会通过安装目录下的 `.env` 将同一文件导入进程（默认路径为 `/opt/auto-hr/.env`）。真实进程环境变量的优先级高于 `.env` 文件，适合由容器或 systemd 临时覆盖配置。通过系统配置页面保存时会自动转义空格、反斜杠、`=`、`:`、`#` 和 `!`，因此密码、Token 和 Endpoint 中的特殊字符可在重启后原样生效。手工编辑时如需字面反斜杠，请写成 `\\`。
 
 常用变量：
 
@@ -537,19 +537,17 @@ python3 scripts/migrate-sqlite-to-postgres.py autohr.db --dsn "$POSTGRES_DSN" --
 
 ### 一键发行包与 systemd
 
-根目录和发行包使用同一个 `deploy-ubuntu.sh`/`deploy.sh`。它会安装缺失的 Ubuntu 运行依赖、准备本机 Redis、检查 FFmpeg 与 Tesseract、配置本机 coturn、创建低权限 `autohr` 用户、安装 systemd 服务，并在 60 秒健康检查失败时恢复上一版后端、前端、service 和 `.env`。服务只监听 `127.0.0.1:8081`；公网访问必须由 OpenResty/Nginx 终止 TLS 并反向代理 `/api`。
+根目录和发行包使用同一个 `deploy-ubuntu.sh`/`deploy.sh`。它会安装缺失的 Ubuntu 运行依赖、准备本机 Redis、检查 FFmpeg 与 Tesseract、配置本机 coturn、创建低权限 `autohr` 用户、安装 systemd 服务，并在 60 秒健康检查失败时恢复上一版后端、前端、service 和 `.env`。默认安装目录为 `/opt/auto-hr`，服务监听 `127.0.0.1:8081`；可用 `--install-dir`、`--server-address`、`--server-port` 和 `--spring-profile` 调整，不需要修改脚本源码（也可通过对应的 `AUTO_HR_INSTALL_DIR`、`AUTO_HR_SERVER_ADDRESS`、`AUTO_HR_SERVER_PORT`、`AUTO_HR_SPRING_PROFILE` 环境变量设置）。公网访问应由 OpenResty/Nginx 终止 TLS 并反向代理 `/api`。
 
 在 Ubuntu 源码目录直接运行即可构建、打包并安装：
 
 ```bash
-bash deploy-ubuntu.sh --web-root /opt/1panel/www/sites/hr.example.com/index
+bash deploy-ubuntu.sh --web-root /var/www/auto-hr
 ```
 
 首次运行未传 `--env` 时，脚本从 `.env.example` 初始化本地 SQLite，并生成 JWT、Redis 和 TURN 密钥，适合立即验证。生产 PostgreSQL 可先准备完整环境文件后传入；后续升级不传 `--env` 会保留服务器现有配置。外部托管 TURN 时传 `--skip-coturn`，已由镜像预装依赖时传 `--skip-dependencies`。
 
-GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。每次 `main` 构建都会创建或更新 `build-<运行编号>` GitHub 预发布版；推送 `v*` 标签会创建正式 Release。若配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_WEB_ROOT` 和可选的 `DEPLOY_PORT`，Actions 会上传发行包并调用包内同一个 `deploy.sh`。`DEPLOY_INITIAL_ENV` 是可选的首次初始化环境文件：只会在服务器尚无 `/opt/auto-hr/.env` 时使用，绝不会覆盖已有配置。使用外部 TURN 服务时可将 `DEPLOY_SKIP_COTURN` 设为 `true`。未配置部署 Secrets 时只跳过远端部署，构建产物和 GitHub 预发布版仍会正常生成。
-
-当前发布流水线使用 SSH `StrictHostKeyChecking=accept-new`：首次连接会记录服务器返回的 host key，后续连接仍会校验已记录的 key。正式部署前应通过独立渠道核对服务器指纹并预置到部署账号的 `known_hosts`；不要在未核对指纹的情况下首次运行自动部署。
+GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。每次 `main` 构建都会创建或更新 `build-<运行编号>` GitHub 预发布版；推送 `v*` 标签会创建正式 Release。远程部署不由 GitHub Actions 自动执行，需要下载发行包后在目标服务器上手动运行包内的 `deploy.sh`。
 
 本地也可生成同一发行包：
 
@@ -560,7 +558,7 @@ bash scripts/package-release.sh
 解压发行包后，其中唯一的部署入口仍是 `deploy.sh`：
 
 ```bash
-sudo ./deploy.sh --env /path/to/production.env --web-root /opt/1panel/www/sites/hr.example.com/index
+sudo ./deploy.sh --env /path/to/production.env --web-root /var/www/auto-hr
 sudo systemctl status auto-hr
 ```
 

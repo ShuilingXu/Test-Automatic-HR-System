@@ -16,7 +16,11 @@ SERVICE_NAME="auto-hr"
 SERVICE_USER="autohr"
 SERVICE_GROUP="autohr"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-HEALTH_URL="${AUTO_HR_HEALTH_URL:-http://127.0.0.1:8081/api/auth/captcha}"
+SERVICE_ADDRESS="${AUTO_HR_SERVER_ADDRESS:-${SERVER_ADDRESS:-127.0.0.1}}"
+SERVICE_PORT="${AUTO_HR_SERVER_PORT:-${SERVER_PORT:-8081}}"
+SERVICE_PROFILE="${AUTO_HR_SPRING_PROFILE:-${SPRING_PROFILES_ACTIVE:-prod}}"
+HEALTH_URL_OVERRIDE="${AUTO_HR_HEALTH_URL:-}"
+HEALTH_URL=""
 
 ENV_SOURCE=""
 WEB_ROOT=""
@@ -54,18 +58,23 @@ Usage:
   sudo ./deploy.sh [options]        Deploy an extracted release package
 
 Options:
-  --env FILE             Install FILE as /opt/auto-hr/.env. Without this option,
-                         an existing environment is preserved; a first install
-                         is initialized from .env.example with random secrets.
+  --install-dir DIR      Install under DIR (default: /opt/auto-hr).
+  --env FILE             Install FILE as the service environment file. Without
+                         this option, an existing environment is preserved; a
+                         first install is initialized with random secrets.
   --web-root DIR         Publish frontend files to an existing
                          OpenResty/Nginx site root after the backend is healthy.
+  --server-address ADDR  Bind the backend to ADDR (default: 127.0.0.1).
+  --server-port PORT     Bind the backend to PORT (default: 8081).
+  --spring-profile NAME  Spring profile for the service (default: prod).
   --skip-dependencies    Do not install missing Ubuntu runtime/build packages.
   --skip-coturn          Do not install or configure the local coturn service.
   -h, --help             Show this help.
 
-The service listens on 127.0.0.1:8081. Terminate TLS and proxy /api with
-OpenResty/Nginx for public deployments. Re-running the command performs an
-in-place upgrade and rolls back the application files if health checks fail.
+The service listens on the configured address and port (127.0.0.1:8081 by
+default). Terminate TLS and proxy /api with OpenResty/Nginx for public
+deployments. Re-running the command performs an in-place upgrade and rolls
+back the application files if health checks fail.
 EOF
 }
 
@@ -85,6 +94,15 @@ run_service() {
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --install-dir)
+      [ "$#" -ge 2 ] || die "--install-dir requires a directory path."
+      INSTALL_DIR="$2"
+      shift 2
+      ;;
+    --install-dir=*)
+      INSTALL_DIR="${1#*=}"
+      shift
+      ;;
     --env)
       [ "$#" -ge 2 ] || die "--env requires a file path."
       ENV_SOURCE="$2"
@@ -101,6 +119,33 @@ while [ "$#" -gt 0 ]; do
       ;;
     --web-root=*)
       WEB_ROOT="${1#*=}"
+      shift
+      ;;
+    --server-address)
+      [ "$#" -ge 2 ] || die "--server-address requires an address."
+      SERVICE_ADDRESS="$2"
+      shift 2
+      ;;
+    --server-address=*)
+      SERVICE_ADDRESS="${1#*=}"
+      shift
+      ;;
+    --server-port)
+      [ "$#" -ge 2 ] || die "--server-port requires a port."
+      SERVICE_PORT="$2"
+      shift 2
+      ;;
+    --server-port=*)
+      SERVICE_PORT="${1#*=}"
+      shift
+      ;;
+    --spring-profile)
+      [ "$#" -ge 2 ] || die "--spring-profile requires a profile name."
+      SERVICE_PROFILE="$2"
+      shift 2
+      ;;
+    --spring-profile=*)
+      SERVICE_PROFILE="${1#*=}"
       shift
       ;;
     --skip-dependencies)
@@ -126,6 +171,10 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ "$RUN_SERVICE" = true ]; then
+  export AUTO_HR_INSTALL_DIR="$INSTALL_DIR"
+  export SERVER_ADDRESS="${SERVER_ADDRESS:-$SERVICE_ADDRESS}"
+  export SERVER_PORT="${SERVER_PORT:-$SERVICE_PORT}"
+  export SPRING_PROFILES_ACTIVE="${SPRING_PROFILES_ACTIVE:-$SERVICE_PROFILE}"
   run_service
 fi
 
@@ -210,12 +259,44 @@ fi
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
   command_exists sudo || die "Run this release deployment as root."
   log "Elevating privileges for the system installation."
-  exec sudo env "AUTO_HR_INSTALL_DIR=$INSTALL_DIR" "AUTO_HR_HEALTH_URL=$HEALTH_URL" \
+  exec sudo env "AUTO_HR_INSTALL_DIR=$INSTALL_DIR" "AUTO_HR_SERVER_ADDRESS=$SERVICE_ADDRESS" \
+    "AUTO_HR_SERVER_PORT=$SERVICE_PORT" "AUTO_HR_SPRING_PROFILE=$SERVICE_PROFILE" \
+    "AUTO_HR_HEALTH_URL=$HEALTH_URL_OVERRIDE" \
     bash "$SCRIPT_PATH" "${ORIGINAL_ARGS[@]}"
 fi
 
+validate_service_settings() {
+  [[ "$SERVICE_ADDRESS" =~ ^[A-Za-z0-9._:-]+$ ]] \
+    || die "--server-address must be a hostname or IP address without whitespace."
+  [[ "$SERVICE_PORT" =~ ^[0-9]+$ ]] \
+    || die "--server-port must be a number between 1 and 65535."
+  ((10#$SERVICE_PORT >= 1 && 10#$SERVICE_PORT <= 65535)) \
+    || die "--server-port must be a number between 1 and 65535."
+  [[ "$SERVICE_PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9._,-]*$ ]] \
+    || die "--spring-profile contains unsupported characters."
+
+  if [ -n "$HEALTH_URL_OVERRIDE" ]; then
+    [[ "$HEALTH_URL_OVERRIDE" != *$'\r'* && "$HEALTH_URL_OVERRIDE" != *$'\n'* ]] \
+      || die "AUTO_HR_HEALTH_URL cannot contain CR or LF."
+    HEALTH_URL="$HEALTH_URL_OVERRIDE"
+    return 0
+  fi
+
+  local health_host="$SERVICE_ADDRESS"
+  case "$health_host" in
+    0.0.0.0) health_host="127.0.0.1" ;;
+    ::) health_host="::1" ;;
+  esac
+  if [[ "$health_host" == *:* ]]; then
+    health_host="[$health_host]"
+  fi
+  HEALTH_URL="http://${health_host}:${SERVICE_PORT}/api/auth/captcha"
+}
+
 validate_install_dir() {
   INSTALL_DIR="$(readlink -m "$INSTALL_DIR")"
+  [[ "$INSTALL_DIR" =~ ^/opt/[A-Za-z0-9._/-]+$ ]] \
+    || die "--install-dir must be below /opt and contain only letters, numbers, '.', '_', '-', and '/'."
   case "$INSTALL_DIR" in
     /opt/*)
       ;;
@@ -240,9 +321,13 @@ validate_web_root() {
 
   WEB_ROOT="$(readlink -m "$WEB_ROOT")"
   case "$WEB_ROOT" in
-    /|/bin|/boot|/dev|/etc|/home|/lib|/lib64|/media|/mnt|/opt|/proc|/root|/run|/sbin|/srv|/sys|/tmp|/usr|/var)
-      die "--web-root must point to a dedicated site directory, not $WEB_ROOT."
+    /var/www/*)
       ;;
+    /|/bin|/bin/*|/boot|/boot/*|/dev|/dev/*|/etc|/etc/*|/lib|/lib/*|/lib64|/lib64/*|/proc|/proc/*|/root|/root/*|/run|/run/*|/sbin|/sbin/*|/sys|/sys/*|/tmp|/tmp/*|/usr|/usr/*|/var|/var/*)
+      die "--web-root must point to a dedicated site directory, not a system directory: $WEB_ROOT."
+      ;;
+  esac
+  case "$WEB_ROOT" in
     "$INSTALL_DIR"|"$INSTALL_DIR"/*)
       die "--web-root must be outside $INSTALL_DIR."
       ;;
@@ -252,7 +337,7 @@ validate_web_root() {
 ensure_runtime_dependencies() {
   local -a packages=(
     ca-certificates curl openjdk-17-jre-headless openssl python3
-    ffmpeg redis-server redis-tools postgresql-client
+    ffmpeg redis-tools postgresql-client
     tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
   )
   if [ "$CONFIGURE_COTURN" = true ]; then
@@ -279,18 +364,66 @@ random_secret() {
 
 get_env_value() {
   local key="$1"
-  grep -m 1 "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true
+  local raw_value
+  raw_value="$(grep -m 1 "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)"
+  decode_properties_value "$raw_value"
+}
+
+decode_properties_value() {
+  PROPERTIES_VALUE="$1" python3 - <<'PY'
+import os
+
+value = os.environ["PROPERTIES_VALUE"]
+decoded = []
+index = 0
+escapes = {"t": "\t", "n": "\n", "r": "\r", "f": "\f"}
+while index < len(value):
+    character = value[index]
+    if character != "\\" or index + 1 >= len(value):
+        decoded.append(character)
+        index += 1
+        continue
+    index += 1
+    character = value[index]
+    if character == "u" and index + 4 < len(value):
+        codepoint = value[index + 1:index + 5]
+        try:
+            decoded.append(chr(int(codepoint, 16)))
+            index += 5
+            continue
+        except ValueError:
+            pass
+    decoded.append(escapes.get(character, character))
+    index += 1
+print("".join(decoded))
+PY
+}
+
+encode_properties_value() {
+  PROPERTIES_VALUE="$1" python3 - <<'PY'
+import os
+
+value = os.environ["PROPERTIES_VALUE"]
+encoded = []
+for character in value:
+    if character in "\\ =:#!":
+        encoded.append("\\")
+    encoded.append(character)
+print("".join(encoded))
+PY
 }
 
 set_env_value() {
   local key="$1"
   local value="$2"
+  local encoded_value
 
   [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "Invalid environment variable name: $key"
   [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] \
     || die "Environment variable $key cannot contain a line break."
+  encoded_value="$(encode_properties_value "$value")"
 
-  ENV_FILE="$ENV_FILE" ENV_KEY="$key" ENV_VALUE="$value" python3 - <<'PY'
+  ENV_FILE="$ENV_FILE" ENV_KEY="$key" ENV_VALUE="$encoded_value" python3 - <<'PY'
 import os
 from pathlib import Path
 import tempfile
@@ -418,9 +551,30 @@ configure_redis() {
     tls_arguments+=(--tls)
   fi
 
+  if [[ "$redis_host" =~ ^(127\.0\.0\.1|localhost|::1)$ ]]; then
+    [ -n "$redis_password" ] || die "REDIS_PASSWORD cannot be empty for the local Redis service."
+  fi
+
+  redis_response="$(REDISCLI_AUTH="$redis_password" redis-cli -h "$redis_host" -p "$redis_port" \
+    "${tls_arguments[@]}" ping 2>/dev/null || true)"
+  if [ "$redis_response" = "PONG" ]; then
+    log "Redis is already reachable at ${redis_host}:${redis_port}; preserving its existing service configuration."
+    return 0
+  fi
+  case "$redis_response" in
+    *NOAUTH*|*WRONGPASS*|*"AUTH failed"*|*"no password is set"*)
+      die "Redis is reachable at ${redis_host}:${redis_port}, but REDIS_PASSWORD is invalid."
+      ;;
+    "")
+      ;;
+    *)
+      die "A service is reachable at ${redis_host}:${redis_port}, but it did not return a Redis PONG."
+      ;;
+  esac
+
   case "$redis_host" in
     127.0.0.1|localhost|::1)
-      [ -n "$redis_password" ] || die "REDIS_PASSWORD cannot be empty for the local Redis service."
+      install_apt_packages redis-server
       [ -f /etc/redis/redis.conf ] || die "Redis configuration was not found at /etc/redis/redis.conf"
       REDIS_PASSWORD="$redis_password" python3 - <<'PY'
 import json
@@ -650,9 +804,10 @@ Group=${SERVICE_GROUP}
 UMask=0077
 WorkingDirectory=${INSTALL_DIR}
 EnvironmentFile=${INSTALL_DIR}/.env
-Environment=SPRING_PROFILES_ACTIVE=prod
-Environment=SERVER_ADDRESS=127.0.0.1
-Environment=SERVER_PORT=8081
+Environment=AUTO_HR_INSTALL_DIR=${INSTALL_DIR}
+Environment=SPRING_PROFILES_ACTIVE=${SERVICE_PROFILE}
+Environment=SERVER_ADDRESS=${SERVICE_ADDRESS}
+Environment=SERVER_PORT=${SERVICE_PORT}
 ExecStart=${INSTALL_DIR}/deploy.sh --run-service
 Restart=always
 RestartSec=5
@@ -899,6 +1054,7 @@ show_failure_diagnostics() {
 main() {
   validate_install_dir
   validate_web_root
+  validate_service_settings
   ensure_runtime_dependencies
   create_service_account
   trap deployment_exit EXIT
