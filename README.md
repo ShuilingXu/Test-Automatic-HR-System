@@ -537,11 +537,17 @@ python3 scripts/migrate-sqlite-to-postgres.py autohr.db --dsn "$POSTGRES_DSN" --
 
 ### 一键发行包与 systemd
 
-仓库根目录的 `deploy-ubuntu.sh` 仅用于单机或可信局域网验证：它启动 Vite 开发服务器，不配置 TLS，也不配置公网反向代理，默认只监听 `127.0.0.1`。局域网测试必须同时指定私网监听地址和允许访问的网段，例如 `APP_BIND_ADDRESS=192.168.1.20 APP_ALLOWED_CIDR=192.168.1.0/24 bash deploy-ubuntu.sh`。脚本会安装并限制本机 Redis、检查 `.env` 中 PostgreSQL 服务和凭据是否可达；PostgreSQL 服务端需要预先创建。公网生产必须使用下面的发行包、systemd 与 OpenResty/Nginx 方案。
+根目录和发行包使用同一个 `deploy-ubuntu.sh`/`deploy.sh`。它会安装缺失的 Ubuntu 运行依赖、准备本机 Redis、检查 FFmpeg 与 Tesseract、配置本机 coturn、创建低权限 `autohr` 用户、安装 systemd 服务，并在 60 秒健康检查失败时恢复上一版后端、前端、service 和 `.env`。服务只监听 `127.0.0.1:8081`；公网访问必须由 OpenResty/Nginx 终止 TLS 并反向代理 `/api`。
 
-GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。每次 `main` 构建都会创建或更新 `build-<运行编号>` GitHub 预发布版；推送 `v*` 标签会创建正式 Release，Release 发布不依赖部署 Secrets，不会因未配置服务器而跳过。若在仓库 Secrets 配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_WEB_ROOT` 和可选的 `DEPLOY_PORT`，`main` 推送会自动发布到服务器；`DEPLOY_WEB_ROOT` 应为 OpenResty/Nginx 的站点静态目录，例如 1Panel OpenResty 的 `/opt/1panel/www/sites/hr.zroevn.cn/index`。首次部署还必须配置 `DEPLOY_INITIAL_ENV`，其内容为完整的 `.env` 文件，至少包含 `JWT_SECRET`、`DB_TYPE`、`DB_URL`、`DB_USERNAME`、`DB_PASSWORD`、`REDIS_HOST`、`REDIS_PORT`、`REDIS_PASSWORD` 和 `INTERVIEW_TURN_SHARED_SECRET`；已有服务器上的 `.env` 不会被覆盖。未配置部署 Secrets 时只跳过远端部署，构建产物和 GitHub 预发布版仍会正常生成。
+在 Ubuntu 源码目录直接运行即可构建、打包并安装：
 
-自动部署会先把新后端写入同文件系统的暂存 JAR，等待旧 systemd 进程完全停止后再原子替换，避免运行中的 JVM 读取到被覆盖的归档。`auto-hr.service` 通过 `EnvironmentFile=/opt/auto-hr/.env` 导入部署配置；该文件权限应保持为 `0600`。新版本无法启动或 60 秒内未通过健康检查时，流水线会恢复上一版 JAR 并重新启动服务，同时将本次部署标记为失败。
+```bash
+bash deploy-ubuntu.sh --web-root /opt/1panel/www/sites/hr.example.com/index
+```
+
+首次运行未传 `--env` 时，脚本从 `.env.example` 初始化本地 SQLite，并生成 JWT、Redis 和 TURN 密钥，适合立即验证。生产 PostgreSQL 可先准备完整环境文件后传入；后续升级不传 `--env` 会保留服务器现有配置。外部托管 TURN 时传 `--skip-coturn`，已由镜像预装依赖时传 `--skip-dependencies`。
+
+GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端构建、把前端静态文件嵌入 Spring Boot JAR，并上传 `auto-hr-release.zip`。每次 `main` 构建都会创建或更新 `build-<运行编号>` GitHub 预发布版；推送 `v*` 标签会创建正式 Release。若配置 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_WEB_ROOT` 和可选的 `DEPLOY_PORT`，Actions 会上传发行包并调用包内同一个 `deploy.sh`。`DEPLOY_INITIAL_ENV` 是可选的首次初始化环境文件：只会在服务器尚无 `/opt/auto-hr/.env` 时使用，绝不会覆盖已有配置。使用外部 TURN 服务时可将 `DEPLOY_SKIP_COTURN` 设为 `true`。未配置部署 Secrets 时只跳过远端部署，构建产物和 GitHub 预发布版仍会正常生成。
 
 当前发布流水线使用 SSH `StrictHostKeyChecking=accept-new`：首次连接会记录服务器返回的 host key，后续连接仍会校验已记录的 key。正式部署前应通过独立渠道核对服务器指纹并预置到部署账号的 `known_hosts`；不要在未核对指纹的情况下首次运行自动部署。
 
@@ -551,14 +557,14 @@ GitHub Actions 在 `main` 分支推送时会按顺序执行后端测试、前端
 bash scripts/package-release.sh
 ```
 
-发行包内含可重复执行的 systemd 安装脚本。准备好不含占位值的生产 `.env` 后执行：
+解压发行包后，其中唯一的部署入口仍是 `deploy.sh`：
 
 ```bash
-sudo ./install-systemd.sh /path/to/production.env
+sudo ./deploy.sh --env /path/to/production.env --web-root /opt/1panel/www/sites/hr.example.com/index
 sudo systemctl status auto-hr
 ```
 
-安装脚本会创建低权限 `autohr` 系统用户，保留 `/opt/auto-hr/uploads` 与日志目录，将 `.env` 设为 `0600`，安装并启动 `auto-hr.service`，然后等待 60 秒健康检查。首次安装必须传入生产 `.env`；后续升级不传参数时会沿用 `/opt/auto-hr/.env`。默认服务监听 `127.0.0.1:8081`，适合由 OpenResty/Nginx 终止 TLS 并反向代理；服务以生产 profile 启动、开机自启，并在异常退出时自动重启。若由 OpenResty 直接托管静态文件，可将包内 `frontend/` 同步到站点目录，并把 `/api` 反代到 `127.0.0.1:8081`。
+`--web-root` 可省略，此时前端继续由已嵌入 JAR 的静态资源提供；指定后脚本会在后端健康后再同步到站点目录，失败会还原先前的站点文件。生产服务以 production profile 启动、开机自启，并在异常退出时自动重启。
 
 生产 OpenResty/Nginx 必须在 HTTPS 站点响应中设置 CSP。`frontend/index.html` 的 meta 仅作为静态页面兜底，不能替代响应头；建议在站点 `server` 块加入以下与后端一致的策略，并确认没有其他配置覆盖它：
 

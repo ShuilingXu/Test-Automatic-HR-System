@@ -11,7 +11,7 @@ PACKAGE_DIR="$RELEASE_DIR/$PACKAGE_NAME"
 if [ -d "$PACKAGE_DIR" ]; then
   rm -rf "$PACKAGE_DIR"
 fi
-mkdir -p "$PACKAGE_DIR/backend" "$PACKAGE_DIR/frontend" "$PACKAGE_DIR/uploads" "$PACKAGE_DIR/logs"
+mkdir -p "$PACKAGE_DIR/backend" "$PACKAGE_DIR/frontend"
 
 echo "Building backend tests..."
 mvn -q -f "$BACKEND_DIR/pom.xml" test
@@ -36,10 +36,8 @@ JAR_FILE="${JAR_FILES[0]}"
 cp "$JAR_FILE" "$PACKAGE_DIR/backend/auto-hr.jar"
 cp -R "$FRONTEND_DIR/dist/." "$PACKAGE_DIR/frontend/"
 cp "$ROOT_DIR/.env.example" "$PACKAGE_DIR/.env.example"
-cp "$ROOT_DIR/scripts/start-release.sh" "$PACKAGE_DIR/start.sh"
-cp "$ROOT_DIR/scripts/install-release.sh" "$PACKAGE_DIR/install-systemd.sh"
-cp "$ROOT_DIR/scripts/auto-hr.service" "$PACKAGE_DIR/auto-hr.service"
-chmod +x "$PACKAGE_DIR/start.sh" "$PACKAGE_DIR/install-systemd.sh"
+cp "$ROOT_DIR/deploy-ubuntu.sh" "$PACKAGE_DIR/deploy.sh"
+chmod +x "$PACKAGE_DIR/deploy.sh"
 
 (
   cd "$RELEASE_DIR"
@@ -47,7 +45,13 @@ chmod +x "$PACKAGE_DIR/start.sh" "$PACKAGE_DIR/install-systemd.sh"
   if command -v zip >/dev/null 2>&1; then
     zip -qr "$PACKAGE_NAME.zip" "$PACKAGE_NAME"
   else
-    python3 - "$PACKAGE_NAME" "$PACKAGE_NAME.zip" <<'PY'
+    python_command="python3"
+    if ! command -v "$python_command" >/dev/null 2>&1; then
+      python_command="python"
+    fi
+    command -v "$python_command" >/dev/null 2>&1 \
+      || { echo "zip, python3, or python is required to create the release archive." >&2; exit 1; }
+    "$python_command" - "$PACKAGE_NAME" "$PACKAGE_NAME.zip" <<'PY'
 import pathlib
 import sys
 import zipfile

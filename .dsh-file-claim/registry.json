@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "sessions": {
+    "session-e24c934e-e40e-4aea-b50d-ac2af4df4de4": {
+      "startedAt": 1786928711303,
+      "claims": [],
+      "lastSeenAt": 1786936152251
+    },
+    "session-0987bea0-105d-40e1-84cc-f73a2532a1fd": {
+      "startedAt": 1786929953681,
+      "claims": [],
+      "lastSeenAt": 1786929953681
+    }
+  }
+}

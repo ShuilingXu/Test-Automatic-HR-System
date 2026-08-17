@@ -92,7 +92,7 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s' "$DEPLOY_SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-      - name: Deploy and restart service
+      - name: Deploy packaged release
         if: steps.deployment.outputs.enabled == 'true'
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -100,54 +100,43 @@ jobs:
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
           DEPLOY_WEB_ROOT: ${{ secrets.DEPLOY_WEB_ROOT }}
           DEPLOY_INITIAL_ENV: ${{ secrets.DEPLOY_INITIAL_ENV }}
+          DEPLOY_SKIP_COTURN: ${{ secrets.DEPLOY_SKIP_COTURN }}
         run: |
-          DEPLOY_WEB_ROOT_B64="$(printf '%s' "$DEPLOY_WEB_ROOT" | base64 | tr -d '\n')"
+          deploy_web_root_b64="$(printf '%s' "$DEPLOY_WEB_ROOT" | base64 | tr -d '\n')"
+          deploy_skip_coturn_b64="$(printf '%s' "$DEPLOY_SKIP_COTURN" | base64 | tr -d '\n')"
+          trap 'rm -f deploy-initial.env' EXIT
           scp -P "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new auto-hr-release.zip "$DEPLOY_USER@$DEPLOY_HOST:/tmp/auto-hr-release.zip"
           if [ -n "$DEPLOY_INITIAL_ENV" ]; then
             umask 077
-            trap 'rm -f deploy-initial.env' EXIT
             printf '%s' "$DEPLOY_INITIAL_ENV" > deploy-initial.env
             scp -p -P "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new deploy-initial.env "$DEPLOY_USER@$DEPLOY_HOST:/tmp/auto-hr-initial.env"
             rm -f deploy-initial.env
           fi
-          ssh -p "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" "DEPLOY_WEB_ROOT_B64='$DEPLOY_WEB_ROOT_B64' bash -s" <<'REMOTE'
-            set -euo pipefail
-            DEPLOY_WEB_ROOT="$(printf '%s' "$DEPLOY_WEB_ROOT_B64" | base64 --decode)"
-            case "$DEPLOY_WEB_ROOT" in
-              ""|/|/opt|/opt/auto-hr|/opt/auto-hr/*)
-                echo "DEPLOY_WEB_ROOT must be a dedicated absolute web directory outside /opt/auto-hr." >&2
-                exit 1
-                ;;
+          ssh -p "$DEPLOY_PORT" -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" \
+          "DEPLOY_WEB_ROOT_B64='$deploy_web_root_b64' DEPLOY_SKIP_COTURN_B64='$deploy_skip_coturn_b64' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          release_tmp=""
+          cleanup() {
+            rm -f /tmp/auto-hr-release.zip /tmp/auto-hr-initial.env
+            case "$release_tmp" in
+              /tmp/auto-hr-release.*) rm -rf -- "$release_tmp" ;;
             esac
-            cleanup() {
-              rm -f /tmp/auto-hr-release.zip /tmp/auto-hr-initial.env
-              sudo rm -f /opt/auto-hr/backend/auto-hr.jar.next
-              sudo rm -rf /opt/auto-hr/frontend.next
-            }
-            trap cleanup EXIT
-            if ! id -u autohr >/dev/null 2>&1; then
-              sudo useradd --system --home-dir /opt/auto-hr --shell /usr/sbin/nologin autohr
-            fi
-            sudo install -d -o autohr -g autohr -m 0750 /opt/auto-hr /opt/auto-hr/backend \
-              /opt/auto-hr/uploads /opt/auto-hr/logs
-            sudo install -d -m 0755 /opt/auto-hr/frontend "$DEPLOY_WEB_ROOT"
-            if [ ! -f /opt/auto-hr/.env ]; then
-              if [ ! -s /tmp/auto-hr-initial.env ]; then
-                echo "First deployment requires the DEPLOY_INITIAL_ENV repository secret." >&2
-                exit 1
-              fi
-              sudo install -o autohr -g autohr -m 0600 /tmp/auto-hr-initial.env /opt/auto-hr/.env
-            fi
-            sudo chown autohr:autohr /opt/auto-hr/.env
-            sudo chmod 0600 /opt/auto-hr/.env
-            sudo rm -rf /tmp/auto-hr-release
-            sudo python3 - <<'PY'
+          }
+          trap cleanup EXIT
+
+          if ! command -v python3 >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y python3
+          fi
+          release_tmp="$(mktemp -d /tmp/auto-hr-release.XXXXXX)"
+          RELEASE_TMP="$release_tmp" python3 - <<'PY'
+          import os
           from pathlib import Path
           import zipfile
 
           archive_path = Path("/tmp/auto-hr-release.zip")
-          destination_root = Path("/tmp/auto-hr-release").resolve()
-          destination_root.mkdir(parents=True, exist_ok=True)
+          destination_root = Path(os.environ["RELEASE_TMP"]).resolve(strict=True)
           with zipfile.ZipFile(archive_path) as archive:
               for member in archive.infolist():
                   destination = (destination_root / member.filename).resolve()
@@ -155,113 +144,17 @@ jobs:
                       raise SystemExit(f"Unsafe path in release archive: {member.filename}")
                   archive.extract(member, destination_root)
           PY
-            RELEASE_ROOT=/tmp/auto-hr-release/auto-hr-release
-            NEXT_JAR=/opt/auto-hr/backend/auto-hr.jar.next
-            CURRENT_JAR=/opt/auto-hr/backend/auto-hr.jar
-            PREVIOUS_JAR=/opt/auto-hr/backend/auto-hr.jar.previous
-            NEXT_FRONTEND=/opt/auto-hr/frontend.next
-            CURRENT_FRONTEND=/opt/auto-hr/frontend
-            PREVIOUS_FRONTEND=/opt/auto-hr/frontend.previous
-            WEB_ROOT_BACKUP=/opt/auto-hr/web-root.previous
 
-            sync_frontend_tree() {
-              local source_root="$1"
-              local destination_root="$2"
-              sudo python3 - "$source_root" "$destination_root" <<'PY'
-          from pathlib import Path
-          import shutil
-          import sys
-
-          source = Path(sys.argv[1]).resolve(strict=True)
-          destination = Path(sys.argv[2]).resolve(strict=True)
-          if destination == Path("/") or destination == Path("/opt/auto-hr") or Path("/opt/auto-hr") in destination.parents:
-              raise SystemExit(f"Refusing unsafe web root: {destination}")
-          for entry in destination.iterdir():
-              if entry.is_symlink() or entry.is_file():
-                  entry.unlink()
-              else:
-                  shutil.rmtree(entry)
-          for entry in source.iterdir():
-              target = destination / entry.name
-              if entry.is_dir():
-                  shutil.copytree(entry, target)
-              else:
-                  shutil.copy2(entry, target)
-          PY
-            }
-
-            rollback_release() {
-              sudo systemctl stop auto-hr || true
-              if [ -f "$PREVIOUS_JAR" ]; then
-                sudo mv -f "$PREVIOUS_JAR" "$CURRENT_JAR"
-              fi
-              if [ -d "$PREVIOUS_FRONTEND" ]; then
-                sudo rm -rf "$CURRENT_FRONTEND"
-                sudo mv "$PREVIOUS_FRONTEND" "$CURRENT_FRONTEND"
-              fi
-              if [ -d "$WEB_ROOT_BACKUP" ]; then
-                sync_frontend_tree "$WEB_ROOT_BACKUP" "$DEPLOY_WEB_ROOT" || true
-              fi
-              sudo systemctl start auto-hr || true
-            }
-
-            activate_frontend() {
-              sudo rm -rf "$PREVIOUS_FRONTEND" "$WEB_ROOT_BACKUP"
-              sudo install -d -m 0755 "$WEB_ROOT_BACKUP"
-              sudo cp -a "$DEPLOY_WEB_ROOT/." "$WEB_ROOT_BACKUP/"
-              sudo mv "$CURRENT_FRONTEND" "$PREVIOUS_FRONTEND"
-              sudo mv "$NEXT_FRONTEND" "$CURRENT_FRONTEND"
-              sync_frontend_tree "$CURRENT_FRONTEND" "$DEPLOY_WEB_ROOT"
-            }
-
-            sudo install -o autohr -g autohr -m 0644 "$RELEASE_ROOT/backend/auto-hr.jar" "$NEXT_JAR"
-            sudo install -m 0644 "$RELEASE_ROOT/.env.example" /opt/auto-hr/.env.example
-            sudo install -m 0755 "$RELEASE_ROOT/start.sh" /opt/auto-hr/start.sh
-            sudo install -m 0644 "$RELEASE_ROOT/auto-hr.service" /opt/auto-hr/auto-hr.service
-            sudo install -m 0644 "$RELEASE_ROOT/auto-hr.service" /etc/systemd/system/auto-hr.service
-            sudo rm -rf "$NEXT_FRONTEND"
-            sudo install -d -m 0755 "$NEXT_FRONTEND"
-            sudo cp -a "$RELEASE_ROOT/frontend/." "$NEXT_FRONTEND/"
-            sudo chown -R autohr:autohr /opt/auto-hr/backend /opt/auto-hr/uploads /opt/auto-hr/logs
-            sudo systemctl daemon-reload
-            sudo systemctl enable auto-hr
-            if [ -f "$CURRENT_JAR" ]; then
-              sudo cp -a "$CURRENT_JAR" "$PREVIOUS_JAR"
-            else
-              sudo rm -f "$PREVIOUS_JAR"
-            fi
-            sudo systemctl stop auto-hr
-            if ! sudo mv -f "$NEXT_JAR" "$CURRENT_JAR"; then
-              echo "Could not activate the staged backend JAR; restarting the previous service." >&2
-              sudo systemctl start auto-hr
-              exit 1
-            fi
-            if ! sudo systemctl start auto-hr; then
-              if [ -f "$PREVIOUS_JAR" ]; then
-                echo "New backend could not start; restoring previous backend JAR." >&2
-                rollback_release
-              fi
-              sudo journalctl -u auto-hr -n 100 --no-pager || true
-              exit 1
-            fi
-            for attempt in $(seq 1 30); do
-              if sudo systemctl is-active --quiet auto-hr && curl --fail --silent --show-error http://127.0.0.1:8081/api/auth/captcha >/dev/null; then
-                if ! activate_frontend; then
-                  echo "Frontend activation failed; restoring the complete previous release." >&2
-                  rollback_release
-                  exit 1
-                fi
-                sudo rm -f "$PREVIOUS_JAR"
-                sudo rm -rf "$PREVIOUS_FRONTEND" "$WEB_ROOT_BACKUP"
-                exit 0
-              fi
-              sleep 2
-            done
-            sudo systemctl status auto-hr --no-pager || true
-            sudo journalctl -u auto-hr -n 100 --no-pager || true
-            if [ -f "$PREVIOUS_JAR" ]; then
-              echo "Deployment health check failed; restoring the previous release." >&2
-              rollback_release
-            fi
-            exit 1
+          release_root="$release_tmp/auto-hr-release"
+          test -s "$release_root/deploy.sh"
+          deploy_web_root="$(printf '%s' "$DEPLOY_WEB_ROOT_B64" | base64 --decode)"
+          deploy_skip_coturn="$(printf '%s' "$DEPLOY_SKIP_COTURN_B64" | base64 --decode)"
+          deploy_args=(--web-root "$deploy_web_root")
+          if ! sudo test -s /opt/auto-hr/.env && [ -s /tmp/auto-hr-initial.env ]; then
+            deploy_args+=(--env /tmp/auto-hr-initial.env)
+          fi
+          case "${deploy_skip_coturn,,}" in
+            1|true|yes) deploy_args+=(--skip-coturn) ;;
+          esac
+          sudo bash "$release_root/deploy.sh" "${deploy_args[@]}"
           REMOTE
