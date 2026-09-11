@@ -44,3 +44,8 @@ Thumbs.db
 /backups/
 backend/LLM.txt
 release/
+
+# Generated documentation and QA workspace artifacts
+/work/
+~$*.docx
+/*软著*鉴别材料*.docx
